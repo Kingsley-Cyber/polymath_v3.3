@@ -3,10 +3,10 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_07_4f901b68f9",
-    "corpus_id": "47157d0c-ae4c-564d-974e-0e661a5f5ddc",
+    "mongo_database": "graphify_eval_syn_07_583a0f6ef7",
+    "corpus_id": "8239d804-f2c5-5216-9b23-fd71cb783b2b",
     "elapsed_seconds": 0.75,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 7,
@@ -42,8 +42,9 @@
     "Registry of Vessel Identities",
     "Tide Forecast Feed",
     "Tidewatch Systems",
-    "incoming manifests",
-    "the"
+    "arrival windows",
+    "berth scheduling stack",
+    "incoming manifests"
   ],
   "item_results": [
     {

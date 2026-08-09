@@ -3,10 +3,10 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_09_f73159ff04",
-    "corpus_id": "0aae816b-3c20-52c5-8bdf-322f5bf23c48",
-    "elapsed_seconds": 0.69,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_09_9b66390012",
+    "corpus_id": "b11adb3b-3d6d-5abb-bae9-87c328340ec5",
+    "elapsed_seconds": 0.52,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 8,
@@ -46,11 +46,8 @@
     "Stowage Planner",
     "Voltage sag",
     "breaker trips",
-    "dockside joke",
     "eastern quay",
-    "south quay",
-    "the",
-    "tide cycle"
+    "south quay"
   ],
   "item_results": [
     {

@@ -1,16 +1,16 @@
 {
   "family": "01_eligibility_open_language",
-  "status": "FAIL",
+  "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_01_92babd88d7",
-    "corpus_id": "83a03105-0e83-579f-ac67-f8c26539dca6",
-    "elapsed_seconds": 23.16,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_01_92a1496549",
+    "corpus_id": "8b3674cf-84aa-5af4-aad4-954b604b4935",
+    "elapsed_seconds": 12.0,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
-    "passed": 12,
-    "failed": 1,
+    "passed": 13,
+    "failed": 0,
     "optional_failed": 0,
     "total": 13
   },
@@ -18,11 +18,13 @@
   "unexpected_promoted_triples": [
     "pinion api | consumes | incoming events",
     "priya anand | works for | quartzline analytics",
-    "tobias venn | member of | telemetry group"
+    "tobias venn | member of | telemetry group",
+    "vaultstone | defines | cold storage service"
   ],
   "duplicate_promoted_edges": {},
   "graph": {
     "nodes": [
+      "cold storage service",
       "incoming events",
       "larkspur queue",
       "pinion api",
@@ -30,14 +32,16 @@
       "quartzline analytics",
       "sable index",
       "telemetry group",
-      "tobias venn"
+      "tobias venn",
+      "vaultstone"
     ],
-    "promoted_edge_count": 5
+    "promoted_edge_count": 6
   },
   "extracted_entities": [
     "2027",
     "2029",
     "Dr. Imani Reyes",
+    "Imani Reyes",
     "Larkspur Queue",
     "Lisbon",
     "March 2028",
@@ -51,7 +55,10 @@
     "Telemetry Group",
     "Tobias Venn",
     "Vaultstone",
+    "cold-storage service",
+    "founding team",
     "incoming events",
+    "normalized batches",
     "quarterly meeting",
     "registry filing",
     "vendor brochure"
@@ -132,9 +139,9 @@
     {
       "id": "E10",
       "check": "positive",
-      "verdict": "FAIL",
+      "verdict": "PASS",
       "optional": false,
-      "detail": "surface relation not discovered anywhere",
+      "detail": "",
       "evidence": "Vaultstone is a cold-storage service written in Rust."
     },
     {

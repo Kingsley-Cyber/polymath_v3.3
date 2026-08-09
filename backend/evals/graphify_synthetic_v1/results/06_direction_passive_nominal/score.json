@@ -3,10 +3,10 @@
   "status": "FAIL",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_06_765ef6e67a",
-    "corpus_id": "0b4e7cc4-641f-5c6c-b898-2de0ad58d670",
-    "elapsed_seconds": 0.89,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_06_9d418c895a",
+    "corpus_id": "863c43b9-b7de-500a-baf6-9f8c80291136",
+    "elapsed_seconds": 0.76,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 8,
@@ -31,7 +31,6 @@
     "promoted_edge_count": 4
   },
   "extracted_entities": [
-    "2029",
     "Falcon Cache",
     "Glowline Metrics",
     "Nightly Snapshot Feed",
@@ -43,7 +42,7 @@
     "Sable Index",
     "Vaultstone",
     "partner deck",
-    "the"
+    "peak load"
   ],
   "item_results": [
     {

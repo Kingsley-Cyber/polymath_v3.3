@@ -23,5 +23,10 @@
     "subject": "tobias venn",
     "predicate": "member_of",
     "object": "telemetry group"
+  },
+  {
+    "subject": "vaultstone",
+    "predicate": "defines",
+    "object": "cold storage service"
   }
 ]

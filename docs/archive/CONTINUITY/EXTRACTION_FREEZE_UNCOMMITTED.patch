@@ -1,0 +1,4266 @@
+diff --git a/README.md b/README.md
+index ebfcf03..c9ea58b 100644
+--- a/README.md
++++ b/README.md
+@@ -634,6 +634,10 @@ mcp_servers:
+     url: https://mcp.example.com/mcp
+     headers:
+       Authorization: Bearer YOUR_POLYMATH_MCP_KEY
++  runpod_docs:
++    url: https://docs.runpod.io/mcp
++    connect_timeout: 30
++    timeout: 120
+ ```
+ 
+ After editing Hermes config, verify the live agent path end-to-end:
+@@ -646,6 +650,35 @@ The verifier compares `~/.hermes/config.yaml` against this repo's
+ `MCP_PUBLIC_URL`, checks that Hermes has a bearer header, then performs a live
+ streamable-HTTP MCP smoke call without printing the secret token.
+ 
++Hermes must not infer ingestion execution from names. After
++`polymath_get_ingest_status` reaches `complete`, it must call
++`polymath_verify_ingestion` for the exact `corpus_id + doc_id` and report only
++that tool's `safe_claims`. In particular, `local_extraction` names the
++deterministic schema contract; a receipt with
++`execution_location=remote_runpod_serverless` proves the work ran on RunPod.
++Qdrant or Mongo location never proves where embeddings were computed.
++
++RunPod now publishes two separate MCP servers:
++
++```yaml
++# No authentication. Search current RunPod contracts and documentation.
++runpod_docs:
++  url: https://docs.runpod.io/mcp
++
++# Optional infrastructure control plane. Put RUNPOD_API_KEY in ~/.hermes/.env.
++runpod:
++  command: npx
++  args: ["-y", "@runpod/mcp-server@latest"]
++  env:
++    RUNPOD_API_KEY: ${RUNPOD_API_KEY}
++```
++
++The API MCP manages RunPod infrastructure. It does not replace Polymath's
++extraction data plane. Polymath's current certified extraction adapter remains
++queue-based (`/run` plus `/status/{job_id}`); load-balancing endpoints use a
++different direct-HTTP worker contract and must be introduced as a separate
++explicit route, never by silently changing an existing endpoint.
++
+ Use Settings -> MCP Server to generate user-scoped MCP keys for remote
+ agents. `MCP_API_KEY` in `.env` remains available for trusted system agents
+ and automation, but it is not shown in the UI.
+diff --git a/backend/config.py b/backend/config.py
+index cca076d..38610fc 100644
+--- a/backend/config.py
++++ b/backend/config.py
+@@ -1148,6 +1148,42 @@ class Settings(BaseSettings):
+             "work unless the explicit auto-run flags below are enabled."
+         ),
+     )
++    CONTROL_PLANE_V2_ENABLED: bool = Field(
++        default=True,
++        description=(
++            "Route the resident maintenance loop through the Control Plane V2 "
++            "artifact reconciler (ledger + census + certificates) instead of "
++            "the legacy queue-count-gated repair tick. Set false to revert to "
++            "the legacy scheduler path unchanged."
++        ),
++    )
++    CONTROL_PLANE_V2_RUN_ALL_LANES: bool = Field(
++        default=True,
++        description=(
++            "When the V2 reconciler finds missing artifacts it executes every "
++            "stage lane (parse, pipeline, extraction, summary, graph) through "
++            "the existing bounded executors. Set false to fall back to the "
++            "per-lane INGEST_AUTO_REPAIR_RUN_* flags."
++        ),
++    )
++    CONTROL_PLANE_V2_DOC_CENSUS_LIMIT: int = Field(
++        default=100,
++        ge=1,
++        le=5000,
++        description=(
++            "Maximum documents whose artifact census (exact ID joins across "
++            "Mongo/Qdrant) is recomputed per corpus per reconcile cycle."
++        ),
++    )
++    CONTROL_PLANE_V2_RECHECK_SECONDS: float = Field(
++        default=21_600.0,
++        ge=300.0,
++        le=604_800.0,
++        description=(
++            "Interval for re-verifying certified documents against live "
++            "artifacts so post-completion artifact loss is re-detected."
++        ),
++    )
+     INGEST_AUTO_REPAIR_POLL_SECONDS: float = Field(
+         default=300.0,
+         ge=30.0,
+@@ -1704,6 +1740,41 @@ class Settings(BaseSettings):
+         description="Minimum similarity score for retrieval; 0 disables the hard score gate",
+     )
+ 
++    # --- Retrieval Tuning (ranking policy + final selection) ---
++    # These control how many chunks survive reranking and reach the LLM.
++    # Adjust via .env without a rebuild.
++    RERANK_RELEVANCE_FLOOR_HYBRID: float = Field(
++        default=0.55,
++        description=(
++            "Relative relevance floor for qdrant_mongo tier (non-BROAD). "
++            "Chunks scoring below this fraction of the top score are dropped. "
++            "0.55 keeps genuinely relevant evidence; 0.85 starves to 2-3 chunks."
++        ),
++    )
++    RERANK_RELEVANCE_FLOOR_GRAPH: float = Field(
++        default=0.80,
++        description="Relative relevance floor for qdrant_mongo_graph tier (non-BROAD).",
++    )
++    RERANK_SPECIFIC_FLOOR_RATIO: float = Field(
++        default=0.35,
++        description=(
++            "Post-MMR trim floor for SPECIFIC-intent queries (ratio of top score). "
++            "Stricter than the main floor to cut tangential clusters."
++        ),
++    )
++    CHAT_SOURCE_CAP: int = Field(
++        default=8,
++        description="Hard distinct-document cap in the facet-based final context selector.",
++    )
++    CHAT_PER_DOC_CAP: int = Field(
++        default=0,
++        description="Max chunks per document in final context. 0 = disabled.",
++    )
++    CHAT_GLOBAL_OVERVIEW_BUDGET: int = Field(
++        default=12,
++        description="Chunk budget for global/overview search mode queries.",
++    )
++
+     # === QDRANT COLLECTION NAMES ===
+     QDRANT_NAIVE: str = Field(
+         default="polymath_naive",
+@@ -2111,6 +2182,45 @@ class Settings(BaseSettings):
+             "to A/B test boost-vs-no-boost on the same query."
+         ),
+     )
++    RETRIEVAL_CURATION_V4_ENABLED: bool = Field(
++        default=False,
++        description=(
++            "Retrieval Layer v4 — deterministic curation stage (shadow flag, "
++            "default OFF). When True, the final selection site calls "
++            "services.retriever.curation.build_packet (explicit "
++            "floor/coalesce/near-dedup/quota-allocation/order pipeline) instead "
++            "of the MMR-based select_with_diversity, and the low-confidence "
++            "rerank guard switches from an absolute threshold to a "
++            "pool-relative gate. When False, both paths are byte-identical to "
++            "the legacy behavior. Promote to True only after the heldout / "
++            "final-acceptance eval shows the shadow wins on doc_recall and "
++            "answerability with no latency regression; any build_packet "
++            "exception falls back to the legacy selector automatically."
++        ),
++    )
++    PER_CORPUS_RECALL_QUOTA: int = Field(
++        default=3,
++        ge=0,
++        le=20,
++        description=(
++            "Cross-corpus recall fairness: after the funnel merge, guarantee "
++            "at least this many candidates per selected corpus enter the "
++            "reranker pool. Purely additive — backfills from the corpus's own "
++            "funnel output if it was underrepresented. Only fires for "
++            "multi-corpus queries. Set 0 to disable."
++        ),
++    )
++    RERANKER_QUERY_ASPECT_ENABLED: bool = Field(
++        default=True,
++        description=(
++            "When True and a candidate carries a lane_query in its metadata "
++            "(the vocabulary-lane sub-query that discovered it), the reranker "
++            "input prepends 'aspect: <lane_query>' so the cross-encoder scores "
++            "against the discovering aspect rather than the full compound "
++            "query. Only fires when lane_query is present; byte-identical to "
++            "legacy behavior otherwise."
++        ),
++    )
+     RETRIEVAL_CACHE_GRAPH_METRICS: bool = Field(
+         default=True,
+         description=(
+diff --git a/backend/main.py b/backend/main.py
+index 1f8cf86..d4f1953 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
+ from routers.auth import limiter as auth_limiter
+ from routers.auth import router as auth_router
+ from routers.chat import router as chat_router
++from routers.control_plane import router as control_plane_router
+ from routers.conversations import router as conversations_router
+ from routers.discourse import router as discourse_router
+ from routers.health import router as health_router
+@@ -338,6 +339,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+     except Exception as exc:
+         logger.warning("graph_sessions multi-corpus migration failed (non-fatal): %s", exc)
+ 
++    # Control Plane V2 — durable run ledger indexes (idempotent, non-fatal).
++    if bool(getattr(settings, "CONTROL_PLANE_V2_ENABLED", True)):
++        try:
++            from services.control_plane.ledger import ensure_ledger_indexes
++
++            await ensure_ledger_indexes(conversation_service._db)
++        except Exception as exc:  # noqa: BLE001
++            logger.warning("Control-plane ledger index setup failed (non-fatal): %s", exc)
++
+     ingest_poll_task: asyncio.Task | None = None
+     startup_repair_task: asyncio.Task | None = None
+     auto_repair_lock = asyncio.Lock()
+@@ -379,7 +389,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+             return
+         try:
+             async with auto_repair_lock:
+-                result = await ingestion_service.run_auto_corpus_repair_tick()
++                if bool(getattr(settings, "CONTROL_PLANE_V2_ENABLED", True)):
++                    # Control Plane V2: artifact-driven reconciler. Actionable
++                    # work is discovered from the run ledger + artifact census,
++                    # never from queue-row counts.
++                    from services.control_plane.reconciler import run_reconcile_tick
++
++                    result = await run_reconcile_tick(
++                        conversation_service._db,
++                        ingestion_service=ingestion_service,
++                    )
++                else:
++                    result = await ingestion_service.run_auto_corpus_repair_tick()
+             logger.info(
+                 "Auto corpus repair %s tick: scanned=%d changed=%d",
+                 reason,
+@@ -596,6 +617,7 @@ app.include_router(mcp_info_router)       # Phase 24 — MCP server info for Set
+ app.include_router(portability_router)    # Runtime archive download/upload for Settings
+ app.include_router(research_router)       # Autoresearch jobs + artifacts
+ app.include_router(ingestion_router)
++app.include_router(control_plane_router)   # Control Plane V2 — run ledger + readiness proof
+ app.include_router(graph_router)
+ app.include_router(graph_discovery_router)  # Phase 17 Wave 1 — /api/graph/query
+ app.include_router(discourse_router)  # Phase 17 Wave 2 — /api/corpora/{id}/discourse
+diff --git a/backend/models/contracts.py b/backend/models/contracts.py
+index 456260f..04ed800 100644
+--- a/backend/models/contracts.py
++++ b/backend/models/contracts.py
+@@ -193,14 +193,17 @@ class RerankerInput(BaseModel):
+     source_book: str = ""
+     section: str = ""
+     parent_context: str = ""
++    query_aspect: str = ""
+     excerpt: str
+ 
+     def render(self) -> str:
+         prefix = ""
++        if self.query_aspect:
++            prefix += f"aspect: {self.query_aspect}\n"
+         if self.source_book and self.section:
+-            prefix = f"{self.source_book} › {self.section}\n"
++            prefix += f"{self.source_book} › {self.section}\n"
+         elif self.source_book:
+-            prefix = f"{self.source_book}\n"
++            prefix += f"{self.source_book}\n"
+         context = (
+             f"Parent context: {self.parent_context}\n" if self.parent_context else ""
+         )
+diff --git a/backend/models/schemas.py b/backend/models/schemas.py
+index 59bd8a6..4ba16b7 100644
+--- a/backend/models/schemas.py
++++ b/backend/models/schemas.py
+@@ -437,6 +437,9 @@ class IngestJobResponse(_legacy.IngestJobResponse):
+     legacy WriteState class."""
+ 
+     write_state: WriteState = Field(default_factory=WriteState)
++    # Control Plane V2 — deterministic run-ledger pointer for this document.
++    # Optional so legacy constructors keep working; populated by the routers.
++    run_id: str | None = None
+ 
+ 
+ class CorpusCreate(_legacy.CorpusCreate):
+diff --git a/backend/polymath_mcp/app_guide.py b/backend/polymath_mcp/app_guide.py
+index fed771b..30086e5 100644
+--- a/backend/polymath_mcp/app_guide.py
++++ b/backend/polymath_mcp/app_guide.py
+@@ -31,8 +31,9 @@ Recommended agent workflow:
+    ideation, or gap synthesis. Use polymath_graph_map_query for visual graph
+    payloads and polymath_graph_question_suggestions to refine questions.
+ 5. Update the knowledge base: create a corpus if needed, ingest URL or upload
+-   document bytes, poll polymath_get_ingest_status until complete, then verify
+-   with search/chat before reporting success.
++   document bytes, poll polymath_get_ingest_status until complete, call
++   polymath_verify_ingestion, then verify with search/chat before reporting
++   success.
+ 
+ Ingestion profile handshake:
+ - Before ingesting ambiguous files or URLs, ask the user or calling agent which
+@@ -54,6 +55,14 @@ Ingestion profile handshake:
+   document and one unsupported/negative query. If the negative query only
+   retrieves adjacent material, report that the corpus does not establish it
+   instead of stretching nearby evidence.
++- Before saying "fully ingested", "query ready", "graph complete", "ran
++  locally", "ran on RunPod", or naming a summary provider, call
++  polymath_verify_ingestion for that exact corpus_id + doc_id.
++- Report only the verifier's safe_claims. If an execution location is unknown,
++  say unknown. "local_extraction" is a deterministic wire-contract name and
++  does not prove that computation ran on the MCP host.
++- Never use corpus-wide counts as document proof. Completion and execution
++  claims require document-scoped identity joins and persisted receipts.
+ 
+ Evidence rules:
+ - Corpus claims should come from hydrated corpus chunks.
+@@ -200,6 +209,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
+             "polymath_ingest_from_url",
+             "polymath_upload_document",
+             "polymath_get_ingest_status",
++            "polymath_verify_ingestion",
+             "polymath_backfill_summaries",
+             "polymath_delete_document",
+         ],
+@@ -296,6 +306,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
+                 "polymath_ingest_from_url",
+                 "polymath_upload_document",
+                 "polymath_get_ingest_status",
++                "polymath_verify_ingestion",
+                 "polymath_backfill_summaries",
+                 "polymath_delete_document",
+             ],
+@@ -332,6 +343,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
+             "polymath_ingest_from_url",
+             "polymath_upload_document",
+             "polymath_get_ingest_status",
++            "polymath_verify_ingestion",
+             "polymath_backfill_summaries",
+             "polymath_delete_document",
+         ],
+@@ -369,6 +381,7 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
+             "polymath_create_corpus if no existing corpus fits",
+             "polymath_ingest_from_url or polymath_upload_document",
+             "poll polymath_get_ingest_status until complete or failed",
++            "call polymath_verify_ingestion and report only its safe_claims",
+             "verify with polymath_search on known document terms",
+             "run one unsupported/negative query and report if the corpus does not establish it",
+             "summarize with polymath_chat_query",
+@@ -461,6 +474,13 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
+         "tool": "polymath_get_ingest_status",
+         "when_to_use": "Poll async ingestion until complete before searching.",
+     },
++    {
++        "tool": "polymath_verify_ingestion",
++        "when_to_use": (
++            "Mandatory final evidence gate before reporting query readiness, "
++            "store completion, provider identity, or execution location."
++        ),
++    },
+     {
+         "tool": "polymath_delete_document",
+         "when_to_use": "Remove confirmed failed or unwanted documents; irreversible.",
+@@ -535,8 +555,9 @@ def get_app_guide(
+         payload["agent_instructions_summary"] = (
+             "Use Fast Search for speed, Hybrid Search for exact text, Graph "
+             "Augmentation for full vector+Mongo+Neo4j synthesis. When updating "
+-            "the app, ingest asynchronously, poll until complete, and verify "
+-            "retrieval before reporting success."
++            "the app, ingest asynchronously, poll until complete, call "
++            "polymath_verify_ingestion, and verify retrieval before reporting "
++            "success."
+         )
+     return payload
+ 
+diff --git a/backend/polymath_mcp/tools.py b/backend/polymath_mcp/tools.py
+index d1fb393..d5de3f8 100644
+--- a/backend/polymath_mcp/tools.py
++++ b/backend/polymath_mcp/tools.py
+@@ -240,13 +240,26 @@ async def _find_existing_source_matches(
+         ).to_list(length=None)
+     }
+     matches: list[dict[str, Any]] = []
++    run_rows: dict[tuple[str, str], dict[str, Any]] = {}
++    for cid in sorted({d["corpus_id"] for d in docs}):
++        rows = await _run_rows_for_docs(
++            cid, [d.get("doc_id") for d in docs if d.get("corpus_id") == cid]
++        )
++        for did, row in rows.items():
++            run_rows[(cid, did)] = row
+     for doc in docs:
+         status = _summarize_write_state(doc)
++        run_row = run_rows.get((doc.get("corpus_id"), doc.get("doc_id"))) or {}
+         matches.append(
+             {
+                 "corpus_id": doc.get("corpus_id"),
+                 "corpus_name": corpus_lookup.get(doc.get("corpus_id")),
+                 "doc_id": doc.get("doc_id"),
++                "run_id": _run_id_for_result(
++                    str(doc.get("corpus_id") or ""), str(doc.get("doc_id") or "")
++                ),
++                "run_status": run_row.get("status"),
++                "certificate_id": run_row.get("certificate_id"),
+                 "filename": doc.get("filename"),
+                 "source_url": doc.get("source_url"),
+                 "source_tier": doc.get("source_tier"),
+@@ -1591,6 +1604,14 @@ async def polymath_mcp_status(
+         "scope": {
+             "accessible_corpus_count": len(accessible),
+         },
++        "control_plane": {
++            "enabled": bool(
++                getattr(settings, "CONTROL_PLANE_V2_ENABLED", True)
++            ),
++            "proof_contract": "certificate.v1",
++            "readiness_rule": _READINESS_RELAY_RULE,
++            "run_endpoint": "GET /api/runs/{run_id}",
++        },
+         "toolsets": _json_ready(MCP_TOOLSETS),
+         "ingestion": {
+             "max_upload_bytes": settings.MCP_INGEST_MAX_BYTES,
+@@ -1676,7 +1697,10 @@ async def polymath_plan_ingestion(
+             post_ingest_actions.append(
+                 {
+                     "tool": "polymath_backfill_summaries",
+-                    "when": "after polymath_get_ingest_status reports complete",
++                    "when": (
++                        "after polymath_get_ingest_status readiness proof "
++                        "reports query_ready true"
++                    ),
+                     "why": "existing corpus does not generate parent summaries during ingest",
+                 }
+             )
+@@ -1754,7 +1778,11 @@ async def polymath_plan_ingestion(
+         "polymath_list_corpora",
+         corpus_action["tool"] if corpus_action["action"] == "create_corpus" else "reuse existing corpus",
+         ingest_tool,
+-        "polymath_get_ingest_status until complete",
++        (
++            "polymath_get_ingest_status until readiness.query_ready is true "
++            "(relay the readiness proof verbatim; never report completion "
++            "from status or write_state)"
++        ),
+         *(a["tool"] for a in post_ingest_actions),
+         "polymath_search verification",
+         "polymath_chat_query final summary if requested",
+@@ -1793,6 +1821,7 @@ async def polymath_plan_ingestion(
+         "call_sequence": call_sequence,
+         "post_ingest_actions": post_ingest_actions,
+         "verification": verification,
++        "readiness_rule": _READINESS_RELAY_RULE,
+         "warnings": warnings,
+     }
+ 
+@@ -1919,8 +1948,13 @@ async def polymath_list_documents(
+         offset: pagination offset.
+ 
+     Returns:
+-        {"documents": [{doc_id, filename, source_tier, chunk_count,
+-                        parent_count, write_state, ingested_at}, ...]}
++        {"documents": [{doc_id, run_id, run_status, certificate_id, proof,
++                        filename, source_tier, chunk_count, parent_count,
++                        write_state, ingested_at}, ...], "agent_rule"}
++
++    run_status/proof come from the Control Plane V2 run ledger (projected
++    from certificate-backed proofs). For an authoritative live proof call
++    polymath_get_ingest_status on the specific doc.
+     """
+     from .auth import SYSTEM_USER_ID, get_current_user_id
+ 
+@@ -1935,10 +1969,25 @@ async def polymath_list_documents(
+     docs = await ingestion_service.list_documents(
+         corpus_id, user_id=list_uid, limit=limit, offset=offset
+     )
++    run_rows = await _run_rows_for_docs(
++        corpus_id, [d.get("doc_id") for d in docs]
++    )
+     return {
+         "documents": [
+             {
+                 "doc_id": d.get("doc_id"),
++                "run_id": _run_id_for_result(
++                    corpus_id, str(d.get("doc_id") or "")
++                ),
++                "run_status": (run_rows.get(str(d.get("doc_id") or "")) or {}).get(
++                    "status"
++                ),
++                "certificate_id": (
++                    run_rows.get(str(d.get("doc_id") or "")) or {}
++                ).get("certificate_id"),
++                "proof": _json_ready(
++                    (run_rows.get(str(d.get("doc_id") or "")) or {}).get("proof")
++                ),
+                 "filename": d.get("filename"),
+                 "source_tier": d.get("source_tier"),
+                 "source_url": d.get("source_url"),
+@@ -1959,7 +2008,8 @@ async def polymath_list_documents(
+                                 if d.get("ingested_at") else None),
+             }
+             for d in docs
+-        ]
++        ],
++        "agent_rule": _READINESS_RELAY_RULE,
+     }
+ 
+ 
+@@ -2275,6 +2325,97 @@ async def polymath_create_corpus(
+     }
+ 
+ 
++def _run_id_for_result(corpus_id: str, doc_id: str) -> str | None:
++    """Deterministic Control Plane V2 run id for an intake response.
++
++    The run row itself is created inside ingestion_service.ingest() via the
++    on_doc_id hook; this only derives the id so agents can poll
++    GET /api/runs/{run_id} without a second lookup.
++    """
++    if not doc_id:
++        return None
++    try:
++        from services.control_plane.ledger import run_id_for
++
++        return run_id_for(corpus_id=corpus_id, doc_id=str(doc_id))
++    except Exception:  # noqa: BLE001 — intake response must not fail on this
++        return None
++
++
++_READINESS_RELAY_RULE = (
++    "Relay the `readiness` proof verbatim. query_ready is certificate-backed "
++    "(readiness_source certificate.v1); never infer completion from "
++    "write_state, ingest_stage, counts, or any other field. "
++    "readiness_source 'unavailable' means unknown — unknown is never ready."
++)
++
++
++async def _doc_readiness_payload(corpus_id: str, doc_id: str) -> dict[str, Any]:
++    """Live certificate-backed readiness proof for one document.
++
++    Never raises and never falls back to legacy flags: any lookup failure
++    yields readiness_source 'unavailable' with query_ready false.
++    """
++    base: dict[str, Any] = {
++        "schema_version": "certificate.v1",
++        "readiness_source": "unavailable",
++        "corpus_id": corpus_id,
++        "doc_id": doc_id,
++        "query_ready": False,
++        "certificate_id": None,
++        "missing": {},
++        "missing_counts": {},
++        "blocking": [],
++        "recovery": {"jobs_created": 0, "next_retry_at": None},
++        "observation_errors": [],
++    }
++    db = ingestion_service.db
++    if db is None:
++        base["observation_errors"] = ["database not attached"]
++        return base
++    try:
++        from services.control_plane.certificate import doc_readiness_proof
++
++        return _json_ready(
++            await doc_readiness_proof(
++                db,
++                ingestion_service._qdrant,
++                corpus_id=corpus_id,
++                doc_id=doc_id,
++            )
++        )
++    except Exception as exc:  # noqa: BLE001 — unknown is never healthy
++        base["observation_errors"] = [f"{type(exc).__name__}: {exc}"]
++        return base
++
++
++async def _run_rows_for_docs(
++    corpus_id: str, doc_ids: list[str]
++) -> dict[str, dict[str, Any]]:
++    """Bulk run-ledger lookup for list/duplicate surfaces (no live census)."""
++    db = ingestion_service.db
++    if db is None or not doc_ids:
++        return {}
++    try:
++        rows = await db["ingestion_runs"].find(
++            {
++                "corpus_id": corpus_id,
++                "doc_id": {"$in": [str(d) for d in doc_ids if d]},
++            },
++            {
++                "_id": 0,
++                "run_id": 1,
++                "doc_id": 1,
++                "status": 1,
++                "certificate_id": 1,
++                "proof": 1,
++            },
++        ).to_list(length=None)
++    except Exception:  # noqa: BLE001 — ledger lookup is additive metadata
++        return {}
++    return {str(r.get("doc_id") or ""): r for r in rows}
++
++
+ async def _ingest_bytes(
+     *,
+     data: bytes,
+@@ -2379,6 +2520,7 @@ async def _ingest_bytes(
+         return {
+             "status": "queued",
+             "doc_id": result.doc_id,
++            "run_id": _run_id_for_result(corpus_id, result.doc_id),
+             "job_id": result.job_id,
+             "corpus_id": corpus_id,
+             "filename": result.filename,
+@@ -2436,7 +2578,7 @@ async def polymath_ingest_from_url(
+             corpus has parent summary generation enabled.
+ 
+     Returns:
+-        {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
++        {"status": "queued", "doc_id", "run_id", "job_id", "corpus_id", "filename",
+          "source_tier", "size_bytes"}
+     """
+     import httpx
+@@ -2546,7 +2688,7 @@ async def polymath_upload_document(
+             corpus has parent summary generation enabled.
+ 
+     Returns:
+-        {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
++        {"status": "queued", "doc_id", "run_id", "job_id", "corpus_id", "filename",
+          "source_tier", "size_bytes"}
+     """
+     import base64
+@@ -2598,6 +2740,11 @@ async def polymath_get_ingest_status(
+                             consistency check tripped)
+       - "not_found"       — no document row with this doc_id
+ 
++    The `readiness` field is the authoritative certificate-backed proof
++    (Control Plane V2). Relay it verbatim: `readiness.query_ready` is the
++    ONLY completion claim; status/write_state above are transport receipts
++    and must never be reported as completion.
++
+     Args:
+         doc_id: Document id returned by polymath_ingest_from_url /
+             polymath_upload_document.
+@@ -2605,9 +2752,9 @@ async def polymath_get_ingest_status(
+             user-accessible.
+ 
+     Returns:
+-        {"doc_id", "corpus_id", "filename", "status", "chunk_count",
+-         "parent_count", "write_state", "error", "ingested_at",
+-         "source_tier", "warnings"}
++        {"doc_id", "run_id", "corpus_id", "filename", "status",
++         "chunk_count", "parent_count", "write_state", "error",
++         "ingested_at", "source_tier", "readiness", "agent_rule"}
+     """
+     if corpus_id:
+         await assert_corpus_allowed(corpus_id)
+@@ -2631,11 +2778,25 @@ async def polymath_get_ingest_status(
+             "corpus_id": corpus_id,
+             "status": "not_found",
+             "error": "no document with that doc_id",
++            "readiness": {
++                "schema_version": "certificate.v1",
++                "readiness_source": "unavailable",
++                "query_ready": False,
++                "certificate_id": None,
++            },
++            "next_action": "Confirm the doc_id; do not report ingestion success.",
+         }
+ 
+     ws = doc.get("write_state") or {}
++    resolved_corpus_id = str(doc.get("corpus_id") or corpus_id or "")
++    readiness = await _doc_readiness_payload(
++        resolved_corpus_id, str(doc.get("doc_id") or doc_id)
++    )
+     return {
+         "doc_id": doc.get("doc_id", doc_id),
++        "run_id": _run_id_for_result(
++            resolved_corpus_id, str(doc.get("doc_id") or doc_id)
++        ),
+         "corpus_id": doc.get("corpus_id"),
+         "filename": doc.get("filename"),
+         "status": _summarize_write_state(doc),
+@@ -2659,9 +2820,260 @@ async def polymath_get_ingest_status(
+             if hasattr(doc.get("ingested_at"), "isoformat")
+             else doc.get("ingested_at")
+         ),
++        "readiness": readiness,
++        "agent_rule": _READINESS_RELAY_RULE,
+     }
+ 
+ 
++def _execution_location(receipt: dict[str, Any]) -> str:
++    explicit = str(receipt.get("execution_location") or "").strip()
++    if explicit:
++        return explicit
++    wire_contract = str(receipt.get("wire_contract") or "")
++    if receipt.get("endpoint") and wire_contract.startswith("polymath.runpod"):
++        return "remote_runpod_serverless"
++    local_compute = receipt.get("local_compute")
++    if local_compute is True:
++        return "local"
++    if local_compute is False:
++        return "external_api"
++    return "unknown"
++
++
++def _unique_receipts(receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
++    unique: list[dict[str, Any]] = []
++    seen: set[str] = set()
++    for receipt in receipts:
++        key = json.dumps(_json_ready(receipt), sort_keys=True, separators=(",", ":"))
++        if key not in seen:
++            seen.add(key)
++            unique.append(_json_ready(receipt))
++    return unique
++
++
++def _compile_ingestion_evidence(
++    bundle: dict[str, Any], readiness: dict[str, Any]
++) -> dict[str, Any]:
++    doc = bundle["document"]
++    ws = doc.get("write_state") or {}
++    config = doc.get("ingestion_config") or {}
++    status = _summarize_write_state(doc)
++    graph_required = bool(config.get("use_neo4j"))
++    summary_required = bool(config.get("chunk_summarization"))
++
++    extraction_receipts: list[dict[str, Any]] = []
++    successful_extractions = 0
++    for row in bundle.get("ghost_rows") or []:
++        if str(row.get("status") or "ok").lower() == "ok":
++            successful_extractions += 1
++        card = dict(row.get("provider_card") or {})
++        receipt = {
++            "provider": card.get("provider") or row.get("provider"),
++            "model": card.get("model") or row.get("model"),
++            "endpoint": card.get("endpoint"),
++            "account": card.get("account"),
++            "wire_contract": card.get("wire_contract"),
++            "transport_mode": card.get("transport_mode"),
++            "schema_mode": row.get("schema_mode"),
++            "output_mode": row.get("output_mode"),
++            "execution_location": _execution_location(card),
++            "evidence_source": "ghost_b_extractions.provider_card",
++        }
++        extraction_receipts.append(
++            {key: value for key, value in receipt.items() if value is not None}
++        )
++    extraction_receipts = _unique_receipts(extraction_receipts)
++
++    summary_receipts: list[dict[str, Any]] = []
++    for row in bundle.get("parent_rows") or []:
++        receipt = dict(row.get("summary_receipt") or row.get("summary_metadata") or {})
++        provider = row.get("summary_provider") or receipt.get("provider")
++        model = row.get("summary_model") or receipt.get("model")
++        if provider or model or receipt.get("local_compute") is not None:
++            summary_receipts.append(
++                {
++                    "provider": provider,
++                    "model": model,
++                    "execution_location": _execution_location(receipt),
++                    "evidence_source": "parent_chunks.summary_receipt",
++                }
++            )
++    for row in bundle.get("provider_metrics") or []:
++        if str(row.get("phase") or "").lower() not in {
++            "summary",
++            "parent_summary",
++            "document_summary",
++        }:
++            continue
++        summary_receipts.append(
++            {
++                "provider": row.get("provider_family"),
++                "model": row.get("model"),
++                "execution_location": _execution_location(row),
++                "billable_provider": row.get("billable_provider"),
++                "evidence_source": "ingest_provider_call_metrics",
++            }
++        )
++    summary_receipts = _unique_receipts(summary_receipts)
++
++    stores = {
++        "mongo": {
++            "required": True,
++            "written": bool(ws.get("mongo_written")),
++            "evidence_source": "documents.write_state.mongo_written",
++        },
++        "qdrant": {
++            "required": True,
++            "written": bool(ws.get("qdrant_written")),
++            "evidence_source": "documents.write_state.qdrant_written",
++        },
++        "summaries": {
++            "required": summary_required,
++            "written": bool(ws.get("summaries_indexed")),
++            "evidence_source": "documents.write_state.summaries_indexed",
++        },
++        "neo4j": {
++            "required": graph_required,
++            "written": bool(ws.get("neo4j_written")),
++            "evidence_source": "documents.write_state.neo4j_written",
++        },
++    }
++    # Control Plane V2: query_ready comes ONLY from the certificate-backed
++    # proof. The write_state flags above stay as store receipts, but they
++    # can no longer produce a completion claim (Hermes false-green fix).
++    query_ready = bool(readiness.get("query_ready"))
++
++    safe_claims = [
++        f"Mongo write: {stores['mongo']['written']}",
++        f"Qdrant write: {stores['qdrant']['written']}",
++        f"Neo4j write: {stores['neo4j']['written']} (required={graph_required})",
++        (
++            f"Summary vectors: {stores['summaries']['written']} "
++            f"(required={summary_required})"
++        ),
++        f"Post-write verification: {ws.get('verified') is True}",
++        (
++            f"Query ready: {query_ready} "
++            f"(readiness_source={readiness.get('readiness_source')}, "
++            f"certificate_id={readiness.get('certificate_id')})"
++        ),
++    ]
++    blocked_claims: list[str] = []
++    if not extraction_receipts:
++        blocked_claims.append(
++            "Extraction provider/location is unknown: no document-scoped provider receipt."
++        )
++    if summary_required and not summary_receipts:
++        blocked_claims.append(
++            "Summary provider/location is unknown: no document-scoped summary receipt."
++        )
++    blocked_claims.append(
++        "Embedding execution location is unknown unless a document-scoped "
++        "embedding receipt is added; Qdrant storage location is not compute proof."
++    )
++    if not query_ready:
++        missing_counts = readiness.get("missing_counts") or {}
++        blocked_claims.append(
++            "Do not report query-ready completion: no valid certificate for "
++            f"the current contract (readiness_source="
++            f"{readiness.get('readiness_source')}, missing_counts="
++            f"{ {k: v for k, v in missing_counts.items() if v} })."
++        )
++
++    return {
++        "contract_version": "polymath.ingestion_evidence.v1",
++        "doc_id": doc.get("doc_id"),
++        "run_id": _run_id_for_result(
++            str(doc.get("corpus_id") or ""), str(doc.get("doc_id") or "")
++        ),
++        "corpus_id": doc.get("corpus_id"),
++        "filename": doc.get("filename"),
++        "status": status,
++        "ingest_stage": doc.get("ingest_stage"),
++        "query_ready": query_ready,
++        "readiness": readiness,
++        "chunk_count": int(doc.get("chunk_count") or 0),
++        "parent_count": int(
++            doc.get("parent_count") or len(doc.get("parent_chunks") or [])
++        ),
++        "stores": stores,
++        "write_verification": {
++            "verified": ws.get("verified"),
++            "warnings": ws.get("warnings") or [],
++            "verify_errors": ws.get("verify_errors") or [],
++        },
++        "execution": {
++            "extraction": {
++                "successful_chunk_receipts": successful_extractions,
++                "routes": extraction_receipts,
++            },
++            "summaries": {"routes": summary_receipts},
++            "embeddings": {
++                "execution_location": "unknown",
++                "artifact_written_to_qdrant": bool(ws.get("qdrant_written")),
++                "evidence_source": "documents.write_state.qdrant_written",
++            },
++        },
++        "graph_promotion": _json_ready(bundle.get("graph_job")),
++        "safe_claims": safe_claims,
++        "blocked_claims": blocked_claims,
++        "agent_rule": (
++            "Report only safe_claims. Never infer compute location from names "
++            "such as local_extraction, storage hostnames, or corpus-wide counts. "
++            + _READINESS_RELAY_RULE
++        ),
++    }
++
++
++async def polymath_verify_ingestion(
++    doc_id: str,
++    corpus_id: str | None = None,
++) -> dict[str, Any]:
++    """Verify one ingestion using document-scoped persisted receipts.
++
++    This is the mandatory final gate before an agent claims a document is
++    query-ready, graph-complete, summarized by a named provider, or processed
++    on a particular machine. It performs identity joins, never count matching.
++    """
++    if corpus_id:
++        await assert_corpus_allowed(corpus_id)
++
++    uid = get_current_user_id()
++    if uid is None and get_settings().MCP_REQUIRE_AUTH:
++        raise AuthError("Authentication required to verify ingestion")
++
++    from .auth import SYSTEM_USER_ID
++    scoped_uid = uid if uid not in (None, SYSTEM_USER_ID) else None
++    bundle = await ingestion_service.get_ingestion_evidence(
++        doc_id,
++        corpus_id=corpus_id,
++        user_id=scoped_uid,
++    )
++    if not bundle:
++        return {
++            "contract_version": "polymath.ingestion_evidence.v1",
++            "doc_id": doc_id,
++            "corpus_id": corpus_id,
++            "status": "not_found",
++            "query_ready": False,
++            "readiness": {
++                "schema_version": "certificate.v1",
++                "readiness_source": "unavailable",
++                "query_ready": False,
++                "certificate_id": None,
++            },
++            "safe_claims": [],
++            "blocked_claims": [
++                "No document-scoped ingestion receipt exists for this identity."
++            ],
++        }
++    readiness = await _doc_readiness_payload(
++        str(bundle["document"].get("corpus_id") or corpus_id or ""),
++        str(bundle["document"].get("doc_id") or doc_id),
++    )
++    return _compile_ingestion_evidence(bundle, readiness)
++
++
+ async def polymath_delete_document(
+     corpus_id: str,
+     doc_id: str,
+@@ -2761,6 +3173,7 @@ ALL_TOOLS = (
+     polymath_ingest_from_url,
+     polymath_upload_document,
+     polymath_get_ingest_status,
++    polymath_verify_ingestion,
+     polymath_delete_document,
+     polymath_backfill_summaries,
+ )
+@@ -2791,6 +3204,7 @@ __all__ = [
+     "polymath_ingest_from_url",
+     "polymath_upload_document",
+     "polymath_get_ingest_status",
++    "polymath_verify_ingestion",
+     "polymath_delete_document",
+     "polymath_backfill_summaries",
+     "AuthError",
+diff --git a/backend/requirements.mcp.txt b/backend/requirements.mcp.txt
+index b9ef424..3114db6 100644
+--- a/backend/requirements.mcp.txt
++++ b/backend/requirements.mcp.txt
+@@ -5,6 +5,12 @@
+ # anyio<4). MCP doesn't need FastAPI — the streamable-HTTP server uses
+ # Starlette directly. Document parsers, slowapi, transformers, etc. are
+ # also excluded (not in any MCP code path).
++#
++# NOTE (2026-07-25): spaCy was added below. The original "slim" claim above
++# predates the runpod_wire_contract=local_extraction_v1 default, which routes
++# MCP-side ingestion through runpod_local_extraction._load_nlp(). That code
++# runs build_spacy_observation_bundle locally on RunPod output, so MCP needs
++# the same spaCy + en_core_web_sm pin as the backend and the RunPod image.
+ 
+ # === MCP SDK ===
+ mcp>=1.2.0
+@@ -38,6 +44,16 @@ bcrypt<4.0
+ # === Token counting (services.context_manager imports tiktoken at module level) ===
+ tiktoken==0.5.2
+ 
++# === spaCy — required by services.runpod_local_extraction._load_nlp() which
++#     runs build_spacy_observation_bundle locally on RunPod output for the
++#     local_extraction_v1 wire contract. Every active polymath corpus uses
++#     this contract by default, so MCP must run the same spaCy pipeline the
++#     backend does. Pin matches backend/requirements.txt and
++#     runpod_flash_extractor/requirements.custom-image.in (B7 lock).
++#     See CONTINUITY/spacy-mcp-fix-20260725.md for full diagnosis. ===
++spacy==3.8.14
++en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
++
+ # === Discourse / graph analytics (services.discourse pulls networkx) ===
+ networkx==3.2.1
+ # Mission Control graph synthesis uses the same domain-emergence analytics as
+diff --git a/backend/routers/ingestion.py b/backend/routers/ingestion.py
+index 96067e9..0eb893f 100644
+--- a/backend/routers/ingestion.py
++++ b/backend/routers/ingestion.py
+@@ -3328,6 +3328,15 @@ async def get_job_status(
+ 
+     ws_raw = doc.get("write_state", {})
+     progress = _resolve_ingest_progress(doc)
++    # Control Plane V2 — hand back the deterministic run-ledger pointer so
++    # callers can follow up with GET /api/runs/{run_id} for the proof.
++    run_id: str | None = None
++    try:
++        from services.control_plane.ledger import run_id_for
++
++        run_id = run_id_for(corpus_id=doc["corpus_id"], doc_id=doc["doc_id"])
++    except Exception:  # noqa: BLE001 — status poll must not fail on this
++        run_id = None
+     return IngestJobResponse(
+         job_id=doc.get("file_id", doc_id),
+         doc_id=doc["doc_id"],
+@@ -3339,6 +3348,7 @@ async def get_job_status(
+         chunk_count=doc.get("chunk_count", 0),
+         parent_count=int(doc.get("parent_count") or len(doc.get("parent_chunks", []))),
+         error=progress["error"],
++        run_id=run_id,
+     )
+ 
+ 
+diff --git a/backend/scripts/relex_generate.py b/backend/scripts/relex_generate.py
+index f859495..3c37c3e 100644
+--- a/backend/scripts/relex_generate.py
++++ b/backend/scripts/relex_generate.py
+@@ -1,5 +1,12 @@
+ """Phase A: run GLiNER-Relex on host (has torch+gliner), dump raw relations.
+-Phase B applies the repo gate inside the container (has backend+ontology)."""
++Phase B applies the repo gate inside the container (has backend+ontology).
++
++IMPORTANT (P1A): entity labels MUST be preserved in the output.  The
++``inference()`` return includes a ``label`` field per entity.  Earlier
++versions serialized this as ``type: null``, which caused 100% of gate
++candidates to hit REVIEW_UNKNOWN_TYPE.  The fix below copies ``label``
++into ``type`` so downstream adapters can resolve endpoint types.
++"""
+ import json, sys, time
+ EL = ["person","organization","location","product","software","document",
+       "method","concept","event","standard","artifact"]
+@@ -20,9 +27,29 @@ for i,c in enumerate(chunks):
+                           return_relations=True, flat_ner=False)
+     except Exception as ex:
+         print(f"ch{i} FAIL {type(ex).__name__}: {ex}", file=sys.stderr); e,r=[[]],[[]]
++    # P1A: preserve entity labels.  GLiNER-Relex returns ``label`` per
++    # entity; copy it into ``type`` so the adapter offset-join can resolve
++    # endpoint types.  Also stamp entity_idx on relation endpoints so the
++    # adapter can join by identity, not text.
++    ents = e[0] if e else []
++    for ent in ents:
++        if ent.get("label") and not ent.get("type"):
++            ent["type"] = ent["label"]
++    # Build offset → entity_idx map for relation endpoint stamping
++    offset_to_idx = {}
++    for idx, ent in enumerate(ents):
++        offset_to_idx[(ent.get("start"), ent.get("end"))] = idx
+     rels = r[0] if r else []
++    for rel in rels:
++        for endpoint_key in ("head", "tail"):
++            ep = rel.get(endpoint_key)
++            if isinstance(ep, dict):
++                ep_idx = offset_to_idx.get((ep.get("start"), ep.get("end")))
++                if ep_idx is not None:
++                    ep["entity_idx"] = ep_idx
++                    ep["type"] = ents[ep_idx].get("type") or ents[ep_idx].get("label") or ""
+     nrel += len(rels)
+-    out.append({**c, "entities": e[0] if e else [], "relations": rels})
++    out.append({**c, "entities": ents, "relations": rels})
+     if (i+1) % 10 == 0: print(f"  {i+1}/{len(chunks)}", file=sys.stderr)
+ fn = f"relex_raw_{ent_thr}_{rel_thr}.json"
+ json.dump(out, open(fn,"w"), indent=1, default=str)
+diff --git a/backend/scripts/run_heldout_eval.py b/backend/scripts/run_heldout_eval.py
+index 43c0f83..e3fdbaf 100644
+--- a/backend/scripts/run_heldout_eval.py
++++ b/backend/scripts/run_heldout_eval.py
+@@ -51,16 +51,32 @@ from services.chat_cost_meter import (  # noqa: E402
+ API = os.environ.get("POLYMATH_API", "http://127.0.0.1:8000")
+ QUESTIONS = REPO / "backend" / "evals" / "heldout_questions.jsonl"
+ REFUSAL_RE = re.compile(
+-    # Refusals AND honest absence acknowledgments both count as fail-closed
+-    # behavior for negative controls (scorer v2, 2026-07-13: the v1 pattern
+-    # under-credited honest "sources don't cover X" answers).
++    # Hard refusals: system-generated template text that is ALWAYS a refusal.
+     r"i cannot answer|did not find source evidence|"
+-    r"cannot answer that as a source-backed|"
++    r"cannot answer that as a source-backed",
++    re.IGNORECASE,
++)
++# Soft negation: "does not contain/cover/establish..." — only counts as refusal
++# when the answer is short (a substantive multi-paragraph answer that mentions
++# a gap in passing is NOT a refusal).
++_NEGATION_RE = re.compile(
+     r"(?:do(?:es)?(?: not|n't)|is not|are not)\s+(?:\w+\s+){0,2}?"
+     r"(?:address|cover|contain|mention|name|state|establish|detail|describe|"
+     r"include|provide|specify|recommend)",
+     re.IGNORECASE,
+ )
++_SOFT_NEGATION_MAX_CHARS = 300
++
++
++def _is_refusal(answer: str) -> bool:
++    """Detect refusal: hard patterns always fire; soft negation only on short answers."""
++    if not answer:
++        return True
++    if REFUSAL_RE.search(answer):
++        return True
++    if len(answer) < _SOFT_NEGATION_MAX_CHARS and _NEGATION_RE.search(answer):
++        return True
++    return False
+ 
+ 
+ def _corpus_ids_by_name() -> dict[str, str]:
+@@ -86,7 +102,8 @@ def _corpus_ids_by_name() -> dict[str, str]:
+ 
+ 
+ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
+-          conversation_id: str | None = None) -> dict:
++          conversation_id: str | None = None,
++          model: str | None = None) -> dict:
+     body: dict = {
+         "message": message,
+         "corpus_ids": corpus_ids,
+@@ -94,6 +111,11 @@ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
+     }
+     if conversation_id:
+         body["conversation_id"] = conversation_id
++    if model:
++        # Pin the answer-synthesis model so the A/B holds the LLM constant and
++        # bypasses the user's query-model-pool routing (which may point at a
++        # lapsed provider). Routed through LiteLLM by model string.
++        body["overrides"] = {"model": model}
+     req = urllib.request.Request(
+         f"{API}/api/chat",
+         data=json.dumps(body).encode(),
+@@ -194,7 +216,7 @@ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
+     return result
+ 
+ 
+-def score(row: dict, run: dict) -> dict:
++def score(row: dict, run: dict, selected_corpus_ids: list[str] | None = None) -> dict:
+     expected = list(row.get("expected_doc_ids") or [])
+     returned_docs = {s["doc_id"] for s in run["sources"] if s.get("doc_id")}
+     returned_corpora = {s["corpus_id"] for s in run["sources"] if s.get("corpus_id")}
+@@ -207,7 +229,7 @@ def score(row: dict, run: dict) -> dict:
+     answer_lower = (run["answer"] or "").lower()
+     concepts = [c.lower() for c in row.get("expected_concepts") or []]
+     concept_hits = [c for c in concepts if c in answer_lower]
+-    refused = bool(REFUSAL_RE.search(run["answer"] or ""))
++    refused = _is_refusal(run["answer"] or "")
+     answerable_expected = bool(row.get("answerable"))
+     answerability_ok = (not refused) if answerable_expected else refused
+     out = {
+@@ -223,6 +245,22 @@ def score(row: dict, run: dict) -> dict:
+     }
+     if row.get("shape") in {"cross_corpus"}:
+         out["corpus_diversity_ok"] = len(returned_corpora) >= 2
++        # MRR cross-corpus: for each selected corpus, find the rank of its
++        # first source; MRR = mean(1/rank). Missing corpus scores 0.
++        sel = selected_corpus_ids or []
++        if sel:
++            reciprocals: list[float] = []
++            for cid in sel:
++                rank = next(
++                    (i + 1 for i, s in enumerate(run["sources"])
++                     if s.get("corpus_id") == cid),
++                    None,
++                )
++                reciprocals.append(1.0 / rank if rank else 0.0)
++            out["corpus_mrr"] = round(sum(reciprocals) / len(reciprocals), 3)
++            out["corpus_coverage"] = round(
++                sum(1 for r in reciprocals if r > 0) / len(sel), 3
++            )
+     return out
+ 
+ 
+@@ -232,6 +270,16 @@ def main() -> int:
+                     choices=["qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"])
+     ap.add_argument("--ids", nargs="*", help="run only these question ids")
+     ap.add_argument("--limit", type=int, default=None)
++    ap.add_argument(
++        "--model",
++        default=None,
++        help="pin answer-synthesis model via overrides.model (e.g. longcat/LongCat-2.0)",
++    )
++    ap.add_argument(
++        "--questions",
++        default=None,
++        help="path to questions JSONL (default: backend/evals/heldout_questions.jsonl)",
++    )
+     ap.add_argument(
+         "--out-suffix",
+         default="",
+@@ -245,7 +293,8 @@ def main() -> int:
+         print("ERROR: set TOKEN")
+         return 1
+     by_name = _corpus_ids_by_name()
+-    rows = [json.loads(line) for line in QUESTIONS.read_text().splitlines() if line.strip()]
++    questions_path = Path(args.questions) if args.questions else QUESTIONS
++    rows = [json.loads(line) for line in questions_path.read_text().splitlines() if line.strip()]
+     if args.ids:
+         rows = [r for r in rows if r["id"] in set(args.ids)]
+     if args.limit:
+@@ -257,15 +306,16 @@ def main() -> int:
+         conversation_id = None
+         question_cost_ledgers: list[dict] = []
+         for turn in row.get("history") or []:
+-            prior = _chat(token, turn, cids, args.tier)
++            prior = _chat(token, turn, cids, args.tier, model=args.model)
+             conversation_id = prior.get("conversation_id") or conversation_id
+             if isinstance(prior.get("chat_cost_ledger"), dict):
+                 question_cost_ledgers.append(prior["chat_cost_ledger"])
+-        run = _chat(token, row["question"], cids, args.tier, conversation_id)
++        run = _chat(token, row["question"], cids, args.tier, conversation_id,
++                    model=args.model)
+         if isinstance(run.get("chat_cost_ledger"), dict):
+             question_cost_ledgers.append(run["chat_cost_ledger"])
+         request_cost_ledgers.extend(question_cost_ledgers)
+-        scored = score(row, run)
++        scored = score(row, run, selected_corpus_ids=cids)
+         results.append(
+             {
+                 "id": row["id"],
+@@ -297,6 +347,8 @@ def main() -> int:
+     summary["doc_recall_mean"] = _avg("doc_recall")
+     summary["concept_recall_mean"] = _avg("concept_recall")
+     summary["answerability_ok_rate"] = _avg("answerability_ok")
++    summary["corpus_mrr_mean"] = _avg("corpus_mrr")
++    summary["corpus_coverage_mean"] = _avg("corpus_coverage")
+     summary["latency_mean_s"] = _avg("total_s")
+     summary["errors"] = len(results) - len(scored_rows)
+     by_shape: dict = {}
+diff --git a/backend/services/chat_orchestrator.py b/backend/services/chat_orchestrator.py
+index f08f430..8c58f43 100644
+--- a/backend/services/chat_orchestrator.py
++++ b/backend/services/chat_orchestrator.py
+@@ -153,7 +153,7 @@ _EVIDENCE_LLM_DECOMPOSE_DEADLINE = 10.0
+ _CHAT_COVERAGE_MAX_DYNAMIC_SUPPLEMENTS = 4
+ _CHAT_COVERAGE_THRESHOLD = 4
+ _CHAT_COVERAGE_WEAK_THRESHOLD = 2
+-_CHAT_COVERAGE_SOURCE_CAP = 8
++_CHAT_COVERAGE_SOURCE_CAP = get_settings().CHAT_SOURCE_CAP
+ _PROMPT_COMPACTION_SOURCE_CHAR_STEPS = (1400, 950, 650, 450, 320)
+ # Max chunks any single document may contribute to the final context.
+ # 0 = DISABLED (uncapped). Reverted 2026-06-19: this hard cap was a band-aid for
+@@ -162,7 +162,7 @@ _PROMPT_COMPACTION_SOURCE_CHAR_STEPS = (1400, 950, 650, 450, 320)
+ # dedup.py) removes that root cause, so an authoritative single source may again
+ # contribute as deeply as it ranks for. Set >0 to re-enable the per-doc ceiling
+ # (honored by both _cap_chunks_per_doc and select_facet_final).
+-_CHAT_PER_DOC_CAP = 0
++_CHAT_PER_DOC_CAP = get_settings().CHAT_PER_DOC_CAP
+ # Per-facet coverage retrievals are independent and run concurrently; this caps
+ # the fan-out so a many-facet query can't swamp Qdrant/Mongo/the reranker at once.
+ _CHAT_COVERAGE_MAX_CONCURRENCY = 4
+@@ -175,7 +175,7 @@ _CHAT_COVERAGE_DOMAIN_CAP = 3
+ # than a focused query — widen the coverage budget AND the distinct-doc cap for
+ # global mode so an overview answer spans more documents/domains. Local unaffected.
+ # (Eval: overview pools held ~35 docs but answers used only 6-7 at the default cap.)
+-_GLOBAL_OVERVIEW_BUDGET = 12
++_GLOBAL_OVERVIEW_BUDGET = get_settings().CHAT_GLOBAL_OVERVIEW_BUDGET
+ # Last-resort fallback when a user has no other enabled query-pool entry. Normal
+ # chat fallback is resolved dynamically from the user's encrypted model pool so
+ # an exhausted provider/account cannot strand a correct retrieval packet.
+diff --git a/backend/services/extraction/dep_path_extractor.py b/backend/services/extraction/dep_path_extractor.py
+index a5c6c93..934f0cc 100644
+--- a/backend/services/extraction/dep_path_extractor.py
++++ b/backend/services/extraction/dep_path_extractor.py
+@@ -63,7 +63,7 @@ class ExtractedTriple:
+     subject_surface: str
+     subject_start: int
+     subject_end: int
+-    predicate: str  # normalized
++    predicate: str | None  # canonical predicate, or None if unmapped
+     predicate_lemma: str
+     predicate_surface: str
+     object_surface: str
+@@ -80,18 +80,38 @@ class ExtractedTriple:
+     chunk_id: str = ""
+     doc_id: str = ""
+     section_path: str = ""
++    # P2A open-relation provenance:
++    # MAPPED = predicate resolved to ontology; UNMAPPED = no canonical mapping.
++    mapping_status: str = "MAPPED"
++    # False for unmapped frames: they must never become graph edges.
++    graph_eligible: bool = True
++    # Head-token offsets: the spaCy head token of each argument phrase.
++    # Used by the HEAD_TOKEN join level to verify that the syntactic head
++    # of the argument lies inside the Relex entity span. These are the
++    # actual token character offsets, NOT the full phrase span.
++    subject_head_start: int = -1
++    subject_head_end: int = -1
++    object_head_start: int = -1
++    object_head_end: int = -1
++    # Argument-role and direction provenance (open-relation routing).
++    subject_dependency_role: str = ""   # agent | patient | theme | possessor | anchor
++    object_dependency_role: str = ""    # agent | patient | theme | possessed | appositive
++    voice: str = ""                     # active | passive | nominal
++    direction_source: str = ""          # DEPENDENCY_FRAME | RESOLVER_SWAP | NOMINAL
++    direction_confidence: str = ""      # high | medium | low
+ 
+     @property
+     def is_graph_edge(self) -> bool:
+         """True if this candidate qualifies as an asserted graph edge.
+ 
+         The graph writer boundary uses this to filter: only direct,
+-        positive, asserted candidates become Neo4j edges. Qualified
+-        candidates (negated, modal, attributed, conditional) are preserved
+-        for the ClaimRecord path but never written as graph facts.
++        positive, asserted, graph-eligible candidates become Neo4j edges.
++        Unmapped frames (graph_eligible=False) never pass this gate.
+         """
+         return (
+-            self.polarity == "POSITIVE"
++            self.graph_eligible
++            and self.predicate is not None
++            and self.polarity == "POSITIVE"
+             and self.modality == "ASSERTED"
+             and self.assertion_mode == "direct"
+         )
+@@ -175,6 +195,7 @@ SUPPRESSION_KEYS: tuple[str, ...] = (
+     "frame_self_loop",
+     "frame_predicate_unnamed",
+     "frame_bibliographic_appositive",
++    "frame_symmetric_no_distribute",
+     "frame_structural_artifact",
+     "frame_missing_required_preposition",
+ )
+@@ -665,6 +686,7 @@ def resolve_predicate(
+     object_type: str,
+     pred_tok: Token | None = None,
+     object_tok: Token | None = None,
++    disabled_feature_groups: frozenset[str] = frozenset(),
+ ) -> tuple[str, bool] | None:
+     """4-tier STRUCTURAL composite predicate resolver.
+ 
+@@ -679,6 +701,11 @@ def resolve_predicate(
+ 
+     Returns (predicate, swap) where swap=True marks passive/agent
+     constructions, or None (drop this edge).
++
++    disabled_feature_groups: rules tagged with a feature_group in this
++    set are skipped (ablation). E.g. frozenset({"p2_verb_prep"}) disables
++    only the P2B verb+preposition resolver rules while leaving baseline
++    prep_object frame generation and older prepositional rules intact.
+     """
+     _load_config()
+     # Lemma-indexed lookup: only scan rules matching this lemma (or wildcard "")
+@@ -688,6 +715,8 @@ def resolve_predicate(
+ 
+     # --- T1: rules with BOTH subj_type and obj_type constraints ---
+     for rule in rules:
++        if disabled_feature_groups and rule.get("feature_group") in disabled_feature_groups:
++            continue
+         r_subj = rule.get("subj_type", "")
+         r_obj = rule.get("obj_type", "")
+         if not (r_subj and r_obj):
+@@ -707,6 +736,8 @@ def resolve_predicate(
+ 
+     # --- T2: rules with signature_contains but NOT both type constraints ---
+     for rule in rules:
++        if disabled_feature_groups and rule.get("feature_group") in disabled_feature_groups:
++            continue
+         r_subj = rule.get("subj_type", "")
+         r_obj = rule.get("obj_type", "")
+         if r_subj and r_obj:
+diff --git a/backend/services/extraction/entity_quality.py b/backend/services/extraction/entity_quality.py
+index 4a883f9..8eb3d09 100644
+--- a/backend/services/extraction/entity_quality.py
++++ b/backend/services/extraction/entity_quality.py
+@@ -108,33 +108,13 @@ NOISE_LABELS = frozenset({
+ # allowed_pairs can actually constrain something. MEASURED: 100% of sampled
+ # mentions carried a type outside the ontology, which made the typed gate
+ # decorative.
++#
++# The mapping is now owned by services.extraction.canonical as the single
++# source of truth, shared with spacy_relation_adapter, relex_gate, and
++# neo4j_writer. Import the PUBLIC alias — the private `_UPPER_TO_ONTOLOGY`
++# name is kept only for backwards compatibility and may be removed.
+ # ---------------------------------------------------------------------------
+-LABEL_TO_ONTOLOGY: dict[str, str] = {
+-    "PERSON": "Person",
+-    "AGENT": "Person",
+-    "ORGANIZATION": "Organization",
+-    "PLACE": "Location",
+-    "PRODUCT": "Product",
+-    "DOCUMENT": "Document",
+-    "SYSTEM": "Software",
+-    "METHOD": "Method",
+-    "CONCEPT": "Concept",
+-    "RESOURCE": "Artifact",
+-    "CONSTRAINT": "Rule",
+-    "EVENT": "Event",
+-    "STANDARD": "Standard",
+-    "LAW": "Law",
+-    "ARTIFACT": "Artifact",
+-    "TIMEREFERENCE": "TimeReference",
+-    # --- vocabulary v2 (lowercase, ontology-aligned) -----------------------
+-    # v2 labels ARE ontology types, so these are identity maps. They exist so
+-    # both vocabularies can be in flight during the pod rollout: chunks
+-    # extracted under v1 and v2 must normalise to the same values, or the
+-    # allowed_pairs gate would see two type systems in one corpus.
+-    "SOFTWARE": "Software",
+-    "LOCATION": "Location",
+-    "CONCEPT_V2": "Concept",
+-}
++from services.extraction.canonical import ENTITY_TYPE_ALIASES as LABEL_TO_ONTOLOGY
+ 
+ # Generic role/abstract nouns that are real words but useless as graph nodes.
+ # Deliberately SHORT and hand-curated: the corpus-frequency rule (R5) is the
+diff --git a/backend/services/extraction/frame_extractor.py b/backend/services/extraction/frame_extractor.py
+index 9906f04..f57b3ea 100644
+--- a/backend/services/extraction/frame_extractor.py
++++ b/backend/services/extraction/frame_extractor.py
+@@ -131,6 +131,265 @@ _PREPOSITIONAL_PREDICATES: dict[str, frozenset[str]] = {
+ }
+ 
+ 
++# Prepositions that participate in pseudo-passive or role-marking
++# constructions in prep_object frames. The preposition alone does NOT
++# determine direction — the construction-level participial test does.
++_DIRECTIONAL_PREPS = frozenset({"with", "by", "from"})
++
++# Reduced participial / adjectival dependency labels. A VBD/VBN predicate
++# in one of these positions is a participial modifier, not a finite verb:
++#   "landscape crowded with video"  → dep=relcl  → participial
++#   "the book written by Alice"     → dep=acl    → participial
++# A VBD/VBN predicate with dep=ROOT and an explicit nsubj is a finite
++# active-past verb and must NOT be treated as pseudo-passive:
++#   "John worked with Mary"         → dep=ROOT   → ordinary active
++_PARTICIPIAL_DEPS = frozenset({"relcl", "acl", "amod"})
++
++
++def _is_pseudo_passive(
++    pred_tok: "Token",
++    prep: str,
++) -> bool:
++    """Construction-level participial test for prep_object frames.
++
++    Returns True only when the predicate is structurally a participial
++    modifier or passive, NOT merely because it carries a VBD/VBN tag.
++
++    Classification table:
++        was written by Alice      → auxpass + VBN       → True  (high)
++        book written by Alice     → acl + VBN           → True  (high)
++        landscape crowded with X  → relcl + VBD         → True  (medium)
++        John worked with Alice    → ROOT + VBD + nsubj  → False
++        company benefited from X  → ROOT + VBD + nsubj  → False
++        Alice traveled with Bob   → ROOT + VBD + nsubj  → False
++    """
++    if prep not in _DIRECTIONAL_PREPS:
++        return False
++    if pred_tok.tag_ not in ("VBN", "VBD"):
++        return False
++
++    # Ordinary passive: explicit passive auxiliary.
++    has_passive_aux = any(c.dep_ == "auxpass" for c in pred_tok.children)
++    if has_passive_aux:
++        return True
++
++    # Reduced participial modifier or fragment: the predicate is NOT the
++    # main clause verb. It hangs off a noun as a relative clause (relcl),
++    # adjectival clause (acl), or adjectival modifier (amod).
++    if pred_tok.dep_ in _PARTICIPIAL_DEPS:
++        return True
++
++    # ROOT + VBD/VBN with an explicit subject is an ordinary finite verb.
++    return False
++
++
++def _prep_object_role(prep: str, *, pseudo_passive: bool) -> tuple[str, str, str]:
++    """Return (subject_role, object_role, confidence) for a prep_object frame.
++
++    Roles are precise: content, instrument, source, co_participant — not
++    a blanket 'agent' for every prepositional object.
++    """
++    if pseudo_passive:
++        # Participial / passive construction: subject is patient/theme.
++        # Object role depends on the preposition:
++        #   by   → agent   ("written by Alice")
++        #   with → content  ("filled with smoke", "crowded with video")
++        #   from → source   ("suffered from drought")
++        obj_role = {"by": "agent", "with": "content", "from": "source"}.get(
++            prep, "patient"
++        )
++        return ("patient", obj_role, "medium")
++
++    # Ordinary active construction: subject retains its canonical role.
++    # Object role depends on the preposition:
++    #   with → co_participant ("worked with Mary")
++    #   from → source         ("benefited from caching")
++    #   by   → agent          (rare in active: "surpassed by far")
++    obj_role = {"with": "co_participant", "from": "source", "by": "agent"}.get(
++        prep, "patient"
++    )
++    return ("agent", obj_role, "high")
++
++
++def _has_subject_conflict(frame: "Frame") -> bool:
++    """Detect structural ambiguity in subject assignment.
++
++    Returns True when the selected subject may belong to a different
++    predicate clause — typically a coordination misparse where the
++    parser assigned the subject to the wrong verb.
++
++    Signals:
++      1. The predicate participates in a coordination (has conj siblings
++         or is itself a conjunct).
++      2. A comma separates the subject token from the predicate token,
++         suggesting a clause boundary between them.
++      3. The subject is not sentence-initial (there is a preceding token
++         that could be the true predicate's subject or object).
++
++    When all three hold, the subject assignment is uncertain and the
++    record should route to REVIEW, not STORE.
++
++    Example misparse:
++        "Copyright fuels creativity, encourages diverse voices"
++        en_core_web_sm tags 'fuels' as a noun, making 'creativity'
++        the nsubj of 'encourages'. The comma between 'creativity' and
++        'encourages' reveals the clause boundary.
++    """
++    pred = frame.pred_tok
++    subj = frame.subj_tok
++
++    # Signal 1: coordination structure.
++    has_conj_siblings = any(c.dep_ == "conj" for c in pred.children)
++    is_conjunct = pred.dep_ == "conj"
++    if not (has_conj_siblings or is_conjunct):
++        return False
++
++    # Signal 2: comma between subject and predicate.
++    sent = pred.sent
++    lo, hi = sorted([subj.i, pred.i])
++    has_comma_between = any(
++        t.text == "," and lo < t.i < hi for t in sent
++    )
++    if not has_comma_between:
++        return False
++
++    # Signal 3: subject is not sentence-initial.
++    if subj.i <= sent.start:
++        return False
++
++    return True
++
++
++def _open_relation_metadata(frame: "Frame") -> dict[str, str]:
++    """Direction metadata for open-relation triples, with conflict demotion.
++
++    Computes the standard argument metadata, then checks for structural
++    subject-assignment conflict. If the subject may belong to a different
++    predicate clause (coordination misparse), the confidence is demoted
++    to 'low' so the gate routes the record to REVIEW.
++    """
++    meta = _argument_metadata(
++        frame.frame_type, swap=False,
++        signature=frame.signature, pred_tok=frame.pred_tok,
++    )
++    if _has_subject_conflict(frame):
++        meta["direction_confidence"] = "low"
++        meta["direction_source"] = "PARSER_STRUCTURE_CONFLICT"
++    return meta
++
++
++def _argument_metadata(
++    frame_type: str,
++    *,
++    swap: bool,
++    signature: str = "",
++    pred_tok: "Token | None" = None,
++) -> dict[str, str]:
++    """Compute argument-role and direction provenance for an extracted triple.
++
++    Returns a dict suitable for spreading into ExtractedTriple kwargs.
++    The roles describe the FINAL subject/object after any swap.
++
++    signature: the frame's dependency signature (e.g. "nsubj-VERB-prep:with-pobj").
++        Used to extract the preposition for construction classification.
++    pred_tok: the predicate Token. Used for the structural participial test
++        (dep label, auxpass children) rather than POS tag alone.
++    """
++    if frame_type == "active_transitive":
++        if swap:
++            return {
++                "subject_dependency_role": "patient",
++                "object_dependency_role": "agent",
++                "voice": "active",
++                "direction_source": "RESOLVER_SWAP",
++                "direction_confidence": "high",
++            }
++        return {
++            "subject_dependency_role": "agent",
++            "object_dependency_role": "patient",
++            "voice": "active",
++            "direction_source": "DEPENDENCY_FRAME",
++            "direction_confidence": "high",
++        }
++    if frame_type == "passive_agent":
++        # Passive frames always swap: grammatical subject is semantic patient.
++        return {
++            "subject_dependency_role": "patient",
++            "object_dependency_role": "agent",
++            "voice": "passive",
++            "direction_source": "DEPENDENCY_FRAME",
++            "direction_confidence": "high",
++        }
++    if frame_type == "prep_object":
++        # Construction-level classification, not POS-tag heuristics.
++        # Extract the preposition from the signature (e.g. "prep:with").
++        prep = ""
++        if "prep:" in signature:
++            prep = signature.split("prep:", 1)[-1].split("-")[0].lower()
++
++        if prep in _DIRECTIONAL_PREPS and pred_tok is not None and not swap:
++            pseudo = _is_pseudo_passive(pred_tok, prep)
++            subj_role, obj_role, conf = _prep_object_role(
++                prep, pseudo_passive=pseudo
++            )
++            return {
++                "subject_dependency_role": subj_role,
++                "object_dependency_role": obj_role,
++                "voice": "active",
++                "direction_source": "DEPENDENCY_FRAME",
++                "direction_confidence": conf,
++            }
++        if swap:
++            return {
++                "subject_dependency_role": "patient",
++                "object_dependency_role": "agent",
++                "voice": "active",
++                "direction_source": "RESOLVER_SWAP",
++                "direction_confidence": "medium",
++            }
++        return {
++            "subject_dependency_role": "agent",
++            "object_dependency_role": "patient",
++            "voice": "active",
++            "direction_source": "DEPENDENCY_FRAME",
++            "direction_confidence": "high",
++        }
++    if frame_type == "possessive":
++        return {
++            "subject_dependency_role": "possessor",
++            "object_dependency_role": "possessed",
++            "voice": "nominal",
++            "direction_source": "NOMINAL",
++            "direction_confidence": "high",
++        }
++    if frame_type == "appositive":
++        return {
++            "subject_dependency_role": "anchor",
++            "object_dependency_role": "appositive",
++            "voice": "nominal",
++            "direction_source": "NOMINAL",
++            "direction_confidence": "high",
++        }
++    if frame_type == "copular_prep":
++        # Copular + prepositional complement: "X is a member of Y"
++        # Subject is the entity being classified; object is the group/whole.
++        return {
++            "subject_dependency_role": "agent",
++            "object_dependency_role": "patient",
++            "voice": "copular",
++            "direction_source": "DEPENDENCY_FRAME",
++            "direction_confidence": "high",
++        }
++    # Unknown frame type — low confidence.
++    return {
++        "subject_dependency_role": "unknown",
++        "object_dependency_role": "unknown",
++        "voice": "unknown",
++        "direction_source": "DEPENDENCY_FRAME",
++        "direction_confidence": "low",
++    }
++
++
+ @dataclass(slots=True)
+ class Frame:
+     """One predicate-bearing construction with two argument slots."""
+@@ -145,6 +404,9 @@ class Frame:
+     # Structural tier, not a calibrated probability. 1.0 = the predicate token
+     # directly governs both slots; 0.9 = one hop further (prepositional object).
+     confidence: float = 1.0
++    # For copular_prep frames: the attr noun's lemma overrides the copula
++    # lemma so the resolver can match noun-based signature rules (member, part).
++    override_lemma: str = ""
+ 
+ 
+ def _conjuncts(tok: Token, *, max_depth: int = 6) -> list[Token]:
+@@ -267,6 +529,22 @@ def _find_frames(doc: Doc) -> list[Frame]:
+                         signature=f"{s.dep_}-VERB-attr",
+                         confidence=1.0,
+                     ))
++                    # 2b. Copular attr + prepositional complement:
++                    # "Alice is a member of the committee"
++                    # "The imprint is part of Penguin Random House"
++                    # The attr noun carries a prep phrase whose pobj is the
++                    # semantic complement. The resolver uses the attr noun's
++                    # lemma (member, part) to match p2_verb_prep rules.
++                    for prep in (c for c in a.children if c.dep_ == "prep"):
++                        for pobj in (g for g in prep.children if g.dep_ == "pobj"):
++                            sig = f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
++                            frames.append(Frame(
++                                subj_tok=s, pred_tok=tok, obj_tok=pobj,
++                                frame_type="copular_prep",
++                                signature=sig,
++                                confidence=0.9,
++                                override_lemma=a.lemma_.lower(),
++                            ))
+ 
+             # 3. Passive with explicit agent: "GitHub was acquired by Microsoft"
+             #    Agentless passives form NO frame — an unstated agent is not an
+@@ -311,6 +589,23 @@ def _find_frames(doc: Doc) -> list[Frame]:
+                                         signature=sig, confidence=0.8,
+                                     ))
+ 
++            # 4b. Passive subject + prepositional object (non-agent):
++            # "The company is based in Texas"
++            # "The hotel is located in Quebec"
++            # These have nsubjpass + prep (not agent). The resolver matches
++            # the verb lemma (base, locate) against p2_verb_prep rules.
++            for s in passive_subjects:
++                for prep in (c for c in tok.children if c.dep_ == "prep"):
++                    if prep.lemma_.lower() == "by":
++                        continue  # agent phrase — handled in section 3
++                    for pobj in (g for g in prep.children if g.dep_ == "pobj"):
++                        sig = f"{s.dep_}-VERB-prep:{prep.lemma_.lower()}-pobj"
++                        frames.append(Frame(
++                            subj_tok=s, pred_tok=tok, obj_tok=pobj,
++                            frame_type="prep_object", signature=sig,
++                            confidence=0.9,
++                        ))
++
+         # ---- Nominal frames ------------------------------------------------
+         # 5. Possessive: "Google's TensorFlow" -> (Google, owns, TensorFlow).
+         #    Strict and local: the possessor is a `poss` CHILD of the possessed.
+@@ -388,6 +683,12 @@ def _resolve_slot(
+     for _ in range(2):
+         if current.head.i == current.i:
+             break
++        # Do not walk up past a relative-clause verb to the modified noun.
++        # "the investment that players have" — walking from "players" up
++        # through "have" (relcl) to "investment" crosses a clause boundary
++        # and fabricates a wrong subject assignment.
++        if current.dep_ in ("relcl", "acl", "advcl"):
++            break
+         current = current.head
+         found = slot_index.get(current.i)
+         if found is not None:
+@@ -576,6 +877,7 @@ class FrameExtractor:
+         doc: Doc | None = None,
+         suppression_counters: dict[str, int] | None = None,
+         trace: list[dict] | None = None,
++        disabled_feature_groups: frozenset[str] = frozenset(),
+     ) -> list[ExtractedTriple]:
+         """Extract frame-licensed relations.
+ 
+@@ -587,6 +889,11 @@ class FrameExtractor:
+         it outside this method means reimplementing the guard order — which is
+         how you end up measuring a copy of the pipeline instead of the pipeline.
+         Off by default; costs one list append per frame when on.
++
++        `disabled_feature_groups`: resolver rules tagged with a feature_group
++        in this set are skipped (ablation). E.g. frozenset({"p2_verb_prep"})
++        disables only the P2B verb+preposition resolver rules while leaving
++        baseline prep_object frame generation intact.
+         """
+         if not text.strip() or len(entities) < 2:
+             return []
+@@ -620,6 +927,17 @@ class FrameExtractor:
+         # are still checked individually below; nominal frames no longer need a
+         # verb to exist.
+         frames = _find_frames(doc)
++        # Ablation gate: the copular_prep and passive prep-object frame types
++        # are part of the p2_verb_prep feature. When disabled (profile D),
++        # these frames do not form — so E−D measures the COMPLETE verb-prep
++        # feature impact (frames + mappings), not just the mapping delta.
++        if disabled_feature_groups and "p2_verb_prep" in disabled_feature_groups:
++            frames = [
++                f for f in frames
++                if f.frame_type != "copular_prep"
++                and not (f.frame_type == "prep_object"
++                         and f.signature.startswith("nsubjpass"))
++            ]
+         if not frames:
+             _inc(suppression_counters, "skipped_verbless")
+             return []
+@@ -746,7 +1064,7 @@ class FrameExtractor:
+                 resolved = ("instance_of", False)
+                 lemma = "be"
+             else:
+-                lemma = pred_tok.lemma_.lower()
++                lemma = frame.override_lemma or pred_tok.lemma_.lower()
+                 resolved = resolve_predicate(
+                     signature=frame.signature,
+                     lemma=lemma,
+@@ -754,9 +1072,92 @@ class FrameExtractor:
+                     object_type=obj_ent.entity_type,
+                     pred_tok=pred_tok,
+                     object_tok=frame.obj_tok,
++                    disabled_feature_groups=disabled_feature_groups,
+                 )
+             if resolved is None:
+-                _die("frame_predicate_unnamed")
++                # --- Open-relation lane (P2A resolver coverage) ---
++                # The resolver could not map this frame's predicate to any
++                # ontology predicate (T4 DROP). Instead of discarding trusted
++                # structural evidence, emit it with predicate=None so the
++                # corroboration gate can route it to
++                # STORE_UNMAPPED_SURFACE_RELATION. The frame is grammatically
++                # licensed (both slots filled, all hygiene guards passed) —
++                # only the ontology mapping is absent.
++                _inc(suppression_counters, "frame_predicate_unnamed")
++
++                polarity, modality, temporal = _extract_qualifiers_inline(pred_tok)
++                if is_attributed:
++                    assertion_mode = "attributed"
++                elif is_conditional:
++                    assertion_mode = "conditional"
++                else:
++                    assertion_mode = "direct"
++
++                sent = pred_tok.sent
++                sent_idx = sent_idx_by_start.get(sent.start, 0)
++
++                key = (subj_ent.surface, "", obj_ent.surface, sent_idx)
++                if key in seen:
++                    if trace is not None:
++                        trace.append({
++                            "subject_token": frame.subj_tok.text,
++                            "predicate_token": frame.pred_tok.text,
++                            "object_token": frame.obj_tok.text,
++                            "frame_type": frame.frame_type,
++                            "subject_entity": subj_ent.surface,
++                            "object_entity": obj_ent.surface,
++                            "signature": frame.signature,
++                            "died_at": "duplicate_of_earlier_frame",
++                        })
++                    continue
++                seen.add(key)
++
++                if trace is not None:
++                    trace.append({
++                        "subject_token": frame.subj_tok.text,
++                        "predicate_token": frame.pred_tok.text,
++                        "object_token": frame.obj_tok.text,
++                        "frame_type": frame.frame_type,
++                        "subject_entity": subj_ent.surface,
++                        "object_entity": obj_ent.surface,
++                        "signature": frame.signature,
++                        "died_at": None,
++                        "emitted": (
++                            f"({subj_ent.surface}) "
++                            f"-[{pred_tok.text} UNMAPPED]-> "
++                            f"({obj_ent.surface})"
++                        ),
++                    })
++
++                triples.append(ExtractedTriple(
++                    subject_surface=subj_ent.surface,
++                    subject_start=subj_ent.start_char,
++                    subject_end=subj_ent.end_char,
++                    predicate=None,  # no canonical mapping (open relation)
++                    predicate_lemma=lemma,
++                    predicate_surface=pred_tok.text,
++                    object_surface=obj_ent.surface,
++                    object_start=obj_ent.start_char,
++                    object_end=obj_ent.end_char,
++                    confidence=frame.confidence,
++                    dep_signature=f"{frame.frame_type}:{frame.signature}",
++                    polarity=polarity,
++                    modality=modality,
++                    assertion_mode=assertion_mode,
++                    temporal_cue=temporal,
++                    sentence_text=sent.text.strip(),
++                    sentence_idx=sent_idx,
++                    chunk_id=chunk_id,
++                    doc_id=doc_id,
++                    section_path=section_path,
++                    mapping_status="UNMAPPED",
++                    graph_eligible=False,
++                    subject_head_start=frame.subj_tok.idx,
++                    subject_head_end=frame.subj_tok.idx + len(frame.subj_tok.text),
++                    object_head_start=frame.obj_tok.idx,
++                    object_head_end=frame.obj_tok.idx + len(frame.obj_tok.text),
++                    **_open_relation_metadata(frame),
++                ))
+                 continue
+ 
+             predicate, resolver_swap = resolved
+@@ -880,6 +1281,11 @@ class FrameExtractor:
+                 chunk_id=chunk_id,
+                 doc_id=doc_id,
+                 section_path=section_path,
++                subject_head_start=frame.subj_tok.idx,
++                subject_head_end=frame.subj_tok.idx + len(frame.subj_tok.text),
++                object_head_start=frame.obj_tok.idx,
++                object_head_end=frame.obj_tok.idx + len(frame.obj_tok.text),
++                **_argument_metadata(frame.frame_type, swap=swap, signature=frame.signature, pred_tok=frame.pred_tok),
+             ))
+ 
+         return triples
+diff --git a/backend/services/extraction/relex_gate.py b/backend/services/extraction/relex_gate.py
+index 512e4fe..c2f63c9 100644
+--- a/backend/services/extraction/relex_gate.py
++++ b/backend/services/extraction/relex_gate.py
+@@ -54,22 +54,12 @@ from services.extraction.spacy_relation_adapter import (
+ )
+ 
+ # Natural-language relation labels handed to the model, and the internal
+-# predicate each maps back to. Wording matters to a zero-shot model, so the
+-# prompt side is plain English while storage stays snake_case.
+-RELATION_LABEL_TO_PREDICATE: dict[str, str] = {
+-    "affiliated with": "affiliated_with", "works for": "works_for",
+-    "created by": "created_by", "owns": "owns", "part of": "part_of",
+-    "located in": "located_in", "causes": "causes", "detects": "detects",
+-    "uses": "uses", "produces": "produces", "derived from": "derived_from",
+-    "is an instance of": "instance_of", "synonym of": "synonym_of",
+-    "includes": "includes", "supports": "supports", "implements": "implements",
+-    "has part": "has_part", "references": "references",
+-    "depends on": "depends_on", "member of": "member_of",
+-    "example of": "example_of", "evaluates": "evaluates",
+-    "deploys": "deploys", "creates": "creates", "trains": "trains",
+-    "runs on": "runs", "quantizes": "quantizes",
+-}
+-RELATION_LABELS: list[str] = list(RELATION_LABEL_TO_PREDICATE)
++# predicate each maps back to, are now owned by services.extraction.canonical
++# as the single source of truth. Import from there.
++from services.extraction.canonical import (
++    RELATION_LABELS,
++    RELATION_LABEL_TO_PREDICATE,
++)
+ 
+ # v2 entity vocabulary. MEASURED better than v1's 25 abstract labels: 22% more
+ # graph-eligible entities from 21% fewer raw mentions, and it maps 1:1 onto
+diff --git a/backend/services/extraction/spacy_relation_adapter.py b/backend/services/extraction/spacy_relation_adapter.py
+index cefe0e0..938ffa5 100644
+--- a/backend/services/extraction/spacy_relation_adapter.py
++++ b/backend/services/extraction/spacy_relation_adapter.py
+@@ -339,74 +339,11 @@ class SpacyRelationExtractor:
+ 
+ 
+ # ---------------------------------------------------------------------------
+-# Entity-type casing normalization (R-pre Finding 6, fixed in R8)
+-#
+-# ontology.yaml declares entity_types in Title Case (Concept, Software, ...)
+-# and allowed_pairs does an EXACT tuple match. The RunPod lane stores UPPERCASE
+-# types (CONCEPT, PERSON, ORGANIZATION), so every uppercase-typed entity failed
+-# every constrained predicate silently. MEASURED on a 5,500-chunk sample:
+-# normalizing recovers 84 relations (+2.9%). Minor at the time it was measured
+-# ONLY because pod relations were never stored at all; it becomes load-bearing
+-# the moment the pod lane starts emitting.
+-#
+-# Normalizing here — at the single boundary every lane passes through — keeps
+-# local, pod, and backfill from disagreeing about what a type is.
++# Entity-type casing normalization is now owned by services.extraction.canonical.
++# Import normalize_entity_type from there — single source of truth shared by
++# this adapter, entity_quality, relex_gate, and neo4j_writer.
+ # ---------------------------------------------------------------------------
+-
+-_ONTOLOGY_ENTITY_TYPES = (
+-    "Person", "Organization", "Location", "Event", "Concept", "Method",
+-    "Product", "Software", "Document", "Standard", "Rule", "Law",
+-    "Artifact", "TimeReference", "other",
+-)
+-_UPPER_TO_ONTOLOGY = {t.upper(): t for t in _ONTOLOGY_ENTITY_TYPES}
+-
+-# Exact synonyms for ontology types under a different upstream name. ONLY
+-# unambiguous renames belong here.
+-_SYNONYM_TO_ONTOLOGY = {
+-    "PLACE": "Location",
+-}
+-
+-# DELIBERATELY NOT MAPPED — and specifically NOT mapped to "other".
+-#
+-# An earlier revision sent unknown types (PLACE, BEHAVIOR, PROCESS, QUALITY,
+-# AGENT, ...) to the "other" wildcard. That was wrong: pair_allowed() treats
+-# "other" as an explicit PASS, so wildcarding them bypassed the ontology gate
+-# entirely for a large share of the corpus. The live type vocabulary is much
+-# wider than ontology.yaml — GROUP, BEHAVIOR, SYSTEM, PROCESS, RESOURCE,
+-# QUALITY, TIME_PATTERN all appear in the thousands — so that one line opened
+-# the gate on most entities and produced edges like
+-#     (Newbury Park, instance_of, Sage)      [bibliography]
+-#     (Ann Arbor, instance_of, University of Michigan Press)
+-# which allowed_pairs would otherwise have rejected: instance_of requires a
+-# Concept object.
+-#
+-# It also explains why R-pre measured the casing fix as recovering "only" 84
+-# relations: the UPPERCASE mismatch had been ACCIDENTALLY acting as a precision
+-# gate. Normalizing casing without this correction removes that accident.
+-#
+-# An entity whose type is not in the ontology cannot satisfy a typed constraint,
+-# so it now fails CLOSED at allowed_pairs. Extending ontology.yaml to cover
+-# these types is an OWNER decision, not something to paper over here.
+-
+-
+-def normalize_entity_type(raw: str) -> str:
+-    """Map an upstream entity type onto ontology.yaml casing.
+-
+-    Exact ontology values pass through. Case variants are folded. Known
+-    out-of-ontology types become the "other" wildcard. Anything else is
+-    returned unchanged so it stays visible rather than being quietly coerced.
+-    """
+-    if not raw:
+-        return ""
+-    if raw in _ONTOLOGY_ENTITY_TYPES:
+-        return raw
+-    upper = raw.strip().upper()
+-    mapped = _UPPER_TO_ONTOLOGY.get(upper) or _SYNONYM_TO_ONTOLOGY.get(upper)
+-    if mapped:
+-        return mapped
+-    # Unknown type: returned unchanged so it stays visible AND fails closed at
+-    # the allowed_pairs gate. Never coerce to "other" — that is a wildcard pass.
+-    return raw
++from services.extraction.canonical import normalize_entity_type  # noqa: E402
+ 
+ 
+ def _to_entity_spans(raw_entities: list[dict], text: str = "") -> list:
+diff --git a/backend/services/graph/neo4j_writer.py b/backend/services/graph/neo4j_writer.py
+index e4eaed7..8247dc6 100644
+--- a/backend/services/graph/neo4j_writer.py
++++ b/backend/services/graph/neo4j_writer.py
+@@ -38,6 +38,18 @@ from services.ghost_b import (
+ )
+ from services.graph.entity_cleaning import is_junk_extracted_entity
+ from services.graph.entity_dedup.resolve import resolve_entity_ids
++from services.extraction.canonical import (
++    ENTITY_ID_PREFIX,
++    GENERIC_ENTITY_TERMS,
++    _load_entity_type_overrides as _canonical_load_entity_type_overrides,
++    _load_alias_lookup as _canonical_load_alias_lookup,
++    _slugify_name,
++    canonicalize_entity_name,
++    entity_id_from_name,
++    is_generic_entity_name,
++    normalize_entity_name,
++    resolve_entity_alias,
++)
+ 
+ logger = logging.getLogger(__name__)
+ ALIAS_MAP_PATH = Path(__file__).with_name("entity_aliases.json")
+@@ -46,10 +58,13 @@ DOMAIN_TAXONOMY_PATH = Path(__file__).with_name("domain_taxonomy.json")
+ CANONICAL_FAMILIES_PATH = Path(__file__).with_name("canonical_families.json")
+ ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.json")
+ ONTOLOGY_VERSION = "2026-04-25-v3"
+-ENTITY_ID_PREFIX = "entity"
+ GRAPH_PROMOTE_VERSION = "polymath.promote.v1"
+ GRAPH_WRITE_MAX_ATTEMPTS = 3
+ GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS = 0.75
++# Memory-pool rejections need more headroom than deadlocks: the pool only
++# frees once competing transactions drain, so an immediate retry just fails
++# again and burns the attempt budget (observed 2026-07-19).
++GRAPH_WRITE_MEMORY_BACKOFF_SECONDS = 3.0
+ # Neo4j transaction-memory safety.  These constants bound every data-sized
+ # production write/refresh in this module; callers must not replace them with
+ # a whole-document/corpus list.  Aggregate refresh is intentionally the most
+@@ -1007,68 +1022,11 @@ def relation_eligible_for_synthesis(
+     return True
+ 
+ 
+-def normalize_entity_name(name: str) -> str:
+-    """Canonical form for dedup: lowercase, NFKD, strip punctuation, collapse spaces."""
+-    name = name.lower().strip()
+-    name = unicodedata.normalize("NFKD", name)
+-    name = re.sub(r"[^\w\s]", "", name)
+-    return re.sub(r"\s+", " ", name).strip()
+-
+-
+-@lru_cache(maxsize=1)
+-def _load_alias_lookup() -> dict[str, str]:
+-    try:
+-        data = json.loads(ALIAS_MAP_PATH.read_text(encoding="utf-8"))
+-    except FileNotFoundError:
+-        return {}
+-    except Exception as exc:
+-        logger.warning("Entity alias map failed to load: %s", exc)
+-        return {}
+-
+-    lookup: dict[str, str] = {}
+-    for canonical, aliases in data.items():
+-        canonical_norm = normalize_entity_name(canonical)
+-        if not canonical_norm:
+-            continue
+-        lookup[canonical_norm] = canonical_norm
+-        for alias in aliases or []:
+-            alias_norm = normalize_entity_name(str(alias))
+-            if alias_norm:
+-                lookup[alias_norm] = canonical_norm
+-    return lookup
+-
+-
+-def resolve_entity_alias(normalized_name: str) -> str:
+-    """Return the configured canonical alias for an already-normalized name."""
+-    return _load_alias_lookup().get(normalized_name, normalized_name)
+-
+-
+-def canonicalize_entity_name(name: str) -> str:
+-    return resolve_entity_alias(normalize_entity_name(name))
+-
+-
+-@lru_cache(maxsize=1)
+-def _load_entity_type_overrides() -> dict[str, str]:
+-    try:
+-        data = json.loads(ENTITY_TYPE_OVERRIDES_PATH.read_text(encoding="utf-8"))
+-    except FileNotFoundError:
+-        return {}
+-    except Exception as exc:
+-        logger.warning("Entity type overrides failed to load: %s", exc)
+-        return {}
+-    if not isinstance(data, dict):
+-        return {}
+-
+-    overrides: dict[str, str] = {}
+-    for name, value in data.items():
+-        canonical = canonicalize_entity_name(str(name))
+-        if not canonical:
+-            continue
+-        if isinstance(value, str):
+-            overrides[canonical] = value
+-        elif isinstance(value, dict) and value.get("primary_entity_type"):
+-            overrides[canonical] = str(value["primary_entity_type"])
+-    return overrides
++# Canonicalization functions are now owned by services.extraction.canonical.
++# Re-exported here for backwards compatibility — all existing callers that
++# import from neo4j_writer continue to work without changes.
++_load_alias_lookup = _canonical_load_alias_lookup
++_load_entity_type_overrides = _canonical_load_entity_type_overrides
+ 
+ 
+ def resolve_primary_entity_type(
+@@ -1310,28 +1268,8 @@ def _slugify_type(entity_type: str) -> str:
+     return slug or SchemaContext.ENTITY_SENTINEL
+ 
+ 
+-def _slugify_name(canonical_name: str) -> str:
+-    """Normalized canonical name → URL-safe slug (spaces → hyphens, no punctuation)."""
+-    return canonicalize_entity_name(canonical_name).replace(" ", "-")
+-
+-
+-def entity_id_from_name(canonical_name: str, entity_type: str | None = None) -> str:
+-    """Deterministic canonical entity ID.
+-
+-    Format: `entity:{name_slug}`.
+-
+-    The `entity_type` argument is intentionally ignored and retained only for
+-    call-site compatibility. Type is now extraction evidence, stored as
+-    primary_entity_type / observed_entity_types on Entity and extracted_type on
+-    MENTIONS. This prevents Product:pvector, Method:pvector, and Concept:pvector
+-    from becoming separate graph nodes.
+-    """
+-    return f"{ENTITY_ID_PREFIX}:{_slugify_name(canonical_name)}"
+-
+-
+-def is_generic_entity_name(canonical_name: str) -> bool:
+-    normalized = canonicalize_entity_name(canonical_name)
+-    return normalized in GENERIC_ENTITY_TERMS
++# _slugify_name, entity_id_from_name, is_generic_entity_name are now imported
++# from services.extraction.canonical at the top of this module.
+ 
+ 
+ def _support_id_for_row(
+@@ -2436,10 +2374,25 @@ async def delete_corpus_graph(
+             await _refresh_entity_aggregates(session, affected_entity_ids)
+ 
+ 
++_GRAPH_WRITE_MEMORY_MARKERS = ("MemoryPoolOutOfMemory", "OutOfMemory")
++
++
++def _is_memory_graph_write_transient(exc: TransientError) -> bool:
++    combined = f"{getattr(exc, 'code', '') or ''} {exc}"
++    return any(marker in combined for marker in _GRAPH_WRITE_MEMORY_MARKERS)
++
++
+ def _is_retryable_graph_write_transient(exc: TransientError) -> bool:
++    # Neo4j marks both lock contention and transaction-memory rejection as
++    # TransientError. Deadlocks clear on quick retry; memory-pool rejections
++    # clear once competing transactions drain. 2026-07-19: OOM raised straight
++    # through here on attempt 1 — the outer batch retry then re-hit the still-
++    # saturated pool with no in-writer damping and burned 215 items' attempts.
+     code = str(getattr(exc, "code", "") or "")
+     text = str(exc)
+-    return "DeadlockDetected" in code or "DeadlockDetected" in text
++    if "DeadlockDetected" in code or "DeadlockDetected" in text:
++        return True
++    return _is_memory_graph_write_transient(exc)
+ 
+ 
+ async def write_document_graph(*args: Any, **kwargs: Any) -> None:
+@@ -2455,9 +2408,15 @@ async def write_document_graph(*args: Any, **kwargs: Any) -> None:
+                 or attempt >= GRAPH_WRITE_MAX_ATTEMPTS
+             ):
+                 raise
+-            delay = GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS * attempt
++            backoff = (
++                GRAPH_WRITE_MEMORY_BACKOFF_SECONDS
++                if _is_memory_graph_write_transient(exc)
++                else GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS
++            )
++            delay = backoff * attempt
+             logger.warning(
+-                "Neo4j graph write deadlock; retrying doc=%s corpus=%s attempt=%d/%d delay=%.2fs",
++                "Neo4j graph write transient (%s); retrying doc=%s corpus=%s attempt=%d/%d delay=%.2fs",
++                str(getattr(exc, "code", "") or type(exc).__name__),
+                 doc_id[:12],
+                 corpus_id[:8],
+                 attempt + 1,
+diff --git a/backend/services/ingestion/extraction_jobs.py b/backend/services/ingestion/extraction_jobs.py
+index 2cc642d..2689c12 100644
+--- a/backend/services/ingestion/extraction_jobs.py
++++ b/backend/services/ingestion/extraction_jobs.py
+@@ -184,6 +184,12 @@ def classify_extraction_status(row: dict[str, Any] | None) -> tuple[str, str]:
+     if not row:
+         return "queued", "missing_extraction"
+     status = str(row.get("status") or "").lower()
++    if status in ("deleted", "deleting"):
++        # Record-status tombstone from the delete cascade, not an extraction
++        # outcome. doc_id is content-derived, so re-ingesting a deleted file
++        # resurrects the document over these rows — they must classify as
++        # never-extracted, not fall through to a phantom "extraction_error".
++        return "queued", "missing_extraction"
+     if status == "ok":
+         if row.get("promoted_at"):
+             return "promoted", "graph_promoted"
+diff --git a/backend/services/ingestion/graph_promotion_jobs.py b/backend/services/ingestion/graph_promotion_jobs.py
+index 7eba779..f4c1df5 100644
+--- a/backend/services/ingestion/graph_promotion_jobs.py
++++ b/backend/services/ingestion/graph_promotion_jobs.py
+@@ -411,10 +411,13 @@ async def mark_doc_extractions_promoted(
+             "full_replay": bool(result.get("full_replay")),
+         }
+ 
+-    ghost_result = await db["ghost_b_extractions"].update_many(
+-        {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"},
+-        {"$set": base_set},
+-    )
++    # Ordering is the crash-safety contract: the census derives promotion
++    # state from ghost rows' promoted_at, so the ghost stamp is the commit
++    # point and must land LAST. A crash between the two writes then leaves
++    # ghost rows unstamped → the census still plans a re-promotion, whose
++    # rerun converges both collections. The reverse order strands
++    # extraction_jobs at "succeeded" forever because the census is already
++    # satisfied and never replans.
+     job_result = await db["extraction_jobs"].update_many(
+         {"corpus_id": corpus_id, "doc_id": doc_id, "status": "succeeded"},
+         {
+@@ -426,6 +429,10 @@ async def mark_doc_extractions_promoted(
+             }
+         },
+     )
++    ghost_result = await db["ghost_b_extractions"].update_many(
++        {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"},
++        {"$set": base_set},
++    )
+     return {
+         "ghost_b_rows_promoted": _modified_count(ghost_result),
+         "extraction_jobs_promoted": _modified_count(job_result),
+diff --git a/backend/services/ingestion/promote.py b/backend/services/ingestion/promote.py
+index e139453..5cba65f 100644
+--- a/backend/services/ingestion/promote.py
++++ b/backend/services/ingestion/promote.py
+@@ -760,3 +760,120 @@ async def promote_claims_to_graph(
+             _skip(total, reason, int(count or 0))
+     total["status"] = "done" if total["docs"] else "noop"
+     return total
++
++
++# ── promote_doc: at-ingest writer (Gap 2 fix) ─────────────────────────────
++import logging  # noqa: E402
++
++_promote_logger = logging.getLogger(__name__)
++
++# Per-corpus index-creation cache so we don't re-issue idempotent index
++# commands on every document ingest.
++_indexes_created_for: set[str] = set()
++
++
++def _graph_entity_id_fn(name: str) -> str:
++    """Resolve entity_id using the Neo4j writer's canonical function."""
++    try:
++        return entity_id_from_name(name)
++    except Exception:
++        return _default_entity_id(name)
++
++
++async def promote_doc(
++    db: Any,
++    *,
++    corpus_id: str,
++    doc_id: str,
++) -> dict[str, Any]:
++    """Promote extraction metadata onto Qdrant child payloads for one document.
++
++    Called at ingest time (worker.py) after Qdrant upserts complete. Reads
++    ghost_b_extractions for the document, computes the payload delta via
++    promote(), and writes it to Qdrant + Mongo. Purely additive; never
++    deletes or replaces existing payload keys.
++
++    Returns a receipt dict: {status, promoted, skipped, collections}.
++    """
++    from qdrant_client import AsyncQdrantClient
++    from qdrant_client import models as qm
++
++    from config import get_settings
++    from services.storage import qdrant_writer as qw
++
++    settings = get_settings()
++
++    # 1) Read extraction rows for this document.
++    rows = await db["ghost_b_extractions"].find(
++        {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"}
++    ).to_list(length=None)
++    if not rows:
++        return {"status": "no_extractions", "promoted": 0, "skipped": 0, "collections": []}
++
++    # 2) Resolve Qdrant collections for this corpus.
++    client = AsyncQdrantClient(url=settings.QDRANT_URL, timeout=30)
++    cols: list[str] = []
++    try:
++        for kind in ("naive", "hrag", "graph"):
++            name = qw._col_for_corpus(corpus_id, kind)
++            if await client.collection_exists(name):
++                cols.append(name)
++    except Exception as exc:
++        _promote_logger.warning("promote_doc: collection lookup failed corpus=%s: %s", corpus_id[:8], exc)
++        return {"status": "collection_error", "promoted": 0, "skipped": 0, "collections": []}
++
++    if not cols:
++        return {"status": "no_collections", "promoted": 0, "skipped": 0, "collections": []}
++
++    # 3) Ensure payload indexes exist (idempotent, cached per corpus).
++    if corpus_id not in _indexes_created_for:
++        for col in cols:
++            for field, ftype in promoted_index_fields():
++                try:
++                    await client.create_payload_index(
++                        collection_name=col,
++                        field_name=field,
++                        field_schema={
++                            "keyword": qm.PayloadSchemaType.KEYWORD,
++                            "bool": qm.PayloadSchemaType.BOOL,
++                            "integer": qm.PayloadSchemaType.INTEGER,
++                        }[ftype],
++                    )
++                except Exception:
++                    pass  # already exists
++        _indexes_created_for.add(corpus_id)
++
++    # 4) Promote each extraction row.
++    promoted_count = 0
++    skipped_count = 0
++    for row in rows:
++        chunk_id = str(row.get("chunk_id") or "")
++        if not chunk_id:
++            skipped_count += 1
++            continue
++        delta = promote(row, entity_id_fn=_graph_entity_id_fn)
++        pid = qw._uuid_from_str(chunk_id)
++        # Write to Qdrant (best-effort per collection).
++        for col in cols:
++            try:
++                await client.set_payload(
++                    collection_name=col, payload=delta, points=[pid]
++                )
++            except Exception:
++                pass  # point may not exist in this collection kind
++        # Mirror onto Mongo child record.
++        try:
++            await db["chunks"].update_one(
++                {"corpus_id": corpus_id, "chunk_id": chunk_id}, {"$set": delta}
++            )
++        except Exception as exc:
++            _promote_logger.debug("promote_doc: mongo mirror failed chunk=%s: %s", chunk_id[:12], exc)
++        promoted_count += 1
++
++    await client.close()
++    return {
++        "status": "ok",
++        "promoted": promoted_count,
++        "skipped": skipped_count,
++        "collections": cols,
++    }
+diff --git a/backend/services/ingestion/verify.py b/backend/services/ingestion/verify.py
+index 741d15b..0de1709 100644
+--- a/backend/services/ingestion/verify.py
++++ b/backend/services/ingestion/verify.py
+@@ -21,6 +21,7 @@ from qdrant_client import AsyncQdrantClient
+ from qdrant_client import models as qmodels
+ 
+ from services.storage.qdrant_writer import _col_for_corpus, payload_text_contract
++from services.storage.record_status import with_active_records
+ from services.ingestion.section_classifier import NOISY_KINDS
+ 
+ logger = logging.getLogger(__name__)
+@@ -50,7 +51,11 @@ async def _expected_child_count(
+         ]
+     if collection_kind == "hrag":
+         query["source_tier"] = {"$in": list(_HRAG_CHILD_TIERS)}
+-    return int(await db["chunks"].count_documents(query))
++    # Active-record scoping is mandatory: doc_id is content-derived, so a
++    # delete → re-ingest of the same file resurrects the document while old
++    # chunk tombstones linger. Counting them over-expects Qdrant points that
++    # no writer will ever produce and fails verification forever.
++    return int(await db["chunks"].count_documents(with_active_records(query)))
+ 
+ 
+ def expected_summary_points_from_state(write_state: Any) -> int | None:
+@@ -101,7 +106,7 @@ async def _expected_summary_count(
+         return stamped
+     projection = {"_id": 0, "parent_id": 1, "summary": 1, "chunk_kind": 1}
+     parents = await db["parent_chunks"].find(
+-        {"doc_id": doc_id, "corpus_id": corpus_id},
++        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
+         projection,
+     ).to_list(length=None)
+     if not parents:
+@@ -134,7 +139,7 @@ async def _expected_qdrant_texts(
+     """Return canonical Mongo text keyed by Qdrant chunk_id/summary id."""
+     expected: dict[str, str] = {}
+     rows = await db["chunks"].find(
+-        {"doc_id": doc_id, "corpus_id": corpus_id},
++        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
+         {"_id": 0, "chunk_id": 1, "text": 1},
+     ).to_list(length=None)
+     for row in rows:
+@@ -143,7 +148,7 @@ async def _expected_qdrant_texts(
+             expected[chunk_id] = str(row.get("text") or "")
+ 
+     parents = await db["parent_chunks"].find(
+-        {"doc_id": doc_id, "corpus_id": corpus_id},
++        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id}),
+         {"_id": 0},
+     ).to_list(length=None)
+     if not parents:
+@@ -317,9 +322,10 @@ async def verify_ingest(
+     """
+     errors: list[str] = []
+ 
+-    # 1. Mongo chunk count for this doc.
++    # 1. Mongo chunk count for this doc (active records only — tombstones
++    # from a prior delete of the same content-derived doc_id don't count).
+     mongo_chunk_count = await db["chunks"].count_documents(
+-        {"doc_id": doc_id, "corpus_id": corpus_id}
++        with_active_records({"doc_id": doc_id, "corpus_id": corpus_id})
+     )
+     if mongo_chunk_count == 0:
+         errors.append(
+diff --git a/backend/services/ingestion_service.py b/backend/services/ingestion_service.py
+index a342459..1c72ca4 100644
+--- a/backend/services/ingestion_service.py
++++ b/backend/services/ingestion_service.py
+@@ -937,6 +937,39 @@ class IngestionService:
+                 )
+             parse_authority_usd(summary_cost_authority_usd)
+ 
++        # Control Plane V2 — every intake path funnels through here, so this
++        # is where each document gets its durable run row. The wrapped
++        # callback fires as soon as the worker resolves the doc_id; the
++        # ledger write is best-effort (the reconciler backfills any miss).
++        upstream_on_doc_id = on_doc_id
++        if self._db is not None and bool(
++            getattr(get_settings(), "CONTROL_PLANE_V2_ENABLED", True)
++        ):
++            db = self._db
++
++            async def _record_run_then_forward(resolved_doc_id: str) -> None:
++                try:
++                    from services.control_plane import ledger as cp_ledger
++
++                    if resolved_doc_id:
++                        await cp_ledger.create_ingestion_run(
++                            db,
++                            corpus_id=corpus_id,
++                            doc_id=str(resolved_doc_id),
++                            user_id=user_id,
++                            source="upload" if source_url is None else "url",
++                            filename=filename,
++                        )
++                except Exception as exc:  # noqa: BLE001 — ledger must not block intake
++                    logger.warning(
++                        "control-plane run row create failed doc=%s: %s",
++                        resolved_doc_id,
++                        exc,
++                    )
++                await _call_ingest_callback(upstream_on_doc_id, resolved_doc_id)
++
++            on_doc_id = _record_run_then_forward
++
+         return await run_ingest_job(
+             job_id=str(uuid.uuid4()),
+             data=data,
+@@ -1604,6 +1637,108 @@ class IngestionService:
+             query["user_id"] = user_id
+         return await self._db["documents"].find_one(query)
+ 
++    async def get_ingestion_evidence(
++        self,
++        doc_id: str,
++        *,
++        corpus_id: str | None = None,
++        user_id: str | None = None,
++    ) -> Optional[dict]:
++        """Return secret-free persisted receipts for one ingestion.
++
++        This is intentionally an identity join on ``corpus_id + doc_id``.
++        Corpus-wide provider counts are never used as proof that a particular
++        document ran on a particular provider or machine.
++        """
++        doc = await self.get_job_status(
++            doc_id,
++            corpus_id=corpus_id,
++            user_id=user_id,
++        )
++        if not doc:
++            return None
++
++        resolved_corpus_id = str(doc.get("corpus_id") or corpus_id or "")
++        identity = {"corpus_id": resolved_corpus_id, "doc_id": doc_id}
++        ghost_rows = await (
++            self._db["ghost_b_extractions"]
++            .find(
++                identity,
++                {
++                    "_id": 0,
++                    "chunk_id": 1,
++                    "status": 1,
++                    "provider": 1,
++                    "model": 1,
++                    "lane": 1,
++                    "schema_mode": 1,
++                    "output_mode": 1,
++                    "provider_card": 1,
++                },
++            )
++            .limit(10_000)
++            .to_list(length=10_000)
++        )
++        parent_rows = await (
++            self._db["parent_chunks"]
++            .find(
++                identity,
++                {
++                    "_id": 0,
++                    "parent_id": 1,
++                    "summary": 1,
++                    "summary_provider": 1,
++                    "summary_model": 1,
++                    "summary_receipt": 1,
++                    "summary_metadata": 1,
++                },
++            )
++            .limit(10_000)
++            .to_list(length=10_000)
++        )
++        provider_metrics = await (
++            self._db["ingest_provider_call_metrics"]
++            .find(
++                identity,
++                {
++                    "_id": 0,
++                    "phase": 1,
++                    "provider_family": 1,
++                    "model": 1,
++                    "local_compute": 1,
++                    "billable_provider": 1,
++                    "accepted_count": 1,
++                    "rejected_count": 1,
++                    "created_at": 1,
++                },
++            )
++            .sort("created_at", -1)
++            .limit(2_000)
++            .to_list(length=2_000)
++        )
++        graph_job = await self._db["graph_promotion_jobs"].find_one(
++            identity,
++            {
++                "_id": 0,
++                "status": 1,
++                "claims_in": 1,
++                "facts_written": 1,
++                "edges_written": 1,
++                "skipped_by_reason": 1,
++                "promote_version": 1,
++                "created_at": 1,
++                "updated_at": 1,
++            },
++            sort=[("updated_at", -1), ("created_at", -1)],
++        )
++        return {
++            "document": doc,
++            "ghost_rows": ghost_rows,
++            "parent_rows": parent_rows,
++            "provider_metrics": provider_metrics,
++            "graph_job": graph_job,
++        }
++
+     # Fields that must never change once any document has been ingested.
+     # Changing them mid-corpus = silent zero-recall (different vector space).
+     _LOCKED_EMBEDDING_FIELDS = frozenset(
+diff --git a/backend/services/reranker.py b/backend/services/reranker.py
+index 858323f..3a05793 100644
+--- a/backend/services/reranker.py
++++ b/backend/services/reranker.py
+@@ -699,6 +699,9 @@ class RerankerService:
+         if _RERANKER_INPUT_CONTEXT:
+             from models.contracts import RerankerInput
+ 
++            _aspect_enabled = bool(
++                getattr(self._settings, "RERANKER_QUERY_ASPECT_ENABLED", True)
++            )
+             prefixed = []
+             for c, doc, parent_context in zip(pool, documents, parent_contexts):
+                 name = str(getattr(c, "doc_name", "") or "").strip()[:80]
+@@ -707,11 +710,20 @@ class RerankerService:
+                     for h in (getattr(c, "heading_path", None) or [])
+                     if str(h).strip()
+                 ]
++                # Lane-aspect: when a candidate was discovered by a vocabulary
++                # lane, score it against that lane's sub-query (the aspect it
++                # is relevant to) rather than the full compound user query.
++                _aspect = ""
++                if _aspect_enabled:
++                    _aspect = str(
++                        (getattr(c, "metadata", None) or {}).get("lane_query") or ""
++                    ).strip()[:120]
+                 prefixed.append(
+                     RerankerInput(
+                         source_book=name,
+                         section=" › ".join(heads[:2])[:80],
+                         parent_context=parent_context[:context_cap],
++                        query_aspect=_aspect,
+                         excerpt=doc,
+                     ).render()
+                 )
+diff --git a/backend/services/retrieval_readiness.py b/backend/services/retrieval_readiness.py
+index 2b31876..011fa7b 100644
+--- a/backend/services/retrieval_readiness.py
++++ b/backend/services/retrieval_readiness.py
+@@ -21,6 +21,7 @@ from typing import Any
+ 
+ from config import get_settings
+ from services.storage.qdrant_writer import _col_for_corpus, ensure_collections_for_corpus
++from services.storage.record_status import active_record_clause
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -224,7 +225,7 @@ async def repair_retrieval_readiness_for_all_corpora(
+ 
+     reports: list[dict[str, Any]] = []
+     cursor = db["corpora"].find(
+-        {},
++        active_record_clause(),
+         {
+             "_id": 0,
+             "corpus_id": 1,
+diff --git a/backend/services/retriever/__init__.py b/backend/services/retriever/__init__.py
+index d0ab9a7..4507d27 100644
+--- a/backend/services/retriever/__init__.py
++++ b/backend/services/retriever/__init__.py
+@@ -526,6 +526,33 @@ def _has_query_term_overlap(chunks: list[SourceChunk], query: str) -> bool:
+     return False
+ 
+ 
++def _top_is_relative_standout(ranked: list[SourceChunk]) -> bool:
++    """Pool-independent "clear winner" detector for the v4 low-confidence guard.
++
++    Replaces the absolute ``RERANKER_LOW_CONFIDENCE_THRESHOLD``: instead of
++    asking "is top1 above a magic constant?", ask "does top1 separate from the
++    pool's own median?". The metric is the top-to-median gap as a fraction of
++    the pool spread, which is scale-free (works on raw logits) and needs no
++    per-provider calibration. A genuine hit puts top1 well clear of the pack
++    (ratio high); a flat junk pool sits near 0.5 (even spacing) and is NOT a
++    standout, so it still falls through to the term-overlap safety net.
++    """
++    scores = sorted(float(chunk.score or 0.0) for chunk in ranked)
++    if len(scores) < 2:
++        return False
++    top = scores[-1]
++    mid = len(scores) // 2
++    median = (
++        scores[mid]
++        if len(scores) % 2
++        else (scores[mid - 1] + scores[mid]) / 2.0
++    )
++    spread = scores[-1] - scores[0]
++    if spread <= 1e-9:
++        return False
++    return (top - median) / spread >= 0.60
++
++
+ def _should_drop_low_confidence_rerank(
+     ranked: list[SourceChunk],
+     ranking_query: str,
+@@ -533,6 +560,7 @@ def _should_drop_low_confidence_rerank(
+     rerank_enabled: bool,
+     score_scale: str | None = None,
+     low_confidence_threshold: float | None = None,
++    relative_gate: bool = False,
+ ) -> bool:
+     """Drop reranked results when the whole pool looks unrelated.
+ 
+@@ -540,12 +568,22 @@ def _should_drop_low_confidence_rerank(
+     "probably irrelevant" signal. Bounded score scales such as cosine or
+     probability cannot use the same threshold, so this guard is disabled for
+     those providers and term overlap + ordinary ranking handles selection.
++
++    ``relative_gate`` (Retrieval Layer v4 shadow, default OFF) swaps the
++    uncalibrated absolute ``low_confidence_threshold`` for a pool-independent
++    test: keep when top1 is a clear relative standout over the pool median,
++    otherwise fall back to the term-overlap safety net. With the gate OFF the
++    behavior is byte-identical to the legacy absolute-threshold path.
+     """
+     if not rerank_enabled or not ranked:
+         return False
+     scale = (score_scale or settings.RERANKER_SCORE_SCALE or "logit").lower()
+     if scale != "logit":
+         return False
++    if relative_gate:
++        if _top_is_relative_standout(ranked):
++            return False
++        return not _has_query_term_overlap(ranked[:10], ranking_query)
+     threshold = (
+         low_confidence_threshold
+         if low_confidence_threshold is not None
+@@ -4719,6 +4757,7 @@ class RetrieverOrchestrator:
+ 
+         selection_diagnostics: dict[str, Any] = {}
+         reranker_diagnostics: dict[str, Any] = {}
++        curation_v4_diagnostics: dict[str, Any] = {}
+ 
+         def _diagnostics(
+             status: str,
+@@ -4762,6 +4801,7 @@ class RetrieverOrchestrator:
+                 "unique_docs_final": unique_docs_final,
+                 "max_doc_share_final": max_doc_share_final,
+                 "selection": selection_diagnostics,
++                "curation_v4": curation_v4_diagnostics,
+                 "reranker": reranker_diagnostics,
+                 "temporal_routing": temporal_diagnostics,
+             }
+@@ -5473,6 +5513,68 @@ class RetrieverOrchestrator:
+         if not merged:
+             _log_timings("empty_after_merge", 0)
+             return _result([], status="empty_after_merge")
++
++        # ── Per-corpus recall quota (cross-corpus fairness) ──────────────
++        # Guarantee each selected corpus has at least PER_CORPUS_RECALL_QUOTA
++        # candidates in the reranker pool. Purely additive: backfills from the
++        # corpus's own funnel output if it was underrepresented after merge.
++        _quota = int(getattr(settings, "PER_CORPUS_RECALL_QUOTA", 3) or 0)
++        if _quota > 0 and multi and corpus_ids and len(corpus_ids) > 1:
++            _merged_ids = {
++                str(c.chunk_id or c.parent_id or "") for c in merged
++            }
++            _corpus_counts: dict[str, int] = {}
++            for _c in merged:
++                _cid = str(getattr(_c, "corpus_id", "") or "")
++                if _cid:
++                    _corpus_counts[_cid] = _corpus_counts.get(_cid, 0) + 1
++            # Pool of all funnel candidates (pre-merge) for backfill.
++            _all_funnel = b_results + a_results + lexical_results + document_anchor_results
++            _backfilled = 0
++            for _cid in corpus_ids:
++                _cid_str = str(_cid)
++                _have = _corpus_counts.get(_cid_str, 0)
++                if _have >= _quota:
++                    continue
++                _need = _quota - _have
++                # Best candidates from this corpus not already in merged.
++                _candidates = [
++                    c for c in _all_funnel
++                    if str(getattr(c, "corpus_id", "") or "") == _cid_str
++                    and str(c.chunk_id or c.parent_id or "") not in _merged_ids
++                ]
++                # Sort by score descending (funnel cosine similarity).
++                _candidates.sort(key=lambda c: float(c.score or 0.0), reverse=True)
++                for _cand in _candidates[:_need]:
++                    if not hasattr(_cand, "metadata") or _cand.metadata is None:
++                        _cand.metadata = {}
++                    _cand.metadata["quota_backfill"] = True
++                    merged.append(_cand)
++                    _merged_ids.add(str(_cand.chunk_id or _cand.parent_id or ""))
++                    _backfilled += 1
++            if _backfilled:
++                counts["corpus_quota_backfill"] = _backfilled
++
++        # ── Lane-aspect annotation (reranker scoring fairness) ────────────
++        # Stamp each candidate with the sub-query of its best-affinity lane so
++        # the reranker can score against the discovering aspect, not the full
++        # compound query. Only meaningful for multi-lane planned queries.
++        try:
++            _lane_query_map = {
++                lane.lane_id: (lane.query or lane.dense_text or "")
++                for lane in lanes  # type: ignore[possibly-undefined]
++            }
++            if _lane_query_map:
++                for _c in merged:
++                    _meta = getattr(_c, "metadata", None) or {}
++                    _best_lane = str(_meta.get("planned_max_affinity_lane") or "")
++                    _lq = _lane_query_map.get(_best_lane, "")
++                    if _lq:
++                        if _c.metadata is None:
++                            _c.metadata = {}
++                        _c.metadata["lane_query"] = _lq
++        except (NameError, AttributeError):
++            pass  # non-planned path or lanes not in scope
+         if (
+             temporal_enabled
+             and temporal_intent.active
+@@ -5777,12 +5879,21 @@ class RetrieverOrchestrator:
+             _add_timing("rerank", phase_started)
+         counts["ranked"] = len(ranked)
+ 
++        # Retrieval Layer v4 shadow flag (default OFF). When ON, the relative
++        # low-confidence gate below and the deterministic curation stage at the
++        # selection site replace their legacy absolute-threshold / MMR
++        # counterparts. When OFF, both paths stay byte-identical to today.
++        curation_v4_enabled = bool(
++            getattr(settings, "RETRIEVAL_CURATION_V4_ENABLED", False)
++        )
++
+         if _should_drop_low_confidence_rerank(
+             ranked,
+             rank_query,
+             rerank_enabled=rerank_enabled,
+             score_scale=settings.RERANKER_SCORE_SCALE,
+             low_confidence_threshold=settings.RERANKER_LOW_CONFIDENCE_THRESHOLD,
++            relative_gate=curation_v4_enabled,
+         ):
+             counts["low_confidence_dropped"] = len(ranked)
+             logger.info(
+@@ -5836,27 +5947,74 @@ class RetrieverOrchestrator:
+             if getattr(c, "doc_id", None)
+         }
+         counts["distinct_docs_in_pool"] = len(_pool_doc_ids)
+-        diversity = select_with_diversity(
+-            ranked,
+-            final_top_k=effective_final_k,
+-            intent=retrieval_intent,
+-            tier=effective_tier,
+-            multi_corpus=multi,
+-            selected_corpus_ids=corpus_ids or [],
+-            query=rank_query,
+-            anchor_query=query,
+-            two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
+-            anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
+-            anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
+-            expansion_lane_admission_threshold=(
+-                settings.EXPANSION_LANE_ADMISSION_THRESHOLD
+-            ),
+-            relationship_allocation_enabled=(
+-                settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
+-            ),
+-        )
+-        selection_diagnostics = dict(diversity.diagnostics or {})
+-        candidates = diversity.candidates
++        selection_added = 0
++        if curation_v4_enabled:
++            # Retrieval Layer v4 — deterministic curation stage (spec §2.5).
++            # Replaces the MMR black box with an explicit, fully-traced
++            # floor/coalesce/dedup/allocate/order pipeline. On ANY failure fall
++            # back to the legacy selector so the shadow can never break a query.
++            try:
++                from services.retriever.curation import build_packet
++
++                packet = build_packet(
++                    ranked,
++                    query=rank_query,
++                    intent=retrieval_intent,
++                    tier=effective_tier,
++                    final_top_k=effective_final_k,
++                    multi_corpus=multi,
++                    corpus_ids=corpus_ids or [],
++                )
++                candidates = packet.items
++                selection_diagnostics = dict(packet.diagnostics or {})
++                _alloc = selection_diagnostics.get("allocation") or {}
++                selection_added = (
++                    int(_alloc.get("side_seats") or 0)
++                    + int(_alloc.get("corpus_seats") or 0)
++                    + int(_alloc.get("graph_seats") or 0)
++                )
++                curation_v4_diagnostics = {
++                    "enabled": True,
++                    "packet_hash": packet.packet_hash,
++                    "final_count": len(candidates),
++                    "diagnostics": selection_diagnostics,
++                }
++                counts["curation_v4_used"] = 1
++            except Exception as exc:
++                logger.warning(
++                    "curation_v4 build_packet failed, falling back to legacy "
++                    "select_with_diversity: %s",
++                    exc,
++                )
++                curation_v4_enabled = False
++                curation_v4_diagnostics = {
++                    "enabled": True,
++                    "fallback": True,
++                    "error": str(exc),
++                }
++        if not curation_v4_enabled:
++            diversity = select_with_diversity(
++                ranked,
++                final_top_k=effective_final_k,
++                intent=retrieval_intent,
++                tier=effective_tier,
++                multi_corpus=multi,
++                selected_corpus_ids=corpus_ids or [],
++                query=rank_query,
++                anchor_query=query,
++                two_lane_anchoring_enabled=settings.TWO_LANE_ANCHORING_ENABLED,
++                anchor_lane_ratio=settings.ANCHOR_LANE_RATIO,
++                anchor_lane_admission_threshold=(settings.ANCHOR_LANE_ADMISSION_THRESHOLD),
++                expansion_lane_admission_threshold=(
++                    settings.EXPANSION_LANE_ADMISSION_THRESHOLD
++                ),
++                relationship_allocation_enabled=(
++                    settings.RELATIONSHIP_EVIDENCE_ALLOCATION_ENABLED
++                ),
++            )
++            selection_diagnostics = dict(diversity.diagnostics or {})
++            candidates = diversity.candidates
++            selection_added = diversity.added
+         # Q4 H4 — distinct-DOMAIN reserve: when the whole final cut shares
+         # the top chunk's domain on a breadth-shaped query, the best
+         # different-domain candidate takes the LAST slot. Rank-only; inert
+@@ -5878,7 +6036,7 @@ class RetrieverOrchestrator:
+                     _swapped_domain,
+                 )
+         counts["candidates"] = len(candidates)
+-        counts["diversity_added"] = diversity.added
++        counts["diversity_added"] = selection_added
+         if effective_tier == RetrievalTier.qdrant_only:
+             candidates, fast_grounding_dropped = _filter_fast_grounded_candidates(
+                 candidates,
+@@ -5920,12 +6078,12 @@ class RetrieverOrchestrator:
+             len(_pool_doc_ids),
+             len(ranked),
+             effective_final_k,
+-            diversity.added,
++            selection_added,
+         )
+         logger.info(
+             "final_top_k=%d diversity_added=%d (post-rerank cut, %d candidates available)",
+             effective_final_k,
+-            diversity.added,
++            selection_added,
+             len(ranked),
+         )
+ 
+diff --git a/backend/services/retriever/ranking_policy.py b/backend/services/retriever/ranking_policy.py
+index 96258bd..2750bcb 100644
+--- a/backend/services/retriever/ranking_policy.py
++++ b/backend/services/retriever/ranking_policy.py
+@@ -3,9 +3,11 @@
+ from __future__ import annotations
+ 
+ import re
+-from dataclasses import dataclass
++import statistics
++from dataclasses import dataclass, replace
+ from typing import Any
+ 
++from config import get_settings
+ from models.schemas import RetrievalTier, SourceChunk
+ from services.retriever.intent_policy import QueryNeed, RetrievalIntent
+ from services.retriever.evidence_allocation import (
+@@ -52,7 +54,10 @@ _GRAPH_GROUNDED_FLOOR_RATIO: float = 0.40
+ # SPECIFIC-intent post-MMR trim floor (ratio of top score). Deliberately
+ # stricter than _MAIN_FLOOR_RATIO: tangential cross-encoder scores cluster in
+ # the 0.25-0.5 band, genuinely relevant secondary passages score above it.
+-_SPECIFIC_FLOOR_RATIO: float = 0.5
++# Lowered 0.5 -> 0.35 (2026-07-29): 0.5 was starving specific queries to 2-3
++# chunks when the CE score distribution is tight (top ~0.6, bulk 0.4-0.55).
++# Now env-configurable via RERANK_SPECIFIC_FLOOR_RATIO; this is the fallback.
++_SPECIFIC_FLOOR_RATIO: float = 0.35
+ _CROSS_DOCUMENT_RELATIONSHIP_ATOM = "cross_document_relationship_evidence"
+ _PERSONALITY_FRAMEWORK_RE = re.compile(
+     r"\b("
+@@ -526,12 +531,15 @@ def _mmr_policy_for(
+         max_same_predicate = 999
+     elif tier == RetrievalTier.qdrant_mongo:
+         base_lambda = 0.65
+-        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else 0.85
++        # Env-configurable via RERANK_RELEVANCE_FLOOR_HYBRID (default 0.55).
++        # 0.85 starved hybrid queries to 2-3 chunks; 0.55 keeps relevant evidence.
++        _s = get_settings()
++        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else _s.RERANK_RELEVANCE_FLOOR_HYBRID
+         graph_reserve = 0
+         max_same_predicate = 999
+     else:
+         base_lambda = 0.55
+-        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else 0.80
++        relevance_floor = 0.35 if intent.need == QueryNeed.BROAD else _s.RERANK_RELEVANCE_FLOOR_GRAPH
+         graph_reserve = 2 if intent.need == QueryNeed.BROAD else 1
+         max_same_predicate = 3
+ 
+@@ -1332,6 +1340,21 @@ def select_with_diversity(
+     bounded = 0.0 <= top_score <= 1.0
+     rel_floor = max(_MAIN_ABS_FLOOR, top_score * _MAIN_FLOOR_RATIO) if bounded else 0.0
+ 
++    # --- Adaptive distribution-relative floor (production pattern) ---
++    # Instead of a fixed ratio of top score, compute mean - 0.5*std of the
++    # normalized relevance distribution. Tight clusters (all scores close)
++    # keep more chunks; spread distributions (one clear winner) keep fewer.
++    # The env-configured floor acts as an absolute minimum safety net.
++    _norm_scores = [relevance_by_idx.get(i, 0.0) for i in range(len(ranked))]
++    if len(_norm_scores) >= 3:
++        _mean = statistics.mean(_norm_scores)
++        _std = statistics.stdev(_norm_scores)
++        _adaptive = _mean - 0.5 * _std
++        # Bound: never below the env-configured floor, never above 0.95
++        _env_floor = policy.relevance_floor
++        _adaptive = max(_env_floor, min(0.95, _adaptive))
++        policy = replace(policy, relevance_floor=_adaptive)
++
+     chosen_idx: set[int] = set()
+     selected_indices: list[int] = []
+     selected_scores: dict[int, float] = {}
+@@ -1524,7 +1547,7 @@ def select_with_diversity(
+         and bounded
+         and selected_indices
+     ):
+-        specific_floor = max(_MAIN_ABS_FLOOR, top_score * _SPECIFIC_FLOOR_RATIO)
++        specific_floor = max(_MAIN_ABS_FLOOR, top_score * get_settings().RERANK_SPECIFIC_FLOOR_RATIO)
+         kept: list[int] = []
+         for idx in selected_indices:
+             if float(
+diff --git a/backend/services/storage/mongo_writer.py b/backend/services/storage/mongo_writer.py
+index b7a4173..8e39bb0 100644
+--- a/backend/services/storage/mongo_writer.py
++++ b/backend/services/storage/mongo_writer.py
+@@ -412,6 +412,9 @@ async def retire_document_derived_state(
+     tree_result = await db["summary_tree"].delete_many(
+         {"corpus_id": corpus_id, "doc_id": doc_id}
+     )
++    control_plane_counts = await _retire_control_plane_state(
++        db, {"corpus_id": corpus_id, "doc_id": doc_id}, reason="document_deleted"
++    )
+     queue_counts: dict[str, int] = {}
+     for collection_name in (
+         "source_parse_jobs",
+@@ -449,6 +452,54 @@ async def retire_document_derived_state(
+     return {
+         "summary_tree": int(getattr(tree_result, "deleted_count", 0) or 0),
+         **queue_counts,
++        **control_plane_counts,
++    }
++
++
++async def _retire_control_plane_state(
++    db: AsyncIOMotorDatabase,
++    scope: dict[str, Any],
++    *,
++    reason: str,
++) -> dict[str, int]:
++    """Project a deletion onto the control-plane ledger for `scope`.
++
++    The run status becomes `excluded` — exactly what the next artifact census
++    of a soft-deleted document would derive — instead of leaving a stale
++    `query_ready` row visible until the periodic recheck. Unconsumed outbox
++    intents are consumed so the reconciler never plans work for a tombstone.
++    Certificates are insert-only history and stay untouched: no proof path
++    trusts one without a live all-clear census.
++    """
++
++    from services.control_plane.ledger import (
++        OUTBOX_COLLECTION,
++        RUNS_COLLECTION,
++        RUN_STATUS_EXCLUDED,
++    )
++
++    now = datetime.utcnow()
++    runs_result = await db[RUNS_COLLECTION].update_many(
++        {**scope, "status": {"$ne": RUN_STATUS_EXCLUDED}},
++        {
++            "$set": {
++                "status": RUN_STATUS_EXCLUDED,
++                "certificate_id": None,
++                "proof": None,
++                "last_intake_reason": reason,
++                "updated_at": now,
++            }
++        },
++    )
++    outbox_result = await db[OUTBOX_COLLECTION].update_many(
++        {**scope, "consumed_at": None},
++        {"$set": {"consumed_at": now, "reason": reason, "updated_at": now}},
++    )
++    return {
++        "ingestion_runs": int(getattr(runs_result, "modified_count", 0) or 0),
++        "control_plane_outbox": int(
++            getattr(outbox_result, "modified_count", 0) or 0
++        ),
+     }
+ 
+ 
+@@ -461,6 +512,9 @@ async def retire_corpus_derived_state(
+ 
+     now = datetime.utcnow()
+     tree_result = await db["summary_tree"].delete_many({"corpus_id": corpus_id})
++    control_plane_counts = await _retire_control_plane_state(
++        db, {"corpus_id": corpus_id}, reason="corpus_deleted"
++    )
+     queue_counts: dict[str, int] = {}
+     for collection_name in (
+         "source_parse_jobs",
+@@ -498,6 +552,7 @@ async def retire_corpus_derived_state(
+     return {
+         "summary_tree": int(getattr(tree_result, "deleted_count", 0) or 0),
+         **queue_counts,
++        **control_plane_counts,
+     }
+ 
+ 
+diff --git a/backend/services/storage/qdrant_writer.py b/backend/services/storage/qdrant_writer.py
+index bc52074..e51a11e 100644
+--- a/backend/services/storage/qdrant_writer.py
++++ b/backend/services/storage/qdrant_writer.py
+@@ -258,11 +258,15 @@ _ALIAS_PREFIX = "corpus_"  # keeps aliases namespaced away from user-typed strin
+ _SLUG_MAX_LEN = 40
+ 
+ 
+-def _slugify_name(name: str) -> str:
++def _slugify_corpus_name(name: str) -> str:
+     """Make a Qdrant-alias-safe slug from a corpus name. Lowercase, alnum+underscore
+     only, collapsed runs, length-capped. Empty / non-ASCII-only names collapse to
+     'unnamed' so we always have a usable slug (uniqueness handled by `[:cid8]`
+     suffix in `_alias_for_corpus`).
++
++    Renamed from `_slugify_name` to avoid a collision with the canonical-entity
++    slug helper in services.extraction.canonical — these two functions have
++    different semantics (corpus slug vs entity slug).
+     """
+     if not name:
+         return "unnamed"
+@@ -279,7 +283,7 @@ def _alias_for_corpus(corpus_id: str, name: str, kind: str) -> str:
+     """
+     if kind not in _VALID_KINDS:
+         raise ValueError(f"Invalid Qdrant kind {kind!r}")
+-    slug = _slugify_name(name)
++    slug = _slugify_corpus_name(name)
+     return f"{_ALIAS_PREFIX}{slug}_{corpus_id[:8]}_{kind}"
+ 
+ 
+diff --git a/backend/tests/conftest.py b/backend/tests/conftest.py
+index cddb971..a91874e 100644
+--- a/backend/tests/conftest.py
++++ b/backend/tests/conftest.py
+@@ -3,8 +3,21 @@ Registers the `integration` marker and auto-skips integration tests unless
+ the user opts in with `pytest -m integration`.
+ """
+ 
++import os
++from pathlib import Path
++
+ import pytest
+ 
++# Load the repo-root .env BEFORE any Settings import.  config.py uses
++# env_file="../.env" (relative to CWD), which only resolves when pytest is
++# invoked from backend/.  Loading explicitly makes the suite CWD-independent.
++_REPO_ROOT = Path(__file__).resolve().parents[2]
++try:
++    from dotenv import load_dotenv
++    load_dotenv(_REPO_ROOT / ".env", override=False)
++except ImportError:
++    pass  # dotenv not installed; rely on ambient env vars
++
+ 
+ def pytest_configure(config: pytest.Config) -> None:
+     config.addinivalue_line(
+diff --git a/backend/tests/test_extraction_jobs.py b/backend/tests/test_extraction_jobs.py
+index b7110bd..7782edb 100644
+--- a/backend/tests/test_extraction_jobs.py
++++ b/backend/tests/test_extraction_jobs.py
+@@ -171,6 +171,16 @@ def test_extraction_status_classifies_missing_as_queued():
+     assert classify_extraction_status(None) == ("queued", "missing_extraction")
+ 
+ 
++def test_extraction_status_classifies_delete_tombstones_as_missing():
++    """Delete → re-ingest of the same content-derived doc_id resurrects the
++    document over tombstoned ghost rows. They must classify as never-extracted
++    (clean requeue), not fall through to a phantom "failed"/"extraction_error"."""
++    for status in ("deleted", "deleting"):
++        assert classify_extraction_status(
++            {"status": status, "deleted_at": "now"}
++        ) == ("queued", "missing_extraction")
++
++
+ def test_extraction_status_classifies_ok_as_succeeded():
+     assert classify_extraction_status({"status": "ok"}) == ("succeeded", "ghost_b_ok")
+ 
+diff --git a/backend/tests/test_frame_extractor.py b/backend/tests/test_frame_extractor.py
+index 6f9e1a2..39fd5bb 100644
+--- a/backend/tests/test_frame_extractor.py
++++ b/backend/tests/test_frame_extractor.py
+@@ -218,3 +218,72 @@ def test_every_frame_counter_is_canonical():
+         "frame_bibliographic_appositive",
+     ):
+         assert key in ALL_COUNTER_KEYS, f"{key} not published"
++
++
++# ---------------------------------------------------------------------------
++# P2A: Open-relation lane (unmapped predicates preserved, not dropped).
++# ---------------------------------------------------------------------------
++
++
++class TestOpenRelationLane:
++    """Frames whose predicate the resolver cannot map are emitted with
++    predicate=None, mapping_status='UNMAPPED', graph_eligible=False
++    rather than being silently discarded."""
++
++    def test_unmapped_verb_emits_open_relation(self, extractor):
++        """A verb with no ontology mapping produces predicate=None."""
++        text = "Acme pioneered the technology."
++        spans = [
++            EntitySpan("Acme", 0, 4, "Organization"),
++            EntitySpan("technology", 19, 29, "Concept"),
++        ]
++        counters = new_counters()
++        trace: list[dict] = []
++        triples = extractor.extract(
++            text=text, entities=spans,
++            suppression_counters=counters, trace=trace,
++        )
++        # The frame should survive (not be dropped)
++        assert len(triples) == 1
++        t = triples[0]
++        assert t.predicate is None  # no canonical mapping
++        assert t.predicate_lemma == "pioneer"  # bare verb lemma preserved
++        assert t.predicate_surface == "pioneered"  # surface form preserved
++        assert t.mapping_status == "UNMAPPED"
++        assert t.graph_eligible is False
++        assert t.is_graph_edge is False  # must never become a graph edge
++        assert t.subject_surface == "Acme"
++        assert t.object_surface == "technology"
++        # Counter still incremented (tracks volume of unmapped frames)
++        assert counters["frame_predicate_unnamed"] >= 1
++
++    def test_unmapped_trace_shows_survived(self, extractor):
++        """Trace entry for an unmapped frame has died_at=None."""
++        text = "The institute championed the method."
++        spans = [
++            EntitySpan("institute", 4, 13, "Organization"),
++            EntitySpan("method", 29, 35, "Method"),
++        ]
++        trace: list[dict] = []
++        triples = extractor.extract(
++            text=text, entities=spans, trace=trace,
++        )
++        # Find the trace entry for our surviving frame
++        survived = [e for e in trace if e.get("died_at") is None]
++        assert len(survived) >= 1
++        entry = survived[0]
++        assert "UNMAPPED" in entry.get("emitted", "")
++
++    def test_mapped_verb_still_resolves(self, extractor):
++        """Verbs WITH ontology mappings still produce canonical predicates."""
++        text = "Microsoft acquired GitHub."
++        spans = [
++            EntitySpan("Microsoft", 0, 9, "Organization"),
++            EntitySpan("GitHub", 19, 25, "Software"),
++        ]
++        triples = extractor.extract(text=text, entities=spans)
++        assert len(triples) == 1
++        assert triples[0].predicate == "owns"  # acquire -> owns
++        assert triples[0].predicate is not None  # NOT unmapped
++        assert triples[0].mapping_status == "MAPPED"
++        assert triples[0].graph_eligible is True
+diff --git a/backend/tests/test_graph_promotion_jobs.py b/backend/tests/test_graph_promotion_jobs.py
+index 7a2f401..c301c00 100644
+--- a/backend/tests/test_graph_promotion_jobs.py
++++ b/backend/tests/test_graph_promotion_jobs.py
+@@ -352,6 +352,38 @@ async def test_mark_doc_extractions_promoted_stamps_rows_and_jobs():
+     assert job_set["graph_promotion_result"]["staged_results_written"] == 3
+ 
+ 
++@pytest.mark.asyncio
++async def test_mark_doc_extractions_promoted_stamps_ghost_commit_last():
++    """The census derives promotion state from ghost rows' promoted_at, so the
++    ghost stamp is the commit point and must land after the extraction_jobs
++    update. A crash between the writes then still replans promotion and the
++    rerun converges; the reverse order strands jobs at "succeeded" forever."""
++    order: list[str] = []
++
++    class _OrderedCollection(_FakeUpdateCollection):
++        def __init__(self, name, modified_count=0):
++            super().__init__(modified_count=modified_count)
++            self.name = name
++
++        async def update_many(self, query, update):
++            order.append(self.name)
++            return await super().update_many(query, update)
++
++    db = _FakeDb(
++        {
++            "ghost_b_extractions": _OrderedCollection("ghost_b_extractions", 3),
++            "extraction_jobs": _OrderedCollection("extraction_jobs", 2),
++        }
++    )
++
++    result = await mark_doc_extractions_promoted(
++        db, corpus_id="corpus-1", doc_id="doc-1"
++    )
++
++    assert result == {"ghost_b_rows_promoted": 3, "extraction_jobs_promoted": 2}
++    assert order == ["extraction_jobs", "ghost_b_extractions"]
++
++
+ @pytest.mark.asyncio
+ async def test_run_graph_promotion_jobs_marks_partial_flush_promoted(monkeypatch):
+     jobs = _FakeQueuedJobsCollection(
+diff --git a/backend/tests/test_ingest_verify_graph_indexes.py b/backend/tests/test_ingest_verify_graph_indexes.py
+index 5d289ad..cf45e97 100644
+--- a/backend/tests/test_ingest_verify_graph_indexes.py
++++ b/backend/tests/test_ingest_verify_graph_indexes.py
+@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
+ import pytest
+ 
+ from services.ingestion import verify
++from services.storage.record_status import active_record_clause
+ 
+ 
+ class _Cursor:
+@@ -112,7 +113,12 @@ async def test_expected_child_count_includes_noisy_chunks_for_qdrant():
+     )
+ 
+     assert count == 2
+-    assert "$or" not in db.chunks.query
++    # Query = {"$and": [base, active-record clause]}: no noisy-kind exclusion
++    # in the base, but tombstoned chunks never count (delete → re-ingest of
++    # the same content-derived doc_id must not over-expect Qdrant points).
++    base, active = db.chunks.query["$and"]
++    assert "$or" not in base
++    assert active == active_record_clause()
+ 
+ 
+ @pytest.mark.asyncio
+@@ -144,7 +150,9 @@ async def test_expected_child_count_excludes_noisy_chunks_for_neo4j():
+     )
+ 
+     assert count == 1
+-    assert "$or" in db.chunks.query
++    base, active = db.chunks.query["$and"]
++    assert "$or" in base
++    assert active == active_record_clause()
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/backend/tests/test_neo4j_writer_deadlock_retry.py b/backend/tests/test_neo4j_writer_deadlock_retry.py
+index e4216e4..e4a1762 100644
+--- a/backend/tests/test_neo4j_writer_deadlock_retry.py
++++ b/backend/tests/test_neo4j_writer_deadlock_retry.py
+@@ -38,6 +38,40 @@ async def test_write_document_graph_retries_deadlock(monkeypatch):
+     assert sleeps == [neo4j_writer.GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS]
+ 
+ 
++@pytest.mark.asyncio
++async def test_write_document_graph_retries_memory_pool_oom(monkeypatch):
++    """2026-07-19 regression: Neo4j classifies memory-pool exhaustion as a
++    TransientError, but only deadlocks were retried — OOM raised straight
++    through on attempt 1 and burned outer batch attempts with no damping."""
++    calls = 0
++    sleeps: list[float] = []
++
++    async def fake_write_once(*args, **kwargs):
++        nonlocal calls
++        calls += 1
++        if calls == 1:
++            raise _transient(
++                "Neo.TransientError.General.MemoryPoolOutOfMemoryError"
++            )
++
++    async def fake_sleep(delay: float):
++        sleeps.append(delay)
++
++    monkeypatch.setattr(neo4j_writer, "_write_document_graph_once", fake_write_once)
++    monkeypatch.setattr(neo4j_writer.asyncio, "sleep", fake_sleep)
++
++    await neo4j_writer.write_document_graph(
++        driver=object(),
++        doc_id="doc-1",
++        corpus_id="corpus-1",
++        extraction_results=[],
++    )
++
++    assert calls == 2
++    # Memory pressure backs off longer than a deadlock retry.
++    assert sleeps == [neo4j_writer.GRAPH_WRITE_MEMORY_BACKOFF_SECONDS]
++
++
+ @pytest.mark.asyncio
+ async def test_write_document_graph_does_not_retry_non_deadlock_transient(monkeypatch):
+     calls = 0
+diff --git a/backend/tests/test_polymath_mcp_ingest_tools.py b/backend/tests/test_polymath_mcp_ingest_tools.py
+index 0a81b43..2fd335e 100644
+--- a/backend/tests/test_polymath_mcp_ingest_tools.py
++++ b/backend/tests/test_polymath_mcp_ingest_tools.py
+@@ -218,7 +218,11 @@ async def test_plan_ingestion_transcript_defaults_to_deep_summary():
+     assert result["duplicate_guard"]["status"] == "clear"
+     assert result["corpus_action"]["action"] == "create_corpus"
+     assert result["corpus_action"]["args"]["preset"] == "deep"
+-    assert "polymath_get_ingest_status until complete" in result["call_sequence"]
++    assert any(
++        step.startswith("polymath_get_ingest_status until readiness.query_ready is true")
++        for step in result["call_sequence"]
++    )
++    assert result["readiness_rule"]
+     assert result["verification"]["negative_query"]
+ 
+ 
+@@ -814,6 +818,12 @@ async def test_get_ingest_status_translates_complete(system_user):
+     assert result["chunk_count"] == 42
+     assert result["parent_count"] == 5
+     assert result["write_state"]["mongo_written"] is True
++    # Control Plane V2 — completion is a certificate-backed proof, never a
++    # write_state translation. With no db attached the proof fails closed.
++    assert result["run_id"] and result["run_id"].startswith("run_")
++    assert result["readiness"]["query_ready"] is False
++    assert result["readiness"]["readiness_source"] == "unavailable"
++    assert "never infer completion" in result["agent_rule"]
+ 
+ 
+ @pytest.mark.asyncio
+@@ -834,6 +844,105 @@ async def test_get_ingest_status_translates_failed(system_user):
+     assert result["error"] == "OOM during embedding"
+ 
+ 
++@pytest.mark.asyncio
++async def test_verify_ingestion_uses_document_scoped_receipts(system_user):
++    doc = {
++        "doc_id": "d1",
++        "corpus_id": "c1",
++        "filename": "paper.pdf",
++        "ingest_stage": "fully_enriched",
++        "write_state": {
++            "mongo_written": True,
++            "qdrant_written": True,
++            "summaries_indexed": True,
++            "neo4j_written": True,
++            "verified": True,
++        },
++        "chunk_count": 1,
++        "parent_count": 1,
++        "ingestion_config": {"use_neo4j": True, "chunk_summarization": True},
++    }
++    bundle = {
++        "document": doc,
++        "ghost_rows": [
++            {
++                "chunk_id": "ch1",
++                "status": "ok",
++                "provider": "runpod_local_extraction",
++                "model": "urchade/gliner_medium-v2.1",
++                "schema_mode": "local_extraction.v1",
++                "provider_card": {
++                    "provider": "runpod_flash",
++                    "endpoint": "endpoint-1",
++                    "account": "primary",
++                    "wire_contract": "polymath.runpod_local_extraction.v1",
++                    "transport_mode": "queue_based",
++                },
++            }
++        ],
++        "parent_rows": [
++            {
++                "parent_id": "p1",
++                "summary_provider": "deepseek",
++                "summary_model": "deepseek-v4-flash",
++                "summary_receipt": {"local_compute": False},
++            }
++        ],
++        "provider_metrics": [],
++        "graph_job": {"status": "done", "facts_written": 9},
++    }
++    certificate_proof = {
++        "schema_version": "certificate.v1",
++        "readiness_source": "certificate.v1",
++        "corpus_id": "c1",
++        "doc_id": "d1",
++        "query_ready": True,
++        "certificate_id": "cert_test123",
++        "missing": {},
++        "missing_counts": {},
++        "blocking": [],
++        "recovery": {"jobs_created": 0, "next_retry_at": None},
++        "observation_errors": [],
++    }
++    with (
++        patch.object(
++            mcp_tools.ingestion_service,
++            "get_ingestion_evidence",
++            new=AsyncMock(return_value=bundle),
++        ),
++        patch.object(
++            mcp_tools,
++            "_doc_readiness_payload",
++            new=AsyncMock(return_value=certificate_proof),
++        ),
++    ):
++        result = await mcp_tools.polymath_verify_ingestion(doc_id="d1")
++
++    # query_ready mirrors ONLY the certificate-backed proof (Hermes fix).
++    assert result["query_ready"] is True
++    assert result["readiness"]["certificate_id"] == "cert_test123"
++    route = result["execution"]["extraction"]["routes"][0]
++    assert route["execution_location"] == "remote_runpod_serverless"
++    assert route["transport_mode"] == "queue_based"
++    assert result["execution"]["summaries"]["routes"][0]["execution_location"] == "external_api"
++    assert result["execution"]["embeddings"]["execution_location"] == "unknown"
++    assert result["graph_promotion"]["status"] == "done"
++
++
++@pytest.mark.asyncio
++async def test_verify_ingestion_fails_closed_when_identity_is_missing(system_user):
++    with patch.object(
++        mcp_tools.ingestion_service,
++        "get_ingestion_evidence",
++        new=AsyncMock(return_value=None),
++    ):
++        result = await mcp_tools.polymath_verify_ingestion(doc_id="missing")
++    assert result["status"] == "not_found"
++    assert result["query_ready"] is False
++    assert result["readiness"]["readiness_source"] == "unavailable"
++    assert result["safe_claims"] == []
++
++
+ # ─── polymath_delete_document ─────────────────────────────────────────────
+ 
+ 
+diff --git a/backend/tests/test_retrieval_readiness.py b/backend/tests/test_retrieval_readiness.py
+index a150fa8..a5e2408 100644
+--- a/backend/tests/test_retrieval_readiness.py
++++ b/backend/tests/test_retrieval_readiness.py
+@@ -23,9 +23,18 @@ class _AsyncCursor:
+ class _Collection:
+     def __init__(self, rows):
+         self.rows = list(rows)
+-
+-    def find(self, *_args, **_kwargs):
+-        return _AsyncCursor(self.rows)
++        self.find_queries = []
++
++    def find(self, query=None, *_args, **_kwargs):
++        self.find_queries.append(query)
++        rows = self.rows
++        if query == retrieval_readiness.active_record_clause():
++            rows = [
++                row
++                for row in rows
++                if row.get("status") in (None, "active")
++            ]
++        return _AsyncCursor(rows)
+ 
+     async def find_one(self, query, *_args, **_kwargs):
+         cid = query.get("corpus_id")
+@@ -125,6 +134,52 @@ async def test_startup_repair_uses_each_corpus_dimension_and_neo4j_once(monkeypa
+     assert qdrant_calls[0]["corpus_name"] == "Corpus One"
+ 
+ 
++@pytest.mark.asyncio
++async def test_startup_repair_never_recreates_deleted_corpus_collections(monkeypatch):
++    qdrant_calls: list[str] = []
++
++    async def fake_ensure_collections(client, corpus_id, dim=1024, *, corpus_name=None):
++        qdrant_calls.append(corpus_id)
++
++    monkeypatch.setattr(
++        retrieval_readiness,
++        "ensure_collections_for_corpus",
++        fake_ensure_collections,
++    )
++    db = _Db(
++        [
++            {"corpus_id": "legacy-active", "default_ingestion_config": {}},
++            {
++                "corpus_id": "explicit-active",
++                "status": "active",
++                "default_ingestion_config": {},
++            },
++            {
++                "corpus_id": "being-deleted",
++                "status": "deleting",
++                "default_ingestion_config": {},
++            },
++            {
++                "corpus_id": "already-deleted",
++                "status": "deleted",
++                "default_ingestion_config": {},
++            },
++        ]
++    )
++
++    report = await retrieval_readiness.repair_retrieval_readiness_for_all_corpora(
++        db=db,
++        qdrant_client=object(),
++        neo4j_driver=None,
++        neo4j_enabled=False,
++        default_dim=1024,
++    )
++
++    assert db.corpora.find_queries == [retrieval_readiness.active_record_clause()]
++    assert qdrant_calls == ["legacy-active", "explicit-active"]
++    assert report["scanned"] == 2
++
++
+ @pytest.mark.asyncio
+ async def test_ingest_readiness_reports_missing_required_neo4j(monkeypatch):
+     async def fake_ensure_collections(*_args, **_kwargs):
+diff --git a/backend/tests/test_runpod_local_extraction.py b/backend/tests/test_runpod_local_extraction.py
+index ea9c2c1..0f0cf6b 100644
+--- a/backend/tests/test_runpod_local_extraction.py
++++ b/backend/tests/test_runpod_local_extraction.py
+@@ -329,6 +329,8 @@ async def test_named_account_pinned_endpoint_and_local_compilation(
+     assert result.relations == []
+     assert result.provider_card["endpoint"] == "greenendpoint"
+     assert result.provider_card["account"] == "primary"
++    assert result.provider_card["transport_mode"] == "queue_based"
++    assert result.provider_card["execution_location"] == "remote_runpod_serverless"
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/backend/tests/test_storage_lifecycle.py b/backend/tests/test_storage_lifecycle.py
+index c93d030..8944a3d 100644
+--- a/backend/tests/test_storage_lifecycle.py
++++ b/backend/tests/test_storage_lifecycle.py
+@@ -156,6 +156,8 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
+         "summary_jobs",
+         "graph_promotion_jobs",
+         "ingest_batch_items",
++        "ingestion_runs",
++        "control_plane_outbox",
+     ]
+     db = _FakeDb({name: _FakeCollection() for name in names})
+ 
+@@ -168,7 +170,7 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
+     assert db["summary_tree"].delete_many_calls == [
+         {"corpus_id": "corpus-1", "doc_id": "doc-1"}
+     ]
+-    for name in names[1:-1]:
++    for name in names[1:6]:
+         query, update = db[name].update_many_calls[0]
+         assert query == {"corpus_id": "corpus-1", "doc_id": "doc-1"}
+         assert update["$set"]["status"] == "superseded"
+@@ -177,6 +179,15 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
+     batch_query, batch_update = db["ingest_batch_items"].update_many_calls[0]
+     assert batch_query == {"corpus_id": "corpus-1", "doc_id": "doc-1"}
+     assert batch_update["$set"]["document_deleted"] is True
++    # Control-plane ledger: the run row is excluded and the outbox intent
++    # consumed so a deleted doc never lingers as query_ready/actionable.
++    run_query, run_update = db["ingestion_runs"].update_many_calls[0]
++    assert run_query["corpus_id"] == "corpus-1" and run_query["doc_id"] == "doc-1"
++    assert run_update["$set"]["status"] == "excluded"
++    assert run_update["$set"]["certificate_id"] is None
++    outbox_query, outbox_update = db["control_plane_outbox"].update_many_calls[0]
++    assert outbox_query["consumed_at"] is None
++    assert outbox_update["$set"]["reason"] == "document_deleted"
+     assert result["summary_tree"] == 0
+ 
+ 
+@@ -190,13 +201,15 @@ async def test_retire_corpus_derived_state_clears_tree_and_retires_all_jobs():
+         "summary_jobs",
+         "graph_promotion_jobs",
+         "ingest_batch_items",
++        "ingestion_runs",
++        "control_plane_outbox",
+     ]
+     db = _FakeDb({name: _FakeCollection() for name in names})
+ 
+     await retire_corpus_derived_state(db, corpus_id="corpus-1")
+ 
+     assert db["summary_tree"].delete_many_calls == [{"corpus_id": "corpus-1"}]
+-    for name in names[1:-1]:
++    for name in names[1:6]:
+         query, update = db[name].update_many_calls[0]
+         assert query == {"corpus_id": "corpus-1", "status": {"$ne": "superseded"}}
+         assert update["$set"]["status"] == "superseded"
+@@ -204,6 +217,12 @@ async def test_retire_corpus_derived_state_clears_tree_and_retires_all_jobs():
+     assert db["ingest_batch_items"].update_many_calls[0][0] == {
+         "corpus_id": "corpus-1"
+     }
++    run_query, run_update = db["ingestion_runs"].update_many_calls[0]
++    assert run_query["corpus_id"] == "corpus-1"
++    assert run_update["$set"]["status"] == "excluded"
++    outbox_query, outbox_update = db["control_plane_outbox"].update_many_calls[0]
++    assert outbox_query == {"corpus_id": "corpus-1", "consumed_at": None}
++    assert outbox_update["$set"]["reason"] == "corpus_deleted"
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/config/ontology.yaml b/config/ontology.yaml
+index a3741f1..bb953dc 100644
+--- a/config/ontology.yaml
++++ b/config/ontology.yaml
+@@ -40,6 +40,8 @@ predicates:
+       - [Concept, Method]
+       - [Concept, Software]
+       - [Artifact, Software]
++      - [Method, Method]       # owner-ratified 2026-07-29
++      - [Person, Concept]      # owner-ratified 2026-07-29
+   supports:
+     allowed_pairs:
+       - [Software, Method]
+@@ -100,7 +102,7 @@ predicates:
+       - [Organization, Document]
+   depends_on:
+     allowed_pairs:
+-      - [Software, Software]
++      - [Software, Software]   # owner-ratified 2026-07-29 (confirmed existing)
+       - [Software, Artifact]
+       - [Software, Standard]
+       - [Method, Software]
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 6937c12..9ec5129 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -176,7 +176,11 @@ function App() {
+   }, [corpora]);
+ 
+   const handleSend = useCallback(
+-    async (message: string, attachedFiles?: File[]) => {
++    async (
++      message: string,
++      attachedFiles?: File[],
++      opts?: { research?: boolean },
++    ) => {
+       console.log("handleSend triggered");
+       const chat = useChatStore.getState();
+       const settings = useSettingsStore.getState();
+@@ -267,6 +271,47 @@ function App() {
+       };
+       chat.addMessage(cid, userMessage);
+ 
++      // Deep Research — one-shot composer mode. Instead of the normal SSE
++      // chat stream, spin up a durable research job and drop a progress
++      // card into the message stream. The card (ResearchCard) polls the
++      // job + events endpoints itself and resolves to artifact downloads
++      // when the pipeline finishes. We deliberately do NOT start streaming.
++      if (opts?.research) {
++        // The stream scaffolding above (controller + startStreaming) was
++        // set up before we knew this was a research turn; tear it down so
++        // the UI doesn't sit in a perpetual "processing" state.
++        activeChatRequestRef.current = null;
++        chat.stopStreaming();
++        try {
++          const job = await api.createResearchJob({
++            question: message,
++            corpus_ids: requestCorpusIds,
++            mode: "standard",
++            metadata: { conversation_id: cid },
++          });
++          const researchMessage: ChatMessage = {
++            id: crypto.randomUUID(),
++            role: "assistant",
++            content: "",
++            created_at: new Date().toISOString(),
++            metadata: {
++              message_kind: "research_job",
++              research_job_id: job.job_id,
++              research_status: job.status,
++              corpus_ids: requestCorpusIds,
++            },
++          };
++          chat.addMessage(cid, researchMessage);
++        } catch (err) {
++          chat.setError(
++            `Failed to start Deep Research: ${
++              err instanceof Error ? err.message : String(err)
++            }`,
++          );
++        }
++        return;
++      }
++
+       const retrievalConfig =
+         settings.retrievalTier === "qdrant_only"
+           ? {
+diff --git a/frontend/src/components/chat/ChatInput.tsx b/frontend/src/components/chat/ChatInput.tsx
+index 739f8e4..74caba8 100644
+--- a/frontend/src/components/chat/ChatInput.tsx
++++ b/frontend/src/components/chat/ChatInput.tsx
+@@ -15,6 +15,7 @@ import {
+   Wrench,
+   Sparkles,
+   SlidersHorizontal,
++  Telescope,
+ } from "lucide-react";
+ import { ToggleBar } from "./ToggleBar";
+ import { ModelSelector } from "./ModelSelector";
+@@ -67,7 +68,11 @@ async function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
+ }
+ 
+ interface ChatInputProps {
+-  onSend: (message: string, attachments?: File[]) => void;
++  onSend: (
++    message: string,
++    attachments?: File[],
++    opts?: { research?: boolean },
++  ) => void;
+   isLoading?: boolean;
+   placeholder?: string;
+   tokenCount?: { current: number; max: number };
+@@ -112,6 +117,12 @@ export function ChatInput({
+ 
+   const [input, setInput] = useState("");
+   const [attachments, setAttachments] = useState<File[]>([]);
++  // Deep Research is a ONE-SHOT composer mode: arming it redirects the next
++  // submission to the durable research pipeline, then auto-disarms. It is
++  // intentionally local state (not settingsStore) so it never survives a
++  // reload or leaks into another conversation.
++  const [researchArmed, setResearchArmed] = useState(false);
++  const [researchWarning, setResearchWarning] = useState<string | null>(null);
+ 
+   // Phase 29 — vision-model guardrail. If the user has attached at least
+   // one image and the selected model can't process images, we surface a
+@@ -262,6 +273,7 @@ export function ChatInput({
+   ];
+ 
+   const activeModeChips = [
++    researchArmed ? "Research" : null,
+     hydeEnabled ? "HyDE" : null,
+     reasoningCascadeEnabled ? "Reason" : null,
+     webSearchEnabled ? "Web" : null,
+@@ -317,8 +329,20 @@ export function ChatInput({
+   const handleSubmit = useCallback(() => {
+     if (!input.trim() && attachments.length === 0) return;
+     if (isLoading) return;
+-
+-    onSend(input.trim(), attachments.length > 0 ? attachments : undefined);
++    // Deep Research is corpus-only in v1: staged attachments would be silently
++    // dropped, so block the turn and tell the user instead.
++    if (researchArmed && attachments.length > 0) {
++      setResearchWarning(
++        "Deep Research is corpus-only — remove attachments to research, or send them as a normal chat turn.",
++      );
++      return;
++    }
++    setResearchWarning(null);
++    onSend(input.trim(), attachments.length > 0 ? attachments : undefined, {
++      research: researchArmed,
++    });
++    // One-shot: disarm the moment the submission fires.
++    setResearchArmed(false);
+     setInput("");
+     setAttachments([]);
+ 
+@@ -326,7 +350,7 @@ export function ChatInput({
+     if (textareaRef.current) {
+       textareaRef.current.style.height = "auto";
+     }
+-  }, [input, attachments, isLoading, onSend]);
++  }, [input, attachments, isLoading, onSend, researchArmed]);
+ 
+   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+     // Phase 24 — slash popover keyboard control. When the popover is open,
+@@ -473,6 +497,60 @@ export function ChatInput({
+                 {activeFeatureCount} active
+               </span>
+             </div>
++
++            {/* Core modes — one-shot submission redirects, distinct from the
++                persistent query enhancements in ToggleBar below. */}
++            <div className="mb-2 rounded-xl bg-black/15 p-2">
++              <div className="mb-1.5 px-1 text-[9px] font-bold uppercase tracking-[0.22em] text-content-tertiary">
++                Core Modes
++              </div>
++              <button
++                type="button"
++                data-testid="composer-research-toggle"
++                onClick={() => {
++                  setResearchArmed((armed) => !armed);
++                  setResearchWarning(null);
++                }}
++                aria-pressed={researchArmed}
++                className={`flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left !transition-colors !duration-150 ${
++                  researchArmed
++                    ? "border-sky-400/40 bg-sky-400/10"
++                    : "border-white/10 bg-transparent hover:border-white/25"
++                }`}
++              >
++                <span className="flex min-w-0 flex-col gap-0.5">
++                  <span
++                    className={`text-[11px] font-bold uppercase tracking-widest ${
++                      researchArmed ? "text-sky-200" : "text-content-primary"
++                    }`}
++                  >
++                    Deep Research
++                  </span>
++                  <span className="text-[10px] text-content-tertiary">
++                    Build a cited report from your corpus — next message only
++                  </span>
++                </span>
++                <span
++                  className={`flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 !transition-colors !duration-150 ${
++                    researchArmed
++                      ? "justify-end border-sky-400/50 bg-sky-400/30"
++                      : "justify-start border-white/20 bg-black/30"
++                  }`}
++                >
++                  <span
++                    className={`h-3.5 w-3.5 rounded-full !transition-colors !duration-150 ${
++                      researchArmed ? "bg-sky-300" : "bg-content-tertiary"
++                    }`}
++                  />
++                </span>
++              </button>
++              {researchArmed && (
++                <div className="mt-1.5 px-1 text-[9px] font-bold uppercase tracking-widest text-sky-300">
++                  Armed — next message becomes a research job
++                </div>
++              )}
++            </div>
++
+             <ToggleBar className="rounded-xl bg-black/15 p-2" />
+           </div>
+         )}
+@@ -518,6 +596,23 @@ export function ChatInput({
+           </div>
+         )}
+ 
++        {/* Deep Research armed warning — e.g. attachments staged while
++            the one-shot research mode is active. Rendered alongside the
++            vision-mismatch warning so the user sees the block reason. */}
++        {researchWarning && (
++          <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2 rounded-none border border-sky-700/50 bg-sky-900/15 text-sky-300">
++            <StatusTag tag="WRN" tone="wrn" />
++            <div className="text-[10px] font-mono tracking-wider leading-snug">
++              <div className="font-bold uppercase mb-0.5">
++                Deep Research
++              </div>
++              <div className="normal-case font-normal text-sky-200/80">
++                {researchWarning}
++              </div>
++            </div>
++          </div>
++        )}
++
+         {/* Phase 29 — vision-model warning. Renders ONLY when the
+             user has attached at least one image and the selected
+             model can't process images. Surfaces the mismatch BEFORE
+@@ -686,7 +781,11 @@ export function ChatInput({
+                 setInput(e.target.value)
+               }
+               onKeyDown={handleKeyDown}
+-              placeholder={placeholder}
++              placeholder={
++                researchArmed
++                  ? "Describe your research question..."
++                  : placeholder
++              }
+               disabled={isLoading}
+               rows={1}
+               className="
+@@ -730,13 +829,24 @@ export function ChatInput({
+                 }
+                 disabled:opacity-50 disabled:cursor-not-allowed
+               `}
+-              title={hasContent ? "Execute Query" : "Awaiting Input..."}
++              title={
++                researchArmed
++                  ? "Launch Deep Research job"
++                  : hasContent
++                    ? "Execute Query"
++                    : "Awaiting Input..."
++              }
+             >
+               {isLoading ? (
+                 <>
+                   <StatusTag tag="GEN" tone="gen" />
+                   <span className="hidden sm:inline">PROCESS...</span>
+                 </>
++              ) : researchArmed ? (
++                <>
++                  <Telescope className="w-3.5 h-3.5" />
++                  <span className="hidden sm:inline">RESEARCH</span>
++                </>
+               ) : (
+                 <>
+                   <CornerDownLeft className="w-3.5 h-3.5" />
+diff --git a/frontend/src/components/chat/MessageBubble.tsx b/frontend/src/components/chat/MessageBubble.tsx
+index cc62605..c56d92b 100644
+--- a/frontend/src/components/chat/MessageBubble.tsx
++++ b/frontend/src/components/chat/MessageBubble.tsx
+@@ -15,6 +15,7 @@ import type { TraceEvent } from "../../types";
+ import type { StreamingToolActivity } from "../../stores/chatStore";
+ import { useSettingsStore } from "../../stores/settingsStore";
+ import { RetrievalBadge } from "./RetrievalBadge";
++import { ResearchCard } from "./ResearchCard";
+ 
+ interface MessageBubbleProps {
+   message: ChatMessage;
+@@ -121,6 +122,23 @@ export function MessageBubble({
+     );
+   }
+ 
++  // Deep Research job card — assistant messages flagged with
++  // `message_kind === "research_job"` render a self-polling progress /
++  // artifact card instead of ordinary markdown content.
++  const researchJobId =
++    !isUser && message.metadata?.message_kind === "research_job"
++      ? String(message.metadata.research_job_id || "")
++      : "";
++  if (researchJobId) {
++    return (
++      <div className="group flex w-full justify-start animate-fade-in">
++        <div className="flex flex-col flex-1 min-w-0 items-start">
++          <ResearchCard jobId={researchJobId} />
++        </div>
++      </div>
++    );
++  }
++
+   return (
+     <div
+       className={`
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index 55b7449..1ad80b0 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -2129,6 +2129,27 @@ export async function downloadResearchArtifact(artifactId: string): Promise<Blob
+   return response.blob();
+ }
+ 
++/**
++ * Download a research artifact through the authenticated endpoint and save it
++ * to disk under its original filename. The download route requires a Bearer
++ * header, so a plain `<a href>` cannot be used — fetch the blob, mint an
++ * object URL, and drive a transient anchor click instead.
++ */
++export async function triggerResearchArtifactDownload(
++  artifactId: string,
++  filename: string,
++): Promise<void> {
++  const blob = await downloadResearchArtifact(artifactId);
++  const url = URL.createObjectURL(blob);
++  const anchor = document.createElement("a");
++  anchor.href = url;
++  anchor.download = filename;
++  document.body.appendChild(anchor);
++  anchor.click();
++  anchor.remove();
++  URL.revokeObjectURL(url);
++}
++
+ export interface PortabilityImportResponse {
+   status: "ok";
+   stats: {
+diff --git a/litellm/config.yaml b/litellm/config.yaml
+index ed5401d..ea107c3 100644
+--- a/litellm/config.yaml
++++ b/litellm/config.yaml
+@@ -112,15 +112,31 @@ model_list:
+       api_base: "https://token-plan-sgp.xiaomimimo.com/v1"
+       api_key: os.environ/MIMO_API_KEY
+ 
++  # LongCat (Meituan) — OpenAI-compatible. Models: LongCat-2.0 (1M ctx, 128K out,
++  # agentic reasoning model that emits reasoning_content). Requires LONGCAT_API_KEY.
++  - model_name: "longcat/*"
++    litellm_params:
++      model: "openai/*"
++      api_base: "https://api.longcat.chat/openai/v1"
++      api_key: os.environ/LONGCAT_API_KEY
++
++  # Concrete LongCat fallback target. litellm resolves default_fallbacks by exact
++  # model_name, not wildcard (same rationale as deepseek-chat-fallback above).
++  - model_name: "longcat-chat-fallback"
++    litellm_params:
++      model: "openai/LongCat-2.0"
++      api_base: "https://api.longcat.chat/openai/v1"
++      api_key: os.environ/LONGCAT_API_KEY
++
+ litellm_settings:
+   drop_params: True
+   set_verbose: False
+   num_retries: 3
+   # Cross-model fallback: if the primary chat/synthesis model fails (e.g. a
+   # lapsed Ollama Cloud model returns 500), litellm retries on a known-good
+-  # backup so the streamed answer is never blank. Requires a valid
+-  # DEEPSEEK_API_KEY (set in .env, never committed).
+-  default_fallbacks: ["deepseek-chat-fallback"]
++  # backup so the streamed answer is never blank. Prefers LongCat-2.0 (valid
++  # key) then the deepseek concrete group. Keys set in .env, never committed.
++  default_fallbacks: ["longcat-chat-fallback", "deepseek-chat-fallback"]
+   request_timeout: 600
+   cache: True
+   cache_params:
+@@ -150,9 +166,9 @@ general_settings:
+ router_settings:
+   # The litellm PROXY reads cross-model fallbacks from router_settings (not
+   # litellm_settings). On any model failure (e.g. lapsed Ollama Cloud 500), the
+-  # router retries on the concrete deepseek-chat-fallback group so the streamed
+-  # answer is never blank. Requires DEEPSEEK_API_KEY in .env.
+-  default_fallbacks: ["deepseek-chat-fallback"]
++  # router retries on the concrete fallback groups so the streamed answer is
++  # never blank. Prefers LongCat-2.0 then deepseek. Keys set in .env.
++  default_fallbacks: ["longcat-chat-fallback", "deepseek-chat-fallback"]
+ 
+ environment: &default
+   completion_model: "ollama/llama3.2:3b"
+diff --git a/scripts/mcp_e2e_smoke.py b/scripts/mcp_e2e_smoke.py
+index d7ecfbc..8dcfaf6 100755
+--- a/scripts/mcp_e2e_smoke.py
++++ b/scripts/mcp_e2e_smoke.py
+@@ -7,8 +7,9 @@ clone after `source .env`. It verifies the same path a remote agent uses:
+ 1. initialize MCP session
+ 2. send initialized notification
+ 3. list tools
+-4. call polymath_mcp_status
+-5. call polymath_plan_ingestion
++4. verify the app instructions include the receipt-first ingestion gate
++5. call polymath_mcp_status and polymath_plan_ingestion
++6. verify the document-scoped ingestion receipt contract
+ 
+ Environment:
+   MCP_SMOKE_URL   Optional. Defaults to MCP_PUBLIC_URL or localhost:8765/mcp.
+@@ -26,6 +27,9 @@ import urllib.request
+ from typing import Any
+ 
+ 
++CURRENT_PROTOCOL_VERSION = "2025-11-25"
++
++
+ def _default_url() -> str:
+     raw = (os.environ.get("MCP_SMOKE_URL") or os.environ.get("MCP_PUBLIC_URL") or "").strip()
+     if not raw:
+@@ -61,12 +65,14 @@ class McpSmokeClient:
+         self.token = token
+         self.session_id: str | None = None
+         self.next_id = 1
++        self.protocol_version = CURRENT_PROTOCOL_VERSION
+ 
+     def post(self, body: dict[str, Any], *, expect_response: bool = True) -> dict[str, Any] | None:
+         headers = {
+             "Accept": "application/json, text/event-stream",
+             "Content-Type": "application/json",
+             "Authorization": f"Bearer {self.token}",
++            "MCP-Protocol-Version": self.protocol_version,
+             "User-Agent": "Polymath-MCP-Smoke/1.0 (+https://github.com)",
+         }
+         if self.session_id:
+@@ -107,6 +113,13 @@ class McpSmokeClient:
+             expect_response=False,
+         )
+ 
++    def accept_protocol(self, initialize_response: dict[str, Any]) -> None:
++        negotiated = str(
++            ((initialize_response.get("result") or {}).get("protocolVersion") or "")
++        ).strip()
++        if negotiated:
++            self.protocol_version = negotiated
++
+     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+         return _tool_json(
+             self.request(
+@@ -131,11 +144,12 @@ def main() -> int:
+     init = client.request(
+         "initialize",
+         {
+-            "protocolVersion": "2025-03-26",
++            "protocolVersion": CURRENT_PROTOCOL_VERSION,
+             "capabilities": {},
+             "clientInfo": {"name": "polymath-mcp-smoke", "version": "1.0"},
+         },
+     )
++    client.accept_protocol(init)
+     client.notify("notifications/initialized")
+     tools = client.request("tools/list")
+     tool_names = {
+@@ -145,7 +159,9 @@ def main() -> int:
+     required = {
+         "polymath_mcp_status",
+         "polymath_check_source",
++        "polymath_app_guide",
+         "polymath_plan_ingestion",
++        "polymath_verify_ingestion",
+         "polymath_backfill_summaries",
+     }
+     missing = sorted(required - tool_names)
+@@ -153,6 +169,9 @@ def main() -> int:
+         raise RuntimeError(f"missing expected MCP tools: {missing}")
+ 
+     status = client.call_tool("polymath_mcp_status", {"detail": "summary"})
++    guide = client.call_tool("polymath_app_guide", {"detail": "full"})
++    if "polymath_verify_ingestion" not in str(guide.get("agent_instructions") or ""):
++        raise RuntimeError("MCP app instructions do not enforce ingestion receipt verification")
+     plan = client.call_tool(
+         "polymath_plan_ingestion",
+         {
+@@ -164,6 +183,16 @@ def main() -> int:
+     )
+     if plan.get("profile") != "transcript" or plan.get("summary_required") is not True:
+         raise RuntimeError(f"ingestion planner returned unexpected plan: {plan}")
++    receipt = client.call_tool(
++        "polymath_verify_ingestion",
++        {"doc_id": "__mcp_contract_probe_missing__"},
++    )
++    if (
++        receipt.get("contract_version") != "polymath.ingestion_evidence.v1"
++        or receipt.get("status") != "not_found"
++        or receipt.get("query_ready") is not False
++    ):
++        raise RuntimeError(f"unexpected ingestion evidence contract: {receipt}")
+ 
+     result = {
+         "status": "ok",
+@@ -172,6 +201,8 @@ def main() -> int:
+         "server": (init.get("result") or {}).get("serverInfo"),
+         "tool_count": len(tool_names),
+         "mcp_status": status.get("status"),
++        "protocol_version": client.protocol_version,
++        "ingestion_evidence_contract": receipt.get("contract_version"),
+         "ingestion_plan": {
+             "profile": plan.get("profile"),
+             "summary_required": plan.get("summary_required"),
+diff --git a/scripts/verify_hermes_mcp.py b/scripts/verify_hermes_mcp.py
+index 6ace34f..9855bd1 100755
+--- a/scripts/verify_hermes_mcp.py
++++ b/scripts/verify_hermes_mcp.py
+@@ -118,11 +118,12 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
+     init = client.request(
+         "initialize",
+         {
+-            "protocolVersion": "2025-03-26",
++            "protocolVersion": module.CURRENT_PROTOCOL_VERSION,
+             "capabilities": {},
+             "clientInfo": {"name": "polymath-hermes-mcp-verify", "version": "1.0"},
+         },
+     )
++    client.accept_protocol(init)
+     client.notify("notifications/initialized")
+     tools = client.request("tools/list")
+     tool_names = {
+@@ -132,7 +133,9 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
+     required = {
+         "polymath_mcp_status",
+         "polymath_check_source",
++        "polymath_app_guide",
+         "polymath_plan_ingestion",
++        "polymath_verify_ingestion",
+         "polymath_backfill_summaries",
+     }
+     missing = sorted(required - tool_names)
+@@ -140,6 +143,9 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
+         raise RuntimeError(f"missing expected MCP tools: {missing}")
+ 
+     status = client.call_tool("polymath_mcp_status", {"detail": "summary"})
++    guide = client.call_tool("polymath_app_guide", {"detail": "full"})
++    if "polymath_verify_ingestion" not in str(guide.get("agent_instructions") or ""):
++        raise RuntimeError("Polymath MCP instructions are missing the evidence gate")
+     plan = client.call_tool(
+         "polymath_plan_ingestion",
+         {
+@@ -151,6 +157,12 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
+     )
+     if plan.get("profile") != "transcript" or plan.get("summary_required") is not True:
+         raise RuntimeError(f"unexpected ingestion plan: {plan}")
++    receipt = client.call_tool(
++        "polymath_verify_ingestion",
++        {"doc_id": "__hermes_contract_probe_missing__"},
++    )
++    if receipt.get("contract_version") != "polymath.ingestion_evidence.v1":
++        raise RuntimeError(f"unexpected ingestion evidence contract: {receipt}")
+ 
+     return {
+         "status": "ok",
+@@ -158,6 +170,8 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
+         "tool_count": len(tool_names),
+         "mcp_status": status.get("status"),
+         "connection_endpoint": (status.get("connection") or {}).get("endpoint"),
++        "protocol_version": client.protocol_version,
++        "ingestion_evidence_contract": receipt.get("contract_version"),
+         "ingestion_plan": {
+             "profile": plan.get("profile"),
+             "summary_required": plan.get("summary_required"),

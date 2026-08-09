@@ -3,10 +3,10 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_04_6af7cf7261",
-    "corpus_id": "fe2e5a93-8396-5286-8cd5-26ed630103af",
-    "elapsed_seconds": 1.46,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_04_d84d9e7387",
+    "corpus_id": "8e2e9378-c702-5be7-a884-1af41af9751c",
+    "elapsed_seconds": 0.77,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 12,
@@ -15,9 +15,7 @@
     "total": 12
   },
   "negative_entities_in_graph": [],
-  "unexpected_promoted_triples": [
-    "recovery desk | consumes | ten minutes"
-  ],
+  "unexpected_promoted_triples": [],
   "duplicate_promoted_edges": {},
   "graph": {
     "nodes": [
@@ -33,16 +31,16 @@
       "report q 9",
       "sable index",
       "sensor k 12",
-      "telemetry group",
-      "ten minutes"
+      "telemetry group"
     ],
-    "promoted_edge_count": 10
+    "promoted_edge_count": 9
   },
   "extracted_entities": [
     "COLD-7",
     "COLD-7 Rollout Plan",
     "Dr. Imani Reyes",
     "Falcon Cache",
+    "Imani Reyes",
     "Monday",
     "Pinion",
     "Pinion 3.1",
@@ -51,14 +49,15 @@
     "Recovery Desk",
     "Report",
     "Report Q-9",
+    "Rollout Plan",
     "Sable Index",
     "Sensor K-12",
     "Telemetry Group",
     "dependency ledger",
     "draft note",
     "hourly schedule",
-    "ten minutes",
-    "the"
+    "within ten minutes",
+    "without pause"
   ],
   "item_results": [
     {

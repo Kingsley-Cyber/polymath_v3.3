@@ -182,7 +182,7 @@ def main() -> int:
     for reason, n in losses.most_common():
         print(f"  {n:>2}  {reason}")
     print("\nSAMPLE DETAILS (first 14):")
-    for gid, layer, msg in details[:14]:
+    for gid, layer, msg in details:
         print(f"  {gid} @{layer}: {msg}")
     return 0
 

@@ -1,0 +1,217 @@
+# BUILDLINE — the temporal north-star (authoritative build order)
+
+**What this is:** the single time-ordered checkpoint line from the repo's
+current state to Definition of Pass. Item truth = the checklist
+(/Users/king/polymath_v3.3/docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md);
+architectural truth = the design docs; temporal truth = THIS file.
+
+**Derivation rule (owner correction 2026-07-14):** this file is DERIVED FROM
+THE CHECKLIST ON DISK, never from any agent's memory. Every checklist section
+with open work maps to exactly one checkpoint in the COVERAGE MAP below;
+`scripts/check_buildline_coverage.py` verifies the mapping and fails loudly on
+any unmapped section. Every newly adopted design claims a slot the same day
+(UNSLOTTED list = planning defects).
+
+**Maintenance:** senior updates NOW pointer + stamps; executor stamps status in
+receipts; owner vetoes via COORDINATION.md. Precedence: OWNER >
+CONTINUATION_HANDOFF §Decision authority > this order > daily directives.
+
+**Model note (owner ruling 2026-07-14):** NO embedding/reranker model change is
+planned. Qdrant binary quantization (~32-40x memory compression with
+oversampling + full-vector rescoring, already implemented and promotion-gated)
+is COMMITTED work on the CURRENT 1024-dim vectors — clone-first, recall-A/B
+gated, at CP6. Any 4B-model move is owner-initiated only and has no slot.
+
+---
+
+**NOW → CP9** (semantic pipeline on the pair; preflight = digest-provider
+retest [LongCat acceptance canary + flash native retest] BEFORE T9.3's ONE
+paid pass — T9.3 requires an explicit senior GO; T9.1/T9.2 are local
+deterministic registry work, zero spend. CP5–CP7 remain Track B fill-in.)
+**UNSLOTTED:** none as of 2026-07-14 (verified by coverage script)
+
+---
+
+## CP0 — Foundation ✅ DONE 2026-07-14
+S0–S3 landed · 3-tier regression (negatives 5/5; scorer v4) · 8 owner
+registries + loader/resolver + hash taxonomy (31 tests) · glide authority.
+
+## CP1 — Deployment validation (Phase A) ✅ DONE 2026-07-14 (certified 18:00Z)
+All g1–g10 green on rebatch_smoke_v2; SEVEN defects found+fixed en route:
+PDF structure bypass (D1), cross-heading chunk merge, batch done-means-done
+(D2a), provider 3-strike pool guard + flash pinned (D2b), PDF-lane biblio
+capture parity (D3), qualified temporal-expression families + fleet blue-green
+cutover (D4), unbatched Neo4j purge (P0.6 reopened, CP6). Consolidated table
++ provenance censuses in COORDINATION 17:5xZ entries.
+g1 FINDING: `_parse_pdf_fast_text` bypass → digital PDFs lose structure.
+CP1-D1: text-layer PDFs → docling layout (no OCR) → markdown/sections →
+structural lane; OCR only for image-only scans; fallback counter; general
+logic only. Exit: g1–g10 green on re-run. Consumes: REBATCH_RUNBOOK §Phase A.
+
+## CP2 — SUPERSEDED (owner sequencing ruling 2026-07-14) — [P0.1→CP6]
+No paid enrichment before the semantic schema era; mark parent semantics are
+generated ONCE at CP9 via the gateway digest. P0.1 verify boxes → CP6.
+Mark full regen → lexicon → cards LAST → readiness → after-eval. Ecom REMOVED
+(fix→owner reingest decision→ONE pass). P0.1's 4 verify boxes ride these
+receipts. Exit: coverage censuses + reconcile + no-regression eval.
+Authority: 2h GLIDE after CP1. Checklist: P0.1.
+
+## CP3 — Envelope + identity ✅ DONE 2026-07-14 (T3.1/T3.2 certified) — [P2.5b · P0.8]
+Identifier recipes + golden vectors · legacy adapters (no-relabeling,
+needs_owner_lineage) · projection outbox model · ProjectionManifests
+(embedding_profile incl. instruction_version) · Mongo validators · typed
+writer-boundary acceptance (P0.8 last box) · UGO annotate-only canary.
+NOTE: outbox/projection ACTIVATION (T3.3/T3.4) rides CP9 by senior ruling.
+Exit: P2.5b acceptance. Checklist: P2.5b, P0.8.
+
+## CP4 — Structured-output gateway ✅ DONE 2026-07-14 AT EXTERNAL LIMIT (a32fb78) — [P2.5c]
+SemanticDigestV1 + capability ladder + semantic validator + targeted repair +
+dead-letter + provenance/cache; UGO 10-packet canary. VERDICT: engine
+certified (contract/validator/ladder/repair/DLQ proven across 3 live failure
+modes, zero canonical pollution; 212-test regression) but flash has NO
+verified digest path (Tier1 provider-rejected 400; Tier4 wrapper-unreliable;
+Tier3 partial, repair-exhausted). Tier1/10-packet/downgrade acceptance boxes
+remain OPEN as provider-blocked external limits — retest at CP9 preflight;
+LongCat = CP9 digest candidate (tiny Tier3 probe passed, full digest
+unverified). Prompt parent-digest.v5 / repair.v2. Checklist: P2.5c.
+
+## CP5 — Vocabulary/alias/instruction layer — [P1.7 · P2.1 · P2.3 · Librarian Ph.3]
+ONE versioned alias registry absorbing the 3 existing stores · qdrant latent
+payload-whitelist fix · dual entity_id reconcile · P1.7 remainder
+(gather-before-fanout, vector reuse, per-corpus batching, lexical-only
+baseline) · P2.1 concept-contract fields (DF/specificity, senses, salience,
+slim payloads) · P2.3 versioned Qwen3 instructions — the APPROVED universal
+instruction's ISOLATED A/B vs baseline_live_v0 (flip = GLIDE 4h) · Librarian
+Phase 3 hardening. Checklist: P1.7, P2.1, P2.3, Librarian Phase 3.
+
+## CP6 — Repo-level RAG hygiene + Qdrant optimization — [P0.2 · P0.4 · P0.5 · P0.6 · Librarian Ph.0 · P1.9 hot-path · P3.4]
+P0.2 hierarchy repair remainder · P0.4 contradiction-check scope · P0.5
+chunk/metadata hygiene remainder · P0.6 lease/reconciliation remainder ·
+Librarian Phase 0 trustworthy-catalog reconcile · **P1.9 Qdrant hot-path audit
+(20 items: per-stage timing, payload selectors, batching, filter/29-index
+audit, prevent_unoptimized, topology, image pin, priority classes, keepalive)
+· P3.4 QUANTIZATION — the owner's 40x: binary quantization on current
+vectors, clone-first, oversampling+rescore, recall A/B, then promote** ·
+v2-naive +68k reconciliation via manifests. Checklist: P0.2, P0.4, P0.5,
+P0.6, Librarian Phase 0, P1.9 hot-path, P3.4.
+
+## CP7 — Librarian measurement moment (S8) — [P0.3 · P1.1 · P1.4 · P1.5 · Librarian Ph.1/2]
+Pair/mark card rebuild FINAL · P1.4 shelf routing · P1.5 remainder ·
+Librarian Phases 1–2 milestones · P0.3 cross-corpus acceptance · P1.1
+remainder (librarian rubric, automated contamination check, standing gate) ·
+shelf_reserve A/B (flip = GLIDE). Checklist: P1.4, P1.5, Librarian Ph.1/2,
+P0.3, P1.1.
+
+## CP8 — Claim spine on canary ✅ DONE 2026-07-14 (T8.1–T8.5 published) — [P2.4 · P2.5 · P2.5a]
+LocalExtractionV1 + Python claim compiler on UGO · negation (P2.4) · typed
+signatures (P2.5) · unified claim/frame contract (P2.5a) · C2 GLiREL
+re-benchmark decides Stage-4. Checklist: P2.4, P2.5, P2.5a.
+DELIVERED: strict boundary f50c394 · claim compiler 0d82515 (374→374
+conservation, projection golden) · negation/signature sidecars 4da87a2
+(zero-flip legacy fix aeec419; polarity-blind legacy limit recorded) ·
+full-corpus census 5fa0e832 (659 children, 14,117→14,090+27 accounted,
+byte-deterministic, negation 97% qualifier-scoped, coref backlog 3,026) ·
+C2 verdict e14db4c2 under preregistered frozen gate 6e0502d6: verbatim
+without_wins → relations_remain_observation_only (REJECTED-WITH-EVIDENCE;
+double falsification: open-label F1 .174 + controlled-label 0-accepted,
+killed on dependency direction; oracle spans 0/8). Deterministic spine =
+sole typed-relation authority. Executor-proposed owner-ratifiable artifacts:
+predicate_normalization.v1 + ClaimRecordV1 field sets.
+
+## CP9 — Semantic pipeline + extraction on the pair (S11) 🔄 IN PROGRESS 2026-07-15 — [P2.6 · P2.7 · P2.7b · P2.8 · Temporal hooks]
+STATUS: T9.1 resolvers ✅ 4ab42c2 · T9.2 motif matcher ✅ 076531f7 · T9.3 paid
+digest pass 🔄 RUNNING (owner option-A prose contract; ~150/720 bought; lane-B
+detour receipts: v2/v3 structured packets rejected-with-evidence, claims
+materialized locally 84,586) · P2.6 DESCOPED by owner
+2026-07-15 ("just focus on runpod") → single RunPod-vs-pinned-local
+comparison only, four-lane matrix off (harness kept as asset) · P2.7 RUNPOD
+LOCKDOWN = THE ACTIVE OBJECTIVE: bake→blue-green→same-chunk validate→5,000
+gate→cutover (= owner E2E step E2) · P2.7b/P2.8 queued behind lockdown ·
+ecom pass ⏸ owner-gated ("ecom reingest approved" never given).
+Staged pipeline via gateway (domains/frames/motifs/latent-v2 corroborating
+interim-v1) · motif matcher (sequence-tolerance + role-threading recipes,
+dual-score MotifCandidate) · P2.6 engine parity · P2.7 remainder (5,000 gate,
+parity compare, retry safety) · P2.7b burst orchestration · P2.8 concept→doc
+grounding · ecom reingest-after-fix + its ONE enrichment pass (post owner §8).
+Checklist: P2.6, P2.7, P2.7b, P2.8, Temporal Program hooks.
+
+## CP10 — Retrieval activation family-by-family — [P2.2 · P2.2c · P2.2d · P1.2 · Librarian Ph.4]
+Representation points (context-enriched children etc.) · mode→family matrix ·
+lineage dedupe · rank fusion · P1.2 grounded-planner activation · Librarian
+Phase 4 LLM amplification (planner-when-thin, explain-not-select). EACH
+family/behavior behind its own A/B · **P2.2d Forced Latent Sweep (owner-
+adopted 2026-07-14): domain-conditioned latent generation per artifact
+(affinity-prior top-N + one wildcard domain, gateway-validated, derivation=
+llm_forced_sweep, abstention legal) — COMPARISON TEST vs deterministic-only
+bridges on the frozen suite; needs CP9's claim spine for corroboration
+binding**. Exit: the preregistered program target — lay-language/cross-corpus
+doc-hit +10pts, no material regression.
+Checklist: P2.2, P2.2c, P2.2d, P1.2, Librarian Phase 4.
+
+## CP11 — Time, anchors, shapes, rerank serving — [P1.3 · P1.6 · T-MAIN · P1.9 adaptive · P3.5]
+P1.3 conversation/open-book anchoring · P1.6 answer-shape routing · T-MAIN
+temporal phases (assertions/episodes/eligibility/query modes) · P1.9
+adaptive reranking + P3.5 reranker serving alternatives (cascade experiments;
+NO model commitment). Checklist: P1.3, P1.6, Temporal Program (T-MAIN),
+P1.9 adaptive rerank, P3.5.
+
+## CP12 — Experiments + closure — [P3.1 · P3.2 · P3.3 · Quick Upload · Regression Matrix · Strict Ready · Invariants]
+P3.1 thematic routing pilot · P3.2 bridge cards · P3.3 collection
+consolidation · Quick Upload decision · Non-Negotiable Invariants final sweep
+· Required 16×3 regression matrix · Definition of Strict Ready per corpus ·
+restart/rollback/concurrency sweep · deploy-from-main real-inference
+reproduction · final report (implemented/migrated/deployed/rejected/limits).
+Checklist: P3.1, P3.2, P3.3, Quick Upload, Regression Matrix, Strict Ready,
+Invariants.
+
+---
+
+## COVERAGE MAP (checklist section → checkpoint; machine-checked)
+
+| Checklist section | CP |
+|---|---|
+| Non-Negotiable Invariants | CP12 (+ every CP exit gate) |
+| P0.8 Schema Enforcement At Storage Boundaries | CP3 |
+| Temporal RAG Program | CP9 (hooks) / CP11 (T-MAIN) |
+| Phase 0 - Trustworthy Catalog | CP6 |
+| Phase 1 - Deterministic `librarian_card.v0` | CP7 |
+| Phase 2 - Deterministic Query And Seat Policy | CP7 |
+| Phase 3 - Deterministic Hardening | CP5 |
+| Phase 4 - Optional LLM Amplification | CP10 |
+| P0.1 Stop Placeholder Summaries | CP2 |
+| P0.2 Repair Degenerate Hierarchy | CP6 |
+| P0.3 Finish Corpus-Floor Calibration | CP7 |
+| P0.4 Make Answerability Honest | CP6 |
+| P0.5 Complete Chunk And Metadata Hygiene | CP6 |
+| P0.6 Corpus Deletion And Orphan Cleanup | CP6 |
+| P1.1 Establish The Evaluation Set First | CP7 |
+| P1.2 Activate The Grounded Planner Safely | CP10 |
+| P1.3 Add Conversation And Open-Book Anchoring | CP11 |
+| P1.4 Route Shelves Before Books | CP7 |
+| P1.5 Implement Librarian Selection Roles | CP7 |
+| P1.6 Route By Answer Shape | CP11 |
+| P1.7 Batch And Cache Vocabulary Work | CP5 |
+| P1.9 Qdrant Hot-Path And Contention Audit | CP6 |
+| P1.9 Make Reranking Adaptive | CP11 |
+| P2.1 Version The Universal Concept Contract | CP5 |
+| P2.2 Build Two-Sided Multi-Point Concept Representations | CP10 |
+| P2.2c Query-Side Retrieval Optimization | CP10 |
+| P2.2d Forced Latent Sweep | CP10 |
+| P2.3 Add Versioned Qwen3 Retrieval Embedding Instructions | CP5 |
+| P2.4 Negation And Relation Correctness | CP8 |
+| P2.5 Typed Relation Signatures | CP8 |
+| P2.5a Unified Claim/Assertion And Mechanism-Frame Contract | CP8 |
+| P2.5b Canonical Semantic Artifact Envelope | CP3 |
+| P2.5c Structured-Output Gateway | CP4 |
+| P2.6 Engine Parity And Provenance | CP9 |
+| P2.7 RunPod Production Validation | CP9 |
+| P2.7b RunPod Burst Orchestration | CP9 |
+| P2.8 Direct Concept-To-Document Grounding | CP9 |
+| P3.1 Pilot Claim And Mechanism-Frame Routing | CP12 |
+| P3.2 Deterministic Motif And Analogy Bridge Cards | CP12 |
+| P3.3 Collection Consolidation - Migration | CP12 |
+| P3.4 Quantization - Experiment | CP6 (owner-committed 40x) |
+| P3.5 Reranker Serving Alternatives - Experiment | CP11 |
+| Quick Upload And Filesystem Contract | CP12 |
+| Required Three-Tier Regression Matrix | CP12 |
+| Definition Of Strict Ready | CP12 |

@@ -74,9 +74,43 @@ more like a research workbench:
 | **Chat RAG** | Agent-Zero-inspired synthesis style, live reasoning streams, source-aware rendering, and pressure-tested answers for design/research questions. |
 | **Retrieval** | Vector, hybrid, and graph-augmented tiers with reranking, HyDE controls, facet-aware coverage, and evidence provenance. |
 | **Graph Query** | Query-specific graph views, evidence packets for research/nuance/ideation, bridges/gaps/hubs, and richer graph visualization controls. |
-| **Extraction** | [Graphify CPU](docs/GRAPHIFY_EXTRACTION_RUNTIME.md) is the single production entity/relation path, with pinned GLiNER2 inputs, deterministic stages, resumable receipts, and fail-closed routing. |
+| **Extraction** | One release-pinned encoder (GLiNER-Relex-large) behind a routable GPU sidecar — Apple-MPS or LAN CUDA, byte-identical pins, qualification-gated switching. Deterministic stages, crash-proof receipts, fail-closed on engine loss. |
 | **Model routing** | LiteLLM wildcard routing with DeepSeek, GLM 5.1, MiMo, OpenRouter, Anthropic, OpenAI, Gemini, Mistral, Ollama, and custom providers. |
 | **Web RAG** | Optional live-web retrieval with cache, trust signals, reranking, and visible trace events. |
+
+---
+
+## Extraction release — `extraction-v1`
+
+The semantic extraction stack is **frozen, qualified, and operationally
+drilled** (see [`release/extraction-v1.yaml`](release/extraction-v1.yaml) for
+every pin):
+
+- **One encoder, one pass** — `knowledgator/gliner-relex-large-v1.0` at a
+  pinned revision and weights hash, served over HTTP by a GPU sidecar.
+  Entities and relation candidates come from a single inference pass per
+  window; thresholds are release properties, never tuning knobs.
+- **Evidence-first honesty** — model output never becomes a canonical fact
+  without corroboration; uncertain or qualified language parks as
+  QUALIFIED/OPEN instead of polluting the graph. Adversarial qualification
+  packets converged to zero leakage.
+- **Receipts everywhere** — every stage writes content-hashed artifacts and
+  receipts; crash recovery adopts durable work instead of re-inferring
+  (drilled at every kill point: pre-inference, pre-persistence, pre-receipt,
+  mid-inference engine loss, per-store writes).
+- **Vector conservation** — every chunk is either an eligible child vector or
+  carries an explicit BY_DESIGN omission receipt; the cross-store verifier
+  enforces the identity and the UI badge cannot read COMPLETE otherwise.
+- **Deterministic dual-engine** — the encoder seam is one URL. A Mongo
+  control document routes between the Mac's MPS sidecar and a LAN CUDA
+  workstation; flips verify exact weight pins, refuse unqualified builds,
+  and agents can wake the GPU box on demand (Wake-on-LAN MCP tool). The
+  CUDA lane qualified with exact battery conservation (book 60/66 · sealed
+  44/51 · families 8-PASS · leakage 0 — identical to the MPS baseline).
+
+Operational entry points: [`RUNBOOK_E2E.md`](RUNBOOK_E2E.md) (owner runbook),
+[`RTX_SETUP_HANDOFF.md`](RTX_SETUP_HANDOFF.md) (GPU workstation deployment),
+[`audit/`](audit/) (saturation status, residual ledger, doctrine).
 
 ---
 
@@ -795,9 +829,13 @@ polymath_v3.3/
 │       └── stores/           Zustand state
 ├── embedder/                 GPU embedder service (Qwen3 1024d)
 ├── reranker/                 Legacy Python reranker service; Docker uses llama.cpp by default
-├── docling_svc/              PDF/DOCX → markdown service
 ├── litellm/config.yaml       wildcard LLM router config
-└── docker-compose.yml        all 11 services
+├── config/                   extraction registries + sidecar release pins
+├── release/                  immutable release manifests (extraction-v1)
+├── audit/                    saturation status, residual ledger, doctrine
+├── scripts/                  ops: qualification harnesses, storage guardrail
+├── docs/archive/             historical mission docs & continuity notes
+└── docker-compose*.yml       core + overrides (offline-ingest, opskill, daily)
 ```
 
 ---

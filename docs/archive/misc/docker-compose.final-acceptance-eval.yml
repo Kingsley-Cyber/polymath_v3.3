@@ -1,0 +1,8 @@
+services:
+  backend:
+    volumes:
+      # The backend image is built from ./backend; the preregistered parent
+      # specifications remain repository documents and are mounted read-only.
+      - "./docs:/docs:ro"
+      # One host lock namespace is shared with every live-eval worktree.
+      - "/tmp/polymath-eval.lock:/tmp/polymath-eval.lock:ro"

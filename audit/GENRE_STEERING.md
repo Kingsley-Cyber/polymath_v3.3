@@ -509,3 +509,34 @@ the current bottleneck. Measured ranking:
 4. Adapter compiler: deprioritized by data (R5 −1); resumes after the above.
 Composite retained as upper-bound control for qualification; bi-solo = one-encoder
 comparison arm; GLiNER2 deletable when a type-resolver converges the two.
+
+### R2 seam repaired: coordination distribution + participial frames (2026-08-08, @11efeac)
+Diagnostic (per-unit OIE propositions vs fast-path proposals on the 3 R2-loss units) settled the
+owner's decision table: case 1 — relations EXIST as whole-coordinated-list propositions in OpenIE,
+and the fast path fires too, but en_core_web_sm FRACTURES long heterogeneous lists into islands
+('shot' as second acl, 'pose' as fresh verb), so arc-following conj expansion strands members past
+the first fracture, and active participles ('lane containing X') never got a subject.
+MECHANISM (2 structural rungs, no vocabulary, @b90ae43): (1) _explicit_list_objects generalized
+from apply-only to EVERY direct-lane frame — licensing = textual adjacency (comma/and/or between
+NP heads), breaks at any verb AND any clause subject (comma-splice safe), whitespace-continuation
+cursor fix; (2) VBG-acl subject = modified head noun (mirror of VBN passive-acl rule).
+EXPOSED LATENT BUG (fixed @11efeac): both flat-synonym resolvers (PredicateCompiler + dep_path T3)
+compiled contain-class → part_of with SURFACE direction (backwards); 3 false facts hit book-66.
+Fix: declarative inverse_synonyms block (contain/include/comprise/consist/composed-of class);
+compiler swaps signature types + endpoint mention ids on :inverse_direction marker; T3 returns
+swap=True; participial subjects position-guarded (must end left of participle — fractured lists
+can never become subjects). VERIFIED: 584/584 tests; book-66 60/66 R .909 leakage 0, false facts
+gone, +1 TRUE edge (device identifier part_of event envelope); sealed-v1 BYTE-IDENTICAL 45/51
+F1 .826 leakage 0; families 01/02/06 byte-identical to pre-mechanism baseline (their FAIL statuses
+pre-exist the mechanism — strict-status harness artifacts); waterfall 38→22→13(+3)→7(+3)→7→3→2→1.
+R5 now holds r13-15 as 'gold CONTAINS vs part_of' = TRUE knowledge, gold vocabulary naming —
+adapter/compiler-era mapping question, NOT a loss. Remaining R2 (9): r03 pronoun-coref (queued
+capability trial), r04-07 coordinated-premodifier + remote subject (control decision), r12 pcomp
+fracture (absolutive rung candidate), r30/r37 gold-debatable/embedded-clause. Next per owner
+priority: universal adapter compiler phase; Relex only if relation proposal still dominates after.
+
+### Relex integration gate PASSED under acceptance-policy v3 (2026-08-08, @cceda2a+@56a10fa)
+Sidecar (relex-large-mps-sidecar-v1) integrated at two seams: entity provider (GRAPHIFY_ENTITY_PROVIDER=relex) and semantic relation lane (GRAPHIFY_RELEX_RELATIONS=1). Three policy rounds, each measured against the full burned battery; round-1 and round-2 failures (embedded-claim leakage; open-pair naming promoting battery negatives; qualified-duplicate veto poisoning killing OpenIE FACTs) are documented in the commit trail. Final policy: same-canonical corroboration only + veto-set exclusion. Battery: sealed 45/51 leak 0, book 60/66 leak 0, families = 3 pre-existing FAILs only, waterfall R2 13→17 / R7 1→2, suite 586/586. Semantic lane's NOVEL knowledge parks in REVIEW/OPEN until the junk-class promotion guards are ratified; relex entities await arbitration calibration. Composite remains the qualified entity arm.
+
+### ONE-ENCODER CONSOLIDATION (2026-08-08, @a779b1b..@b53c20e)
+OpenIE ablation verdict: KEEP (uniquely holds ~19% of gold canonical knowledge + 4 families for 14-19% wall; leakage gate-owned in both arms). Entity encoder consolidated to Relex-large: rounds 4-5 with counted-NP universal guard → battery strictly better than composite (families 8 PASS incl. 01/08 first-ever; book F1 .839 best-ever; sealed 44/51 net −1; leakage 0). Production = relex entities + relex relations through one host-MPS sidecar; GLiNER2/bi/composite retired to evaluation. Factory topology history: 853s (container census) → 746s (+relex lane) → 660s (encoders on MPS) → next: single-pass relex + adapter compiler.

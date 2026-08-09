@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<polymath_q9_implementation_directive version="1.0">
+  <metadata>
+    <title>Polymath q9: Consolidated Retrieval, Deterministic Parsing, Memory Control, and Conversation-Grounded Chat</title>
+    <directive_type>implementation_and_validation</directive_type>
+    <scope>isolated_10_file_q9_corpus</scope>
+    <production_migration_authorized>false</production_migration_authorized>
+    <persisted_at>2026-08-04T17:20Z</persisted_at>
+    <note>Durable copy of the owner directive pasted into chat. Governing document for q9 execution.</note>
+  </metadata>
+  <pointer>
+    Full text of the owner directive lives in the conversation that authored this file
+    and in CONTINUITY/Q9_STEP7_HANDOFF_20260804.md §1–§5 for the operational
+    summary. Re-paste the full XML into a fresh session if this stub is insufficient;
+    do not invent acceptance criteria beyond the owner XML.
+  </pointer>
+  <executive_summary>
+    <q8_decision>q8 accepted — one evidence collection replaces three route collections.</q8_decision>
+    <q9_scope>Isolated 10-file inspection corpus; not a production migration.</q9_scope>
+    <prohibited>
+      scalar INT8 / product / binary quantization; vectors or HNSW on disk;
+      production cutover; existing-corpus reingestion; legacy collection deletion;
+      destructive docker prune.
+    </prohibited>
+  </executive_summary>
+  <execution_sequence_status as_of="2026-08-04T23:20Z">
+    <step order="1" status="COMPLETE">Record binding owner decisions</step>
+    <step order="2" status="COMPLETE">Inventory schemas vocabulary vs summary records</step>
+    <step order="3" status="COMPLETE">Deterministic parse-policy contracts</step>
+    <step order="4" status="COMPLETE">firecrawl/pdf-inspector for text PDFs</step>
+    <step order="5" status="COMPLETE">Remove Docling and OCR runtime paths</step>
+    <step order="6" status="COMPLETE">Native EPUB and DOCX adapters</step>
+    <step order="7" status="COMPLETE" closed="CONTINUITY/Q9_STEPS_7_8_CLOSEOUT_20260804.md">Unquantized in-memory Qdrant vectors + HNSW</step>
+    <step order="8" status="COMPLETE" closed="CONTINUITY/Q9_STEPS_7_8_CLOSEOUT_20260804.md">Prune speculative payload indexes (corpus_id)</step>
+    <step order="9" status="COMPLETE" closed="CONTINUITY/Q9_STEP9_MEMORY_CLOSEOUT_20260804.md">Mongo WT 1.5GB + Neo4j heap 2G / pagecache 1G</step>
+    <step order="10" status="COMPLETE" closed="CONTINUITY/Q9_STEP10_BASELINE_CLOSEOUT_20260804.md">Docker + datastore baselines</step>
+    <step order="11" status="COMPLETE" corpus="q9_10_file_inspection" corpus_id="6a766597-29f3-4a3e-8918-5de10f0053b3">Create + ingest isolated 10-file corpus</step>
+    <step order="12" status="COMPLETE">Exactly-once evidence/summary check</step>
+    <step order="13" status="COMPLETE" artifacts="data_eval/q9/q9_retrieval_alias_probes.jsonl">Fast/Hybrid/Graph retrieval-only probes + alias traces</step>
+    <step order="14" status="COMPLETE" note="graph path ran; facts sparse until enrichment finishes">Graph seed→hydration trace</step>
+    <step order="15" status="COMPLETE">Cold + warm latency</step>
+    <step order="16" status="COMPLETE" artifacts="data_eval/q9/step16_conversation_html_probe.json">Conversation-aware HTML-test probe</step>
+    <step order="17" status="COMPLETE" closed="CONTINUITY/Q9_STEPS_10_17_CLOSEOUT_20260804.md">q9 closeout report</step>
+    <step order="18" status="PAUSED_OWNER">Pause for owner approval</step>
+  </execution_sequence_status>
+</polymath_q9_implementation_directive>

@@ -3,10 +3,10 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_08_9933d5c82f",
-    "corpus_id": "076281a0-8016-5ecf-abca-ab3e1a9b9d2e",
-    "elapsed_seconds": 0.66,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_08_00e13b034d",
+    "corpus_id": "fcdfd018-a799-5fb7-b91d-fce69eb1f318",
+    "elapsed_seconds": 0.62,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 6,
@@ -42,9 +42,8 @@
     "Spring Audit Window",
     "Wavemark",
     "Yard Stack",
-    "last spring",
-    "sailing plans",
-    "the"
+    "routing platform",
+    "sailing plans"
   ],
   "item_results": [
     {

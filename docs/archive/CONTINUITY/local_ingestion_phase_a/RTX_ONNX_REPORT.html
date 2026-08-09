@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polymath ONNX GLiNER Sidecar — Experiment Report (2026-06-11)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 -apple-system, Segoe UI, Roboto, sans-serif; max-width: 900px;
+         margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.5rem; } h2 { margin-top: 2rem; border-bottom: 1px solid #8884; padding-bottom: .3rem; }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; }
+  th, td { border: 1px solid #8884; padding: .35rem .6rem; text-align: left; }
+  th { background: #8881; }
+  code, pre { font-family: ui-monospace, Consolas, monospace; }
+  pre { background: #8881; padding: .8rem; overflow-x: auto; border-radius: 6px; }
+  .win { color: #2a8; font-weight: 600; }
+  .files a { display: inline-block; margin-right: 1rem; }
+</style>
+</head>
+<body>
+<h1>ONNX GLiNER Sidecar Experiment — RTX Pro 6000 Blackwell</h1>
+<p>Repo commit <code>8729491</code> · 2026-06-11 · host LAN IP <code>192.168.1.83</code></p>
+
+<h2>Headline</h2>
+<p>GLiNER moved from torch/CPU (on this box the torch lane has no CUDA branch) onto
+ONNX Runtime with the <strong>CUDAExecutionProvider</strong>, verified live via
+<code>/health</code> + nvidia-smi. fp32 output is bit-equivalent to torch.
+<span class="win">~3.1× faster end-to-end; ~15.7× on the GLiNER stage.</span></p>
+
+<h2>Speed (256-task warm, identical payload, both emit 1376 entities / 544 relations)</h2>
+<table>
+<tr><th>metric</th><th>8086 ONNX/CUDA fp32</th><th>8084 torch (GLiNER on CPU)</th></tr>
+<tr><td><b>ms/chunk</b></td><td class="win">15</td><td>47</td></tr>
+<tr><td>wall</td><td>6.02 s</td><td>14.07 s</td></tr>
+<tr><td>total_s</td><td>3.96</td><td>12.0</td></tr>
+<tr><td>gliner_s</td><td class="win">0.47 (1.8 ms/ch)</td><td>7.38 (28.8 ms/ch)</td></tr>
+<tr><td>glirel_s</td><td>3.34</td><td>3.37</td></tr>
+<tr><td>facts_facets_s</td><td>0.10</td><td>1.20</td></tr>
+<tr><td>peak GPU util</td><td>100 %</td><td>100 %</td></tr>
+<tr><td>peak VRAM</td><td>23,367 MiB</td><td>37,844 MiB</td></tr>
+</table>
+<p>GLiREL (torch, ~3.2 s/256 ≈ 13 ms/chunk) is now the dominant stage — next target.</p>
+
+<h2>Equivalence gate</h2>
+<pre>fp32 → RESULT: PASS   entities 1.0000  relations 1.0000  facets 1.0000  conf |Δ| 0.00091
+fp16 → RESULT: PASS   entities 0.9767  relations 0.9412  facets 1.0000  conf |Δ| 0.00678
+        (fp16 drops one 'Concept' entity; no speed gain since GLiNER is not the bottleneck → fp32 wins)</pre>
+
+<h2>FORWARD-batch sweep (fp32)</h2>
+<pre>FORWARD=8   gliner 0.46s  total 3.91s  15 ms/chunk
+FORWARD=16  gliner 0.32s  total 3.72s  15 ms/chunk
+FORWARD=32  gliner 0.24s  total 3.61s  14 ms/chunk   (8086 left here)</pre>
+
+<h2>Stack</h2>
+<pre>torch              2.12.0+cu130   (unchanged)
+onnxruntime-gpu    1.27.0.dev20260511001   ← OFFICIAL CUDA-13 ORT nightly (NOT PyPI; PyPI is CUDA-12 and collides with torch cu130)
+gliner 0.2.26 · glirel 1.2.1 · transformers 4.57.6 · huggingface_hub 0.36.2
+venv: E:\polymath_v3.3\.venv_onnx   weights: E:\Polymath_Training\gliner_onnx_medium_v2.1</pre>
+
+<h2>Raw artifacts</h2>
+<p class="files">
+<a href="torch_rtx.json">torch_rtx.json</a>
+<a href="onnx_rtx.json">onnx_rtx.json</a>
+<a href="onnx_fp16_rtx.json">onnx_fp16_rtx.json</a>
+<a href="bench_8086_out.json">bench_8086_out.json</a>
+<a href="bench_8084_out.json">bench_8084_out.json</a>
+<a href="bench_8086_fp16_out.json">bench_8086_fp16_out.json</a>
+</p>
+<p>8086 = ONNX fp32 FORWARD=32, warm, CUDAExecutionProvider. NOT promoted / not in any Scheduled Task — Mac side decides promotion after its own bench.</p>
+</body>
+</html>

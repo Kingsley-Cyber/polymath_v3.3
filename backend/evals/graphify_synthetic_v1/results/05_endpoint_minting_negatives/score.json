@@ -3,10 +3,10 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_05_f24330301e",
-    "corpus_id": "b781ebc5-fed2-5e70-bbf9-55814a4de315",
-    "elapsed_seconds": 0.75,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_05_cd125a39bc",
+    "corpus_id": "36094e04-1aca-5ec2-8ce5-cc560249f7ec",
+    "elapsed_seconds": 0.54,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 9,
@@ -35,8 +35,11 @@
     "Redlark",
     "Sable Index",
     "broken records",
+    "confusion among staff",
+    "most of the quarter",
     "separate audit",
-    "spring sweep"
+    "spring sweep",
+    "temporary coordination work"
   ],
   "item_results": [
     {

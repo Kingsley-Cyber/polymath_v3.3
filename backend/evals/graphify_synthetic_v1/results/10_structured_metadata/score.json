@@ -3,10 +3,10 @@
   "status": "PASS",
   "runtime": {
     "pipeline_release": "graphify-cpu-pipeline-v15",
-    "mongo_database": "graphify_eval_syn_10_d6263548d0",
-    "corpus_id": "1e48ad3c-d55d-52ec-b5ff-265f22550712",
-    "elapsed_seconds": 0.58,
-    "interpreter": "/Users/king/polymath_v3.3/local_ghost_b/.venv/bin/python"
+    "mongo_database": "graphify_eval_syn_10_cea021c586",
+    "corpus_id": "e32c7ff5-b749-5cf0-bc41-9c13ecd0c38e",
+    "elapsed_seconds": 0.5,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
   },
   "items": {
     "passed": 9,
