@@ -3550,6 +3550,75 @@ async def polymath_fleet_status() -> dict[str, Any]:
     return await fleet_status(db)
 
 
+async def polymath_worker_stack(
+    action: str = "status",
+    workers: int | None = None,
+) -> dict[str, Any]:
+    """RunPod-style control of the RTX box's ingest-worker stack.
+
+    Actions:
+      status — containers, health, current scale, GPU free/used.
+      up     — bring the stack up (workers=N, RTX clamps to 2; each replica
+               carries a 24GB limit against the 64GB WSL VM). Blocks until
+               healthy (wait=300 on the manager side).
+      scale  — re-scale in place (workers=N).
+      down   — stop the stack, freeing VRAM/CPU so the box can idle to sleep.
+
+    The full on-demand cycle: polymath_wake_extraction_engine (WoL) →
+    up → watch status → down → the box sleeps. The contract (base_url,
+    routes, clamp) lives on the routing document's worker_stack block; auth
+    is X-Api-Key from env RTX_LANE_MANAGER_API_KEY (source of truth:
+    api-key.txt on the RTX box — transfer over the NFS share, never chat).
+    The manager auto-heals unhealthy replicas within ~30s while the stack
+    is up. Returns manager JSON verbatim plus the resolved endpoint; a
+    missing key or unreachable manager degrades to a labeled error.
+    """
+    import urllib.error as _uerr
+    import urllib.request as _rq
+
+    from services.extraction.engine_routing import active_route
+
+    stack = ((active_route(force_refresh=True) or {}).get("worker_stack")) or {}
+    base = str(stack.get("base_url") or "http://192.168.1.83:8085").rstrip("/")
+    key = os.environ.get(str(stack.get("api_key_env") or "RTX_LANE_MANAGER_API_KEY"), "").strip()
+    if not key:
+        return {
+            "error": "lane-manager key not configured",
+            "fix": ("Put the RTX api-key.txt value into RTX_LANE_MANAGER_API_KEY "
+                    "in .env (transfer over the NFS ingest-files share, never "
+                    "chat) and recreate the backend container."),
+            "base_url": base,
+        }
+    action = (action or "status").strip().lower()
+    if action == "status":
+        method, path = "GET", "/worker/status"
+    elif action == "up":
+        method, path = "POST", f"/worker/up?scale={int(workers or 1)}&wait=300"
+    elif action == "scale":
+        if not workers:
+            return {"error": "scale requires workers=N"}
+        method, path = "POST", f"/worker/scale?workers={int(workers)}"
+    elif action == "down":
+        method, path = "POST", "/worker/down"
+    else:
+        return {"error": f"unknown action {action!r}; use status|up|scale|down"}
+    request = _rq.Request(base + path, method=method, headers={"X-Api-Key": key})
+    try:
+        with _rq.urlopen(request, timeout=330 if action == "up" else 30) as resp:
+            body = resp.read().decode("utf-8", "replace")
+    except _uerr.HTTPError as exc:
+        return {"error": f"manager HTTP {exc.code}", "detail": exc.read().decode("utf-8", "replace")[:300],
+                "endpoint": base + path}
+    except Exception as exc:  # noqa: BLE001 — reachability is the datum
+        return {"error": f"{type(exc).__name__}: {exc}"[:200], "endpoint": base + path,
+                "hint": "Box asleep? polymath_wake_extraction_engine() first."}
+    try:
+        payload = json.loads(body)
+    except Exception:  # noqa: BLE001
+        payload = {"raw": body[:500]}
+    return {"action": action, "endpoint": base + path, "result": payload}
+
+
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
@@ -3585,6 +3654,7 @@ ALL_TOOLS = (
     polymath_set_extraction_engine,
     polymath_set_engine_throughput,
     polymath_fleet_status,
+    polymath_worker_stack,
     polymath_delete_document,
     polymath_backfill_summaries,
 )

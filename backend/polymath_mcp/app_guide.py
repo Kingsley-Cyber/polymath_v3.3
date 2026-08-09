@@ -213,6 +213,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
             "polymath_set_extraction_engine",
             "polymath_set_engine_throughput",
             "polymath_fleet_status",
+            "polymath_worker_stack",
         ],
     },
     {
@@ -375,6 +376,7 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
         "steps": [
             "polymath_extraction_engine — engine reachable? busy? which device?",
             "polymath_fleet_status — who is working what right now (workers, items, queues, rate)",
+            "polymath_worker_stack — RunPod-style RTX worker stack: status/up/scale/down",
             "polymath_plan_ingestion + polymath_check_source — plan, dedupe",
             "polymath_create_corpus / polymath_upload_document — submit",
             "polymath_get_ingest_status until terminal; failures park recoverable and auto-resume",

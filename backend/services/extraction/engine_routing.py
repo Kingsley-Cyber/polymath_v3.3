@@ -121,6 +121,8 @@ async def write_route(
         doc["qualified_releases"] = existing["qualified_releases"]
     if existing.get("wake"):
         doc["wake"] = existing["wake"]
+    if existing.get("worker_stack"):
+        doc["worker_stack"] = existing["worker_stack"]
     # Append-only audit trail (capped): every flip is reconstructible —
     # who routed where, when, in which mode, and what it replaced.
     await db[ROUTING_COLLECTION].update_one(
