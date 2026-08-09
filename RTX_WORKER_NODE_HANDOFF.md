@@ -14,25 +14,24 @@ Mac control plane (all already reachable on the LAN — verified):
 Get `<MAC-IP>` and the Mongo/Neo4j passwords from the owner (they are in the
 Mac repo's `.env`: MONGO_PASSWORD, NEO4J_PASSWORD).
 
-## Step 0 — file access (the one real prerequisite)
+## Step 0 — file access via NFS (no passwords, no GUI)
 
 Batch items reference source paths under `/data/ingest-drop-off/...` which
-live on the Mac. The OWNER must share that folder once (Mac side):
-System Settings → General → Sharing → File Sharing → add
-`/Users/king/PolymathRuntime/volumes/ingest-drop-off` (and its sibling
-`ingest-files`), SMB on, account enabled.
+live on the Mac. The Mac exports both folders over NFS restricted to this
+box's IP (the Mac-side agent handles the export). On this box (WSL2 Ubuntu):
 
-Then on this box (inside WSL2 Ubuntu):
 ```bash
-sudo apt-get install -y cifs-utils
+sudo apt-get install -y nfs-common
 sudo mkdir -p /mnt/mac-drop-off /mnt/mac-ingest-files
-sudo mount -t cifs //<MAC-IP>/ingest-drop-off /mnt/mac-drop-off \
-  -o username=<mac-user>,password=<mac-pass>,uid=$(id -u),vers=3.0
-sudo mount -t cifs //<MAC-IP>/ingest-files /mnt/mac-ingest-files \
-  -o username=<mac-user>,password=<mac-pass>,uid=$(id -u),vers=3.0
-# add both to /etc/fstab for persistence
+sudo mount -t nfs -o resvport,ro <MAC-IP>:/Users/king/PolymathRuntime/volumes/ingest-drop-off /mnt/mac-drop-off
+sudo mount -t nfs -o resvport,rw <MAC-IP>:/Users/king/PolymathRuntime/volumes/ingest-files /mnt/mac-ingest-files
+# persist in /etc/fstab:
+#   <MAC-IP>:/Users/king/PolymathRuntime/volumes/ingest-drop-off /mnt/mac-drop-off nfs resvport,ro 0 0
+#   <MAC-IP>:/Users/king/PolymathRuntime/volumes/ingest-files  /mnt/mac-ingest-files nfs resvport,rw 0 0
 ```
-Verify: `ls /mnt/mac-drop-off` shows corpus upload folders.
+NOTE: macOS nfsd requires a reserved source port — the `resvport` option is
+mandatory or the mount is refused. Verify: `ls /mnt/mac-drop-off` shows
+corpus upload folders. No SMB credential file is needed anywhere.
 
 ## Step 1 — repo + env
 
