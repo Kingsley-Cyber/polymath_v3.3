@@ -3619,6 +3619,112 @@ async def polymath_worker_stack(
     return {"action": action, "endpoint": base + path, "result": payload}
 
 
+async def polymath_engine_pool(
+    action: str = "status",
+    replicas: int | None = None,
+) -> dict[str, Any]:
+    """RunPod-grade control of the GPU extraction-engine pool — no remote
+    agent, no human: key-authenticated calls to the RTX lane manager.
+
+    Actions:
+      status — GET /sidecar/status: per-replica port/health/pins/VRAM.
+      scale  — POST /sidecar/scale?replicas=N: manager starts/stops
+               identically-pinned sidecar units (systemd template). After a
+               successful scale, this tool health-verifies every replica's
+               release pins from here and WRITES the verified URL list into
+               the routing document's sidecar_pool — running workers pick
+               it up within the 30s route-cache window, no restarts.
+
+    Determinism: replicas serve the same sha-verified weights; each infer
+    response still carries the release handshake, so a wrong build fails
+    closed per call. Scale-down shrinks the pool the same way. If the
+    manager lacks /sidecar routes (404), returns manager_unsupported with
+    the one-time install note — that installation is the last act the RTX
+    agent is ever needed for.
+    """
+    import urllib.error as _uerr
+    import urllib.request as _rq
+
+    from services.extraction.engine_routing import (
+        PINNED_MODEL,
+        active_route,
+        invalidate_cache,
+    )
+
+    stack = ((active_route(force_refresh=True) or {}).get("worker_stack")) or {}
+    base = str(stack.get("base_url") or "http://192.168.1.83:8085").rstrip("/")
+    key = os.environ.get(str(stack.get("api_key_env") or "RTX_LANE_MANAGER_API_KEY"), "").strip()
+    if not key:
+        return {"error": "lane-manager key not configured",
+                "fix": "RTX_LANE_MANAGER_API_KEY in .env, then recreate backend"}
+    action = (action or "status").strip().lower()
+    if action == "status":
+        method, path = "GET", "/sidecar/status"
+    elif action == "scale":
+        if not replicas or int(replicas) < 1:
+            return {"error": "scale requires replicas>=1"}
+        method, path = "POST", f"/sidecar/scale?replicas={int(replicas)}"
+    else:
+        return {"error": f"unknown action {action!r}; use status|scale"}
+    request = _rq.Request(base + path, method=method, headers={"X-Api-Key": key})
+    try:
+        with _rq.urlopen(request, timeout=180) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace"))
+    except _uerr.HTTPError as exc:
+        if exc.code == 404:
+            return {"error": "manager_unsupported",
+                    "detail": ("lane manager has no /sidecar routes yet — "
+                               "one-time install spec is in the cluster "
+                               "inbox (06-sidecar-api.md); after that this "
+                               "tool has full granularity with no agent.")}
+        return {"error": f"manager HTTP {exc.code}",
+                "detail": exc.read().decode("utf-8", "replace")[:300]}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {exc}"[:200],
+                "hint": "Box asleep? polymath_wake_extraction_engine() first."}
+
+    result: dict[str, Any] = {"action": action, "manager": body}
+    if action != "scale":
+        return result
+    # Verify every replica the manager reports, then route the pool.
+    replica_urls = []
+    for row in (body.get("replicas") or body.get("sidecars") or []):
+        url = str(row.get("url") or "").rstrip("/")
+        if not url and row.get("port"):
+            url = f"http://192.168.1.83:{int(row['port'])}"
+        if not url:
+            continue
+        try:
+            with _rq.urlopen(url + "/health", timeout=10) as resp:
+                health = json.loads(resp.read())
+            model = health.get("model") or {}
+            if (model.get("id") == PINNED_MODEL["id"]
+                    and model.get("revision") == PINNED_MODEL["revision"]
+                    and model.get("weights_sha256") == PINNED_MODEL["weights_sha256"]):
+                replica_urls.append(url)
+            else:
+                result.setdefault("rejected", []).append(
+                    {"url": url, "reason": "release-pin mismatch"})
+        except Exception as exc:  # noqa: BLE001
+            result.setdefault("unreachable", []).append(
+                {"url": url, "reason": f"{type(exc).__name__}"[:60]})
+    if replica_urls:
+        db = ingestion_service.db
+        if db is not None:
+            await db["extraction_engine_routing"].update_one(
+                {"_id": "primary"},
+                {"$set": {"sidecar_pool": replica_urls}},
+                upsert=True,
+            )
+            invalidate_cache()
+            result["sidecar_pool_routed"] = replica_urls
+            result["note"] = ("running workers fan out across the pool "
+                              "within ~30s (route-cache TTL); no restarts")
+    else:
+        result["error"] = "no replica passed pin verification; pool unchanged"
+    return result
+
+
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
@@ -3655,6 +3761,7 @@ ALL_TOOLS = (
     polymath_set_engine_throughput,
     polymath_fleet_status,
     polymath_worker_stack,
+    polymath_engine_pool,
     polymath_delete_document,
     polymath_backfill_summaries,
 )
