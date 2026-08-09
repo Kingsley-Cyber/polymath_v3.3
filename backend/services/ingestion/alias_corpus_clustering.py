@@ -7,6 +7,7 @@ Never mutates production corpora, schemas, or Neo4j identity edges.
 from __future__ import annotations
 
 import re
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
@@ -120,6 +121,8 @@ class CorpusClusteringBatch:
     semantic_similarity_merges: int = 0
     cooccurrence_only_merges: int = 0
     unsupported_transitive_bridge_merges: int = 0
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(value: str) -> str:
@@ -631,13 +634,34 @@ def cluster_corpus_entities(
                     inv.entity.document_entity_id
                 )
 
-    # Candidate pairs within blocks
+    # Candidate pairs within blocks.
+    # Degenerate blocking keys explode quadratically: a hyper-common token
+    # or acronym key can collect thousands of entity ids, and a 10k-id
+    # block is 50M pairs — observed pinning a worker core for hours on a
+    # corpus-scale rebuild after transcript ingestion (2026-08-10 RCA).
+    # A genuine alias cluster is small; an oversized block is a pathology
+    # of the KEY, not alias evidence — skipped deterministically and
+    # reported, never ground through.
+    max_block_ids = 200
     pair_set: set[tuple[str, str]] = set()
-    for ids in blocks.values():
+    skipped_blocks: list[tuple[str, int]] = []
+    for block_key, ids in blocks.items():
         uniq = sorted(set(ids))
+        if len(uniq) > max_block_ids:
+            skipped_blocks.append((block_key, len(uniq)))
+            continue
         for i, a in enumerate(uniq):
             for b in uniq[i + 1 :]:
                 pair_set.add((a, b) if a < b else (b, a))
+    if skipped_blocks:
+        logger.warning(
+            "cluster_corpus_entities corpus=%s skipped %d degenerate blocks "
+            "(> %d ids): %s",
+            corpus_id,
+            len(skipped_blocks),
+            max_block_ids,
+            [(k[:40], n) for k, n in sorted(skipped_blocks, key=lambda t: -t[1])[:5]],
+        )
 
     merge_candidates = [
         {

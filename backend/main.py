@@ -457,40 +457,56 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.warning("Durable ingest poll recovery failed (non-fatal): %s", exc)
 
     if settings.INGEST_RUNNERS_ENABLED:
-        try:
-            # Readiness gate (2026-07-05): after a Docker VM restart the backend
-            # boots FASTER than Qdrant/Neo4j accept connections. Resuming batches
-            # immediately burned 81 docs on retrieval_setup connection-refused in
-            # one storm. Wait (bounded) for both stores to answer before starting
-            # batch runners — on timeout, resume anyway and let per-item retry
-            # handle it (better late than never, never worse than before).
-            for _attempt in range(24):  # up to ~120s
-                if await _stores_ready():
-                    if _attempt:
-                        logger.info(
-                            "Ingest recovery readiness gate: stores ready after %ds",
-                            _attempt * 5,
-                        )
-                    break
-                await asyncio.sleep(5)
-            else:
-                logger.warning(
-                    "Ingest recovery readiness gate: stores not ready after 120s — "
-                    "resuming anyway (per-item failures will surface)"
-                )
+        # Deferred (2026-08-10 RCA "flap"): this chain used to run BEFORE the
+        # lifespan yielded, so uvicorn was not serving yet — on a slow start
+        # /api/health/live could not answer, external restart-on-unhealthy
+        # watchdogs killed the process mid-recovery, and the cycle repeated
+        # (8 restarts in 46 min observed on the RTX node). Liveness must
+        # answer from process start; the readiness gate + startup recovery
+        # now run as a background chain and the poll loop starts when the
+        # chain finishes.
+        async def _deferred_ingest_startup() -> None:
+            nonlocal ingest_poll_task, startup_repair_task
+            try:
+                # Readiness gate (2026-07-05): after a Docker VM restart the
+                # backend boots FASTER than Qdrant/Neo4j accept connections.
+                # Resuming batches immediately burned 81 docs on
+                # retrieval_setup connection-refused in one storm. Wait
+                # (bounded) for both stores before starting batch runners —
+                # on timeout, resume anyway; per-item retry handles it.
+                for _attempt in range(24):  # up to ~120s
+                    if await _stores_ready():
+                        if _attempt:
+                            logger.info(
+                                "Ingest recovery readiness gate: stores ready after %ds",
+                                _attempt * 5,
+                            )
+                        break
+                    await asyncio.sleep(5)
+                else:
+                    logger.warning(
+                        "Ingest recovery readiness gate: stores not ready after 120s — "
+                        "resuming anyway (per-item failures will surface)"
+                    )
 
-            await _recover_ingest_batches("startup")
-            if bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
-                startup_repair_task = asyncio.create_task(
-                    _run_auto_corpus_repair_tick("startup")
+                await _recover_ingest_batches("startup")
+                if bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
+                    startup_repair_task = asyncio.create_task(
+                        _run_auto_corpus_repair_tick("startup")
+                    )
+                ingest_poll_task = asyncio.create_task(_ingest_worker_poll_loop())
+                logger.info(
+                    "Durable ingest runners enabled; polling every %.1fs",
+                    float(getattr(settings, "INGEST_RUNNER_POLL_SECONDS", 10.0) or 10.0),
                 )
-            ingest_poll_task = asyncio.create_task(_ingest_worker_poll_loop())
-            logger.info(
-                "Durable ingest runners enabled; polling every %.1fs",
-                float(getattr(settings, "INGEST_RUNNER_POLL_SECONDS", 10.0) or 10.0),
-            )
-        except Exception as exc:
-            logger.warning("Durable ingest startup recovery failed (non-fatal): %s", exc)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Durable ingest startup recovery failed (non-fatal): %s", exc)
+
+        startup_chain_task = asyncio.create_task(_deferred_ingest_startup())
+        background_repair_tasks.add(startup_chain_task)
+        startup_chain_task.add_done_callback(background_repair_tasks.discard)
     else:
         logger.info(
             "Durable ingest runners disabled for this process "

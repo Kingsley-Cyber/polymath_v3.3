@@ -32,6 +32,10 @@ services:
       INGEST_MAX_PARSE_JOBS: "2"
 
   ingest-worker:
+    # Live py-spy stack dumps (ptrace) for CPU-pin diagnostics — RTX RCA
+    # confirmed attach fails without this.
+    cap_add:
+      - SYS_PTRACE
     logging:
       driver: "json-file"
       options:

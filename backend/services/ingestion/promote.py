@@ -854,32 +854,66 @@ async def promote_doc(
                     pass  # already exists
         _indexes_created_for.add(corpus_id)
 
-    # 4) Promote each extraction row.
+    # 4) Promote each extraction row — BATCHED (2026-08-10 RCA: the per-
+    # point x per-collection loop issued ~3xN sequential HTTP calls; an
+    # 8,600-chunk doc meant ~26k Qdrant round-trips). Payloads differ per
+    # point, so batches carry one SetPayloadOperation per point but travel
+    # a few hundred per HTTP call; set_payload on an id absent from a
+    # collection kind is a Qdrant no-op, preserving the old best-effort
+    # semantics. Mongo mirrors ride bulk_write the same way.
+    from pymongo import UpdateOne as _UpdateOne
+
     promoted_count = 0
     skipped_count = 0
+    deltas: list[tuple[str, Any, dict[str, Any]]] = []
     for row in rows:
         chunk_id = str(row.get("chunk_id") or "")
         if not chunk_id:
             skipped_count += 1
             continue
         delta = promote(row, entity_id_fn=_graph_entity_id_fn)
-        pid = qw._uuid_from_str(chunk_id)
-        # Write to Qdrant (best-effort per collection).
+        deltas.append((chunk_id, qw._uuid_from_str(chunk_id), delta))
+        promoted_count += 1
+    batch_size = 200
+    for start in range(0, len(deltas), batch_size):
+        window = deltas[start:start + batch_size]
         for col in cols:
+            operations = [
+                qm.SetPayloadOperation(
+                    set_payload=qm.SetPayload(payload=delta, points=[pid])
+                )
+                for _cid, pid, delta in window
+            ]
             try:
-                await client.set_payload(
-                    collection_name=col, payload=delta, points=[pid]
+                await client.batch_update_points(
+                    collection_name=col, update_operations=operations
                 )
             except Exception:
-                pass  # point may not exist in this collection kind
-        # Mirror onto Mongo child record.
+                # Fallback for clients/collections that reject the batch:
+                # original per-point best-effort writes.
+                for _cid, pid, delta in window:
+                    try:
+                        await client.set_payload(
+                            collection_name=col, payload=delta, points=[pid]
+                        )
+                    except Exception:
+                        pass  # point may not exist in this collection kind
         try:
-            await db["chunks"].update_one(
-                {"corpus_id": corpus_id, "chunk_id": chunk_id}, {"$set": delta}
+            await db["chunks"].bulk_write(
+                [
+                    _UpdateOne(
+                        {"corpus_id": corpus_id, "chunk_id": cid},
+                        {"$set": delta},
+                    )
+                    for cid, _pid, delta in window
+                ],
+                ordered=False,
             )
         except Exception as exc:
-            _promote_logger.debug("promote_doc: mongo mirror failed chunk=%s: %s", chunk_id[:12], exc)
-        promoted_count += 1
+            _promote_logger.debug(
+                "promote_doc: mongo mirror bulk failed (%d rows): %s",
+                len(window), exc,
+            )
 
     await client.close()
     return {
