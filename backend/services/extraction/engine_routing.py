@@ -105,20 +105,38 @@ async def write_route(
     note: str = "",
 ) -> dict[str, Any]:
     """Persist the routing decision (async caller, e.g. the MCP tool)."""
+    now = __import__("datetime").datetime.utcnow()
     doc = {
         "_id": ROUTING_DOC_ID,
+        "schema_version": "polymath.engine_routing.v1",
         "sidecar_url": sidecar_url.rstrip("/"),
         "expected_release": expected_release,
         "mode": mode,
         "updated_by": updated_by,
         "note": note,
-        "updated_at": __import__("datetime").datetime.utcnow(),
+        "updated_at": now,
     }
     existing = await db[ROUTING_COLLECTION].find_one({"_id": ROUTING_DOC_ID}) or {}
     if existing.get("qualified_releases"):
         doc["qualified_releases"] = existing["qualified_releases"]
+    if existing.get("wake"):
+        doc["wake"] = existing["wake"]
+    # Append-only audit trail (capped): every flip is reconstructible —
+    # who routed where, when, in which mode, and what it replaced.
     await db[ROUTING_COLLECTION].update_one(
-        {"_id": ROUTING_DOC_ID}, {"$set": doc}, upsert=True
+        {"_id": ROUTING_DOC_ID},
+        {"$set": doc,
+         "$push": {"route_history": {
+             "$each": [{
+                 "at": now, "by": updated_by, "mode": mode, "note": note,
+                 "sidecar_url": doc["sidecar_url"],
+                 "expected_release": expected_release,
+                 "replaced_url": existing.get("sidecar_url"),
+                 "replaced_release": existing.get("expected_release"),
+             }],
+             "$slice": -50,
+         }}},
+        upsert=True,
     )
     invalidate_cache()
     return doc
@@ -143,6 +161,37 @@ async def record_qualified_release(db: Any, *, release: str, evidence: str) -> N
         upsert=True,
     )
     invalidate_cache()
+
+
+def describe_route() -> dict[str, Any]:
+    """Deterministic one-call summary of the control plane's routing state.
+
+    source: which layer decides the engine right now — 'routing_doc' when the
+    control document holds a URL, else 'env' (RELEX_SIDECAR_URL), else
+    'default' (the MPS host chain). Safe under all failure modes.
+    """
+    route = active_route()
+    url = (route or {}).get("sidecar_url")
+    if url:
+        source = "routing_doc"
+    elif os.environ.get("RELEX_SIDECAR_URL", "").strip():
+        source, url = "env", os.environ["RELEX_SIDECAR_URL"].strip()
+    else:
+        source, url = "default", None
+    history = list((route or {}).get("route_history") or [])
+    last = history[-1] if history else None
+    return {
+        "schema_version": (route or {}).get("schema_version"),
+        "source": source,
+        "sidecar_url": url,
+        "mode": (route or {}).get("mode"),
+        "expected_release": (route or {}).get("expected_release"),
+        "qualified_releases": list(qualified_releases(route)),
+        "wake_configured": bool(((route or {}).get("wake") or {}).get("mac_address")),
+        "last_change": ({k: last.get(k) for k in ("at", "by", "mode", "note",
+                         "sidecar_url", "replaced_url")} if last else None),
+        "history_length": len(history),
+    }
 
 
 def invalidate_cache() -> None:

@@ -3209,8 +3209,14 @@ async def polymath_extraction_engine() -> dict[str, Any]:
         load["queued_items"] = int(
             await db["ingest_batch_items"].count_documents({"status": "queued"})
         )
+    try:
+        from services.extraction.engine_routing import describe_route
+        routing = describe_route()
+    except Exception as exc:  # noqa: BLE001
+        routing = {"error": f"{type(exc).__name__}: {exc}"[:120]}
     return {
         "contract_version": "polymath.extraction_engine.v1",
+        "routing": routing,
         "sidecar_url": url,
         "reachable": reachable,
         "release": health.get("release"),
