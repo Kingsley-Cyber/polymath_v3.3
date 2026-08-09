@@ -183,7 +183,11 @@ def _type_from_surface(name: str, definition: str = "") -> str | None:
     return None
 
 
-def _choose_type(cluster: _Cluster, document: NormalizedDocumentV1) -> tuple[str, bool]:
+def _choose_type(
+    cluster: _Cluster,
+    document: NormalizedDocumentV1,
+    doc_casefold: str | None = None,
+) -> tuple[str, bool]:
     contexts = " ".join(
         _sentence_context(
             document.normalized_text, mention.normalized_start or 0, mention.normalized_end or 0,
@@ -192,10 +196,24 @@ def _choose_type(cluster: _Cluster, document: NormalizedDocumentV1) -> tuple[str
     )
     details = " ".join([*cluster.definitions, contexts])
     explicit = _type_from_surface(cluster.canonical_name, details)
+    # Literal gate before the whole-document regex scans: the patterns can
+    # only match when BOTH "defines" and the canonical name literally occur
+    # in the text, and `in` over a precomputed casefold is C-speed. Without
+    # this, two uncompiled regexes swept the ENTIRE normalized text once per
+    # cluster — O(clusters x doc_length), observed wedging a worker for
+    # hours on transcript-scale documents (py-spy: re.search inside
+    # _choose_type). Skipping when the literals are absent cannot change
+    # any outcome.
+    if doc_casefold is None:
+        doc_casefold = document.normalized_text.casefold()
+    may_match = (
+        "defines" in doc_casefold
+        and cluster.canonical_name.casefold() in doc_casefold
+    )
     escaped = re.escape(cluster.canonical_name)
-    if re.search(rf"\bdefines\s+{escaped}\s+as\s+(?:an?\s+)?[^.\n]*\b(?:workflow|process|method)\b", document.normalized_text, re.I):
+    if may_match and re.search(rf"\bdefines\s+{escaped}\s+as\s+(?:an?\s+)?[^.\n]*\b(?:workflow|process|method)\b", document.normalized_text, re.I):
         explicit = "method"
-    elif explicit is None and re.search(rf"\b{escaped}\s+defines\b", document.normalized_text, re.I) and "person" not in details.casefold():
+    elif explicit is None and may_match and re.search(rf"\b{escaped}\s+defines\b", document.normalized_text, re.I) and "person" not in details.casefold():
         explicit = "software"
     weighted: Counter[str] = Counter()
     for mention in cluster.mentions:
@@ -634,8 +652,9 @@ def reduce_document_entities(
     _merge_number_and_title_variants(clusters)
     entities: list[DocumentEntityV1] = []
     assignments: list[MentionReductionAssignment] = []
+    doc_casefold = document.normalized_text.casefold()
     for key, cluster in sorted(clusters.items()):
-        entity_type, type_conflict = _choose_type(cluster, document)
+        entity_type, type_conflict = _choose_type(cluster, document, doc_casefold)
         state, reasons = _cluster_decision(cluster, document, aligned, survey)
         if type_conflict:
             reasons = tuple(reasons) + ("type_conflict_adjudicated",)

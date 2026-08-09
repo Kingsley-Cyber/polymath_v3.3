@@ -558,13 +558,18 @@ async def run_graphify_pipeline(
     )
     raw_mentions = tuple(RawMentionV1.model_validate(item) for item in census_payload["mentions"])
 
-    def reducer_compute() -> dict[str, Any]:
-        output: ReducerOutput = reduce_document_entities(document, raw_mentions, survey)
-        return {
-            "entities": _record_payload(output.entities),
-            "assignments": [item.as_dict() for item in output.assignments],
-            "report": output.report,
-        }
+    def reducer_compute() -> Any:
+        # Pure CPU — run off the event loop (same rationale as
+        # adapter_compute: a book-scale doc must not starve heartbeats).
+        def _run() -> dict[str, Any]:
+            output: ReducerOutput = reduce_document_entities(document, raw_mentions, survey)
+            return {
+                "entities": _record_payload(output.entities),
+                "assignments": [item.as_dict() for item in output.assignments],
+                "report": output.report,
+            }
+
+        return asyncio.to_thread(_run)
 
     reducer_payload = await run_one(
         stage=PipelineStage.ENTITY_REDUCTION_COMPLETE,
@@ -577,9 +582,13 @@ async def run_graphify_pipeline(
     )
     entities = tuple(DocumentEntityV1.model_validate(item) for item in reducer_payload["entities"])
 
-    def completion_compute() -> dict[str, Any]:
-        output: CompletionOutput = complete_document_mentions(document, entities, raw_mentions)
-        return {"mentions": _record_payload(output.mentions), "report": output.report}
+    def completion_compute() -> Any:
+        # Full-document spacy tokenization — minutes on books; off-loop.
+        def _run() -> dict[str, Any]:
+            output: CompletionOutput = complete_document_mentions(document, entities, raw_mentions)
+            return {"mentions": _record_payload(output.mentions), "report": output.report}
+
+        return asyncio.to_thread(_run)
 
     completion_payload = await run_one(
         stage=PipelineStage.MENTION_COMPLETION_COMPLETE,
@@ -670,9 +679,13 @@ async def run_graphify_pipeline(
         AdaptedOpenIEArgumentV1.model_validate(item) for item in adapter_payload["arguments"]
     )
 
-    def proposition_compute() -> dict[str, Any]:
-        output = reduce_openie_propositions(openie_propositions, openie_arguments)
-        return {"families": _record_payload(output.families), "report": output.report}
+    def proposition_compute() -> Any:
+        # Pure CPU over in-memory propositions — off-loop like its siblings.
+        def _run() -> dict[str, Any]:
+            output = reduce_openie_propositions(openie_propositions, openie_arguments)
+            return {"families": _record_payload(output.families), "report": output.report}
+
+        return asyncio.to_thread(_run)
 
     proposition_payload = await run_one(
         stage=PipelineStage.OPENIE_PROPOSITION_REDUCTION_COMPLETE,
