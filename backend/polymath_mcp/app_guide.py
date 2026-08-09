@@ -198,6 +198,20 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
         ],
     },
     {
+        "name": "execution",
+        "enabled_by_default": True,
+        "required_scope": "read",
+        "purpose": (
+            "Observe the extraction engine (sidecar release pins, device, "
+            "health, queue load) before planning heavy ingestion or claiming "
+            "throughput. The engine is one URL — MPS host GPU or a LAN CUDA "
+            "workstation — with identical release pins either way."
+        ),
+        "tools": [
+            "polymath_extraction_engine",
+        ],
+    },
+    {
         "name": "ingestion",
         "enabled_by_default": True,
         "required_scope": "write",
@@ -352,6 +366,17 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
 
 
 AGENT_WORKFLOWS: list[dict[str, Any]] = [
+    {
+        "name": "ingest_then_research",
+        "steps": [
+            "polymath_extraction_engine — engine reachable? busy? which device?",
+            "polymath_plan_ingestion + polymath_check_source — plan, dedupe",
+            "polymath_create_corpus / polymath_upload_document — submit",
+            "polymath_get_ingest_status until terminal; failures park recoverable and auto-resume",
+            "polymath_verify_ingestion — the mandatory gate: safe_claims + vector_conservation.holds",
+            "then research: polymath_search / polymath_graph_query / polymath_chat_query",
+        ],
+    },
     {
         "name": "answer_existing_corpus",
         "steps": [

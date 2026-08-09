@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import os
 import logging
 import uuid
 from datetime import date, datetime
@@ -3141,7 +3142,98 @@ async def polymath_verify_ingestion(
         str(bundle["document"].get("corpus_id") or corpus_id or ""),
         str(bundle["document"].get("doc_id") or doc_id),
     )
-    return _compile_ingestion_evidence(bundle, readiness)
+    evidence = _compile_ingestion_evidence(bundle, readiness)
+    # Vector-omission conservation (O4): every active chunk is either an
+    # eligible child vector or carries an explicit BY_DESIGN receipt.
+    db = ingestion_service.db
+    if db is not None:
+        from services.ingestion.section_classifier import NOISY_KINDS
+        from services.storage.record_status import with_active_records
+
+        vcid = str(bundle["document"].get("corpus_id") or corpus_id or "")
+        vdoc = str(bundle["document"].get("doc_id") or doc_id)
+        base = {"doc_id": vdoc, "corpus_id": vcid}
+        active = int(await db["chunks"].count_documents(with_active_records(dict(base))))
+        eligible = int(await db["chunks"].count_documents(with_active_records({
+            **base,
+            "$or": [
+                {"chunk_kind": {"$exists": False}},
+                {"chunk_kind": {"$nin": sorted(NOISY_KINDS)}},
+            ],
+        })))
+        stamped = int(await db["chunks"].count_documents(with_active_records({
+            **base, "vector_omitted_by_design.by_design": True,
+        })))
+        evidence["vector_conservation"] = {
+            "active_chunks": active,
+            "eligible_children": eligible,
+            "by_design_omissions": stamped,
+            "holds": eligible + stamped == active,
+        }
+    return evidence
+
+
+async def polymath_extraction_engine() -> dict[str, Any]:
+    """Report the semantic extraction engine: which sidecar serves it, its
+    release pins, device, health, and current load.
+
+    The encoder (GLiNER-Relex-large) runs behind ONE seam — the sidecar URL.
+    Production may serve it from the host GPU (MPS) or a LAN CUDA
+    workstation; the model id, revision, weights sha256, thresholds, and
+    output contract are release-pinned and identical either way. Agents
+    should call this before planning heavy ingestion: `busy=true` means the
+    engine queue is occupied and large submissions will drain slowly.
+
+    Returns release pins (the determinism guarantee), reachability, device,
+    engine load (running/queued batch items), and the deployment seam docs.
+    """
+    import urllib.request as _rq
+
+    settings = get_settings()
+    url = (os.environ.get("RELEX_SIDECAR_URL") or "http://host.docker.internal:8737").rstrip("/")
+    expected = os.environ.get("RELEX_EXPECT_RELEASE", "").strip() or None
+    health: dict[str, Any] = {}
+    reachable = False
+    try:
+        with _rq.urlopen(url + "/health", timeout=5) as resp:
+            health = json.loads(resp.read())
+            reachable = True
+    except Exception as exc:  # noqa: BLE001 — reachability is the datum
+        health = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+    load = {"running_items": 0, "queued_items": 0}
+    db = ingestion_service.db
+    if db is not None:
+        load["running_items"] = int(
+            await db["ingest_batch_items"].count_documents({"status": "running"})
+        )
+        load["queued_items"] = int(
+            await db["ingest_batch_items"].count_documents({"status": "queued"})
+        )
+    return {
+        "contract_version": "polymath.extraction_engine.v1",
+        "sidecar_url": url,
+        "reachable": reachable,
+        "release": health.get("release"),
+        "expected_release_pin": expected,
+        "release_pin_enforced": bool(expected),
+        "device": health.get("device"),
+        "model": health.get("model"),
+        "thresholds": health.get("thresholds"),
+        "contract": health.get("contract"),
+        "busy": load["running_items"] > 0 or load["queued_items"] > 0,
+        "engine_load": load,
+        "throughput_rules_of_thumb": {
+            "mps_m1_max": "~8-12 min per MB of dense text; ~1h per 3MB book",
+            "small_doc_floor_seconds": "2-4s fixed pipeline cost per document",
+            "cuda_workstation": "~10-30x MPS once qualified (battery + digest gate)",
+        },
+        "deployment_seam": {
+            "switch": "RELEX_SIDECAR_URL env on the ingest worker — one URL, no code",
+            "pin_enforcement": "set RELEX_EXPECT_RELEASE to refuse any other build",
+            "fail_closed": "sidecar unavailable => items park failed_recoverable and auto-resume; never a silent fallback model",
+            "qualification_gate": "a new device/build becomes production only after the burned battery + digest comparison passes",
+        },
+    }
 
 
 async def polymath_delete_document(
@@ -3244,6 +3336,7 @@ ALL_TOOLS = (
     polymath_upload_document,
     polymath_get_ingest_status,
     polymath_verify_ingestion,
+    polymath_extraction_engine,
     polymath_delete_document,
     polymath_backfill_summaries,
 )
