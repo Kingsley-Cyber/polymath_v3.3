@@ -82,6 +82,10 @@ def complete_document_mentions(
     if any(entity.document_id != document.document_id for entity in entities):
         raise ValueError("document entity identity mismatch")
     nlp = spacy.blank("en")
+    # Tokenizer-only pipeline: E088's 1M-char guard protects parser/NER
+    # memory, neither of which exists here — book-scale documents (O5 soak
+    # finding: 3.3MB monograph) must tokenize whole.
+    nlp.max_length = max(len(document.normalized_text) + 1, 1_000_000)
     doc = nlp.make_doc(document.normalized_text)
     exact_matcher = PhraseMatcher(nlp.vocab, attr="ORTH")
     folded_matcher = PhraseMatcher(nlp.vocab, attr="LOWER")

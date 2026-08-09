@@ -98,7 +98,7 @@ Repeated footer.
 
 def test_survey_is_repeatable_on_committed_quality_fixture() -> None:
     repo_root = Path(__file__).resolve().parents[3]
-    text = (repo_root / "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_quality_fixture.md").read_text()
+    text = (Path(__file__).parent / "fixtures/graphify_quality_fixture.md").read_text()
     document = normalize_document("quality", text)
     first = survey_document(document)
     second = survey_document(document)

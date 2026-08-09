@@ -67,3 +67,15 @@ def test_repeatability_and_review_exclusion() -> None:
     assert first == second
     assert [item.surface for item in first.mentions] == ["MongoDB"]
     assert first.report["deterministic_ids"] is True
+
+
+def test_book_scale_document_completes_mentions() -> None:
+    # O5 soak finding: spaCy E088 rejected full-document tokenization past
+    # 1M chars, terminally failing every big book. The completion pipeline
+    # is tokenizer-only, so the guard must scale with the document.
+    filler = ("The archive committee reviewed the quarterly registry notes. " * 200 + "\n")
+    text = ("Graphify uses MongoDB. " + filler * 90)[:1_100_000] + " Graphify uses MongoDB."
+    assert len(text) > 1_000_000
+    document = normalize_document("doc-book", text)
+    output = complete_document_mentions(document, [entity("doc-book", "Graphify")])
+    assert any(m.entity_id == "entity:doc-book:Graphify" for m in output.mentions)
