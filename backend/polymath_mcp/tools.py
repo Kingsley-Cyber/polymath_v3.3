@@ -3600,8 +3600,14 @@ async def polymath_worker_stack(
         method, path = "POST", f"/worker/scale?workers={int(workers)}"
     elif action == "down":
         method, path = "POST", "/worker/down"
+    elif action == "nfs_remount":
+        # Named recovery runbook on the box (allowlisted, idempotent):
+        # down worker stack, recreate the two NFS named volumes, verify a
+        # probe ls, report. The stale-volume hang cost an evening once.
+        method, path = "POST", "/ops/nfs-remount"
     else:
-        return {"error": f"unknown action {action!r}; use status|up|scale|down"}
+        return {"error": f"unknown action {action!r}; "
+                         "use status|up|scale|down|nfs_remount"}
     request = _rq.Request(base + path, method=method, headers={"X-Api-Key": key})
     try:
         with _rq.urlopen(request, timeout=330 if action == "up" else 30) as resp:
