@@ -3521,6 +3521,35 @@ async def polymath_backfill_summaries(
     )
 
 
+async def polymath_fleet_status() -> dict[str, Any]:
+    """Glass-box view of the ingest worker fleet — what every worker is doing
+    right now, from durable state.
+
+    Returns: live lane owners (worker identity as batch:<batch_id>:
+    <container_id>:<pid>, heartbeat freshness, live/dead per the scheduler's
+    own adoption rule), every running item (file, stage, heartbeat age),
+    per-corpus queue depths, measured throughput (done last hour / 24h,
+    recent completion durations), and the engine route.
+
+    Interpreting worker identity: container_id is the Docker container's
+    hostname on whichever machine runs it (Mac Studio or the RTX box). HOST
+    PIDs are meaningless for container operations — inside its namespace a
+    worker's main process is PID 1; operate with `docker exec`/`docker top`,
+    never `kill <host-pid>`. A worker with a stale heartbeat needs no manual
+    surgery: its lanes become adoptable and the fleet self-heals; restarting
+    its container is always safe (leases release on clean stop, and a killed
+    runner's lanes are adopted within minutes).
+
+    Human-frontend mirror: GET /api/health/engine + /api/health/fleet.
+    """
+    from services.ingestion.fleet_status import fleet_status
+
+    db = ingestion_service.db
+    if db is None:
+        return {"error": "database not initialized"}
+    return await fleet_status(db)
+
+
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
@@ -3555,6 +3584,7 @@ ALL_TOOLS = (
     polymath_wake_extraction_engine,
     polymath_set_extraction_engine,
     polymath_set_engine_throughput,
+    polymath_fleet_status,
     polymath_delete_document,
     polymath_backfill_summaries,
 )

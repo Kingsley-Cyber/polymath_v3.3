@@ -67,6 +67,22 @@ async def extraction_engine_health():
     return {"routing": routing, "engine": engine}
 
 
+@router.get("/health/fleet")
+async def worker_fleet_health():
+    """Human-frontend glass box for the ingest worker fleet: every live lane
+    owner (worker identity + heartbeat freshness), every running item (file,
+    stage, heartbeat), per-corpus queue depths, measured throughput, and the
+    engine route. The MCP mirror is polymath_fleet_status. Deterministic and
+    fail-safe: sections degrade to labeled errors, never a 500."""
+    from services.ingestion.fleet_status import fleet_status
+    from services.ingestion_service import ingestion_service
+
+    db = ingestion_service.db
+    if db is None:
+        return {"error": "database not initialized"}
+    return await fleet_status(db)
+
+
 @router.post("/health/embedder/batch-ready")
 async def embedder_batch_ready():
     """Fail-closed local-embedder preflight for an evaluation batch."""
