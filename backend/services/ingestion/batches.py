@@ -1794,6 +1794,35 @@ async def recover_local_batch_runners(
     ).limit(max(1, int(max_batches))).to_list(length=max(1, int(max_batches)))
 
     started = 0
+    # Livelock guard (2026-08-09): with a per-worker batch cap, starting the
+    # first-sorted candidate every tick deadlocks when its corpus lane is
+    # owned by another worker — the runner defers/exits and the next tick
+    # picks the SAME batch again, never reaching runnable candidates. Skip
+    # candidates whose corpus lane is already owned so the one start we get
+    # goes to a batch this worker can actually run.
+    owned_corpora: set[str] = set()
+    try:
+        lane_rows = await db["ingest_lane_leases"].find(
+            {"lane": "source_parse", "lease_until": {"$gt": _now()}},
+            {"corpus_id": 1},
+        ).to_list(length=200)
+        owned_corpora = {str(r.get("corpus_id") or "") for r in lane_rows}
+    except Exception:  # noqa: BLE001 — selection hint only, never blocks
+        owned_corpora = set()
+    if owned_corpora:
+        batch_corpus: dict[str, str] = {}
+        try:
+            metas = await db[BATCHES].find(
+                {"batch_id": {"$in": [str(b.get("batch_id") or "") for b in rows]}},
+                {"batch_id": 1, "corpus_id": 1},
+            ).to_list(length=len(rows))
+            batch_corpus = {str(m["batch_id"]): str(m.get("corpus_id") or "") for m in metas}
+        except Exception:  # noqa: BLE001
+            batch_corpus = {}
+        preferred = [b for b in rows
+                     if batch_corpus.get(str(b.get("batch_id") or "")) not in owned_corpora]
+        deferredish = [b for b in rows if b not in preferred]
+        rows = preferred + deferredish
     for batch in rows:
         # Operator pause is sticky: without this skip, poll recovery would
         # undo any pause within 10 seconds. Only an explicit Resume (which
