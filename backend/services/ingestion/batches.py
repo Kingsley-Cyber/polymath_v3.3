@@ -1735,21 +1735,33 @@ async def recover_local_batch_runners(
         running_filter,
         {"batch_id": 1, "_id": 0},
     ).to_list(length=None)
-    res = await db[ITEMS].update_many(
-        running_filter,
-        {
-            "$set": {
-                "status": ITEM_FAILED_RECOVERABLE,
-                "phase": "stale",
-                "failure_stage": "backend_restarted",
-                "error": "Backend restarted while this item was running; item can be resumed.",
-                "lease_owner": None,
-                "lease_until": None,
-                "last_heartbeat_at": now,
-                "updated_at": now,
-            }
-        },
+    parking_set = {
+        "status": ITEM_FAILED_RECOVERABLE,
+        "phase": "stale",
+        "failure_stage": "backend_restarted",
+        "error": "Backend restarted while this item was running; item can be resumed.",
+        "lease_owner": None,
+        "lease_until": None,
+        "last_heartbeat_at": now,
+        "updated_at": now,
+    }
+    # Refund the attempt the claim consumed: a restart killed the RUNNER —
+    # the item did not fail. Without the refund, infra bounces eat the
+    # INGEST_MAX_ITEM_ATTEMPTS content-failure budget (observed 2026-08-09:
+    # books hard-failed max_attempts with error histories containing ONLY
+    # "Backend restarted"). $set+$inc in one update is atomic per document,
+    # and a parked row stops matching running_filter, so concurrent recover
+    # passes cannot double-refund. The second update catches attempts<=0 /
+    # missing rows — nothing was consumed there, so nothing is refunded.
+    res_refund = await db[ITEMS].update_many(
+        {**running_filter, "attempts": {"$gt": 0}},
+        {"$set": parking_set, "$inc": {"attempts": -1}},
     )
+    res_plain = await db[ITEMS].update_many(
+        running_filter,
+        {"$set": parking_set},
+    )
+    reclaimed_items = int(res_refund.modified_count) + int(res_plain.modified_count)
 
     work_filter: dict[str, Any] = {
         "source": {"$in": RUNNABLE_SOURCES},
@@ -1771,7 +1783,7 @@ async def recover_local_batch_runners(
     )
     if not batch_ids:
         return {
-            "reclaimed_items": int(res.modified_count),
+            "reclaimed_items": reclaimed_items,
             "candidate_batches": 0,
             "started_batches": 0,
         }
@@ -1861,7 +1873,7 @@ async def recover_local_batch_runners(
             started += 1
 
     return {
-        "reclaimed_items": int(res.modified_count),
+        "reclaimed_items": reclaimed_items,
         "candidate_batches": len(rows),
         "started_batches": started,
     }

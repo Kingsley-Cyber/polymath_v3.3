@@ -1106,6 +1106,9 @@ def _matches_query(row, query):
             elif "$lt" in expected:
                 if actual is None or not actual < expected["$lt"]:
                     return False
+            elif "$gt" in expected:
+                if actual is None or not actual > expected["$gt"]:
+                    return False
             elif "$in" not in expected:
                 raise AssertionError(f"Unsupported query operator in {expected!r}")
         elif actual != expected:
@@ -1192,6 +1195,8 @@ class _RecoveryCollection:
         for row in self.rows:
             if _matches_query(row, query):
                 row.update(update.get("$set", {}))
+                for key, value in (update.get("$inc") or {}).items():
+                    row[key] = row.get(key, 0) + value
                 modified += 1
         return type("Result", (), {"modified_count": modified})()
 
@@ -1289,6 +1294,57 @@ async def test_recover_local_batch_runners_reclaims_orphaned_running_items(monke
     assert by_item["running"]["status"] == batches.ITEM_FAILED_RECOVERABLE
     assert by_item["running"]["failure_stage"] == "backend_restarted"
     assert by_item["true-failed"]["status"] == batches.ITEM_FAILED
+
+
+@pytest.mark.asyncio
+async def test_recover_refunds_attempt_consumed_by_restart(monkeypatch):
+    """Restart-parking must refund the claim's attempt increment — infra
+    bounces may never eat the INGEST_MAX_ITEM_ATTEMPTS failure budget."""
+    batch_rows = [
+        {
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.BATCH_RUNNING,
+            "started_at": datetime(2024, 1, 1),
+        }
+    ]
+    item_rows = [
+        {
+            "item_id": "claimed-thrice",
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.ITEM_RUNNING,
+            "lease_until": None,
+            "attempts": 3,
+        },
+        {
+            "item_id": "never-claimed",
+            "batch_id": "batch-1",
+            "source": "local_folder",
+            "user_id": "user-1",
+            "status": batches.ITEM_RUNNING,
+            "lease_until": None,
+            "attempts": 0,
+        },
+    ]
+    db = _RecoveryDb(batch_rows, item_rows)
+    monkeypatch.setattr(
+        batches, "start_local_batch_runner", lambda **kwargs: True
+    )
+
+    result = await batches.recover_local_batch_runners(
+        db=db,
+        ingestion_service=object(),
+    )
+
+    by_item = {row["item_id"]: row for row in item_rows}
+    assert result["reclaimed_items"] == 2
+    assert by_item["claimed-thrice"]["status"] == batches.ITEM_FAILED_RECOVERABLE
+    assert by_item["claimed-thrice"]["attempts"] == 2  # refunded, not free
+    assert by_item["never-claimed"]["status"] == batches.ITEM_FAILED_RECOVERABLE
+    assert by_item["never-claimed"]["attempts"] == 0  # nothing consumed, nothing refunded
 
 
 @pytest.mark.asyncio
