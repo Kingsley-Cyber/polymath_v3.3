@@ -22,6 +22,17 @@ RELEX_CONTRACT = "relex-infer-v1"
 
 
 def sidecar_url() -> str:
+    # Runtime routing (Mongo control doc, TTL-cached) outranks the env
+    # chain so an MCP agent can flip the engine without restarts. Any
+    # routing failure falls back to env/defaults (the MPS host sidecar).
+    try:
+        from services.extraction.engine_routing import routed_sidecar_url
+
+        routed = routed_sidecar_url()
+        if routed:
+            return routed
+    except Exception:  # noqa: BLE001 — routing is strictly optional
+        pass
     explicit = os.environ.get("RELEX_SIDECAR_URL", "").strip()
     if explicit:
         return explicit.rstrip("/")
@@ -107,6 +118,13 @@ def infer(
     if body.get("contract") != RELEX_CONTRACT:
         raise RelexSidecarError(f"contract mismatch: {body.get('contract')!r}")
     expected_release = os.environ.get("RELEX_EXPECT_RELEASE", "").strip()
+    if not expected_release:
+        try:
+            from services.extraction.engine_routing import routed_expected_release
+
+            expected_release = routed_expected_release() or ""
+        except Exception:  # noqa: BLE001
+            expected_release = ""
     if expected_release and body.get("release") != expected_release:
         raise RelexSidecarError(
             f"release pin mismatch: sidecar={body.get('release')!r} "

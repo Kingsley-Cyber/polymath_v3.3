@@ -3236,6 +3236,100 @@ async def polymath_extraction_engine() -> dict[str, Any]:
     }
 
 
+async def polymath_set_extraction_engine(
+    sidecar_url: str,
+    mode: Literal["production", "qualification"] = "production",
+    note: str = "",
+) -> dict[str, Any]:
+    """Route the extraction engine to a sidecar (e.g. enable the LAN CUDA
+    workstation to accelerate the Mac) — with determinism enforced at flip
+    time.
+
+    The flip only succeeds when the target's /health proves the FROZEN
+    release identity: exact model id, revision, and weights sha256. In
+    "production" mode the target's release must additionally be in the
+    qualified set (its burned-battery + digest comparison passed);
+    "qualification" mode routes an unqualified-but-pin-correct build so the
+    qualification harness itself can run against it. Takes effect within
+    ~30s (route cache TTL); in-flight items finish on their current engine.
+    Clear the route by flipping back to the MPS sidecar URL.
+    """
+    import urllib.request as _rq
+
+    from services.extraction import engine_routing
+
+    uid = _require_user_id_for_write()
+    if mode not in ("production", "qualification"):
+        raise ValueError("mode must be 'production' or 'qualification'")
+    url = sidecar_url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("sidecar_url must be an http(s) URL")
+
+    try:
+        with _rq.urlopen(url + "/health", timeout=8) as resp:
+            health = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "refused",
+            "reason": f"target unreachable: {type(exc).__name__}: {exc}"[:200],
+            "routed": False,
+        }
+
+    model = health.get("model") or {}
+    pin = engine_routing.PINNED_MODEL
+    mismatches = [
+        f"{key}: sidecar={model.get(key)!r} pinned={value!r}"
+        for key, value in pin.items()
+        if model.get(key) != value
+    ]
+    if health.get("contract") != "relex-infer-v1":
+        mismatches.append(f"contract: {health.get('contract')!r}")
+    if mismatches:
+        return {
+            "status": "refused",
+            "reason": "release-pin mismatch — refusing non-identical weights",
+            "mismatches": mismatches,
+            "routed": False,
+        }
+
+    release = str(health.get("release") or "")
+    db = ingestion_service.db
+    if db is None:
+        return {"status": "refused", "reason": "control-plane db unavailable", "routed": False}
+    route_row = await db[engine_routing.ROUTING_COLLECTION].find_one(
+        {"_id": engine_routing.ROUTING_DOC_ID}
+    )
+    qualified = engine_routing.qualified_releases(route_row or {})
+    if mode == "production" and release not in qualified:
+        return {
+            "status": "refused",
+            "reason": (
+                f"release {release!r} is not production-qualified. Run the "
+                "burned battery + digest comparison against it, record the "
+                "release via engine_routing.record_qualified_release, then "
+                "flip. Use mode='qualification' to route harness runs now."
+            ),
+            "qualified_releases": list(qualified),
+            "routed": False,
+        }
+
+    doc = await engine_routing.write_route(
+        db,
+        sidecar_url=url,
+        expected_release=release,
+        mode=mode,
+        updated_by=str(uid),
+        note=note,
+    )
+    return {
+        "status": "routed",
+        "routed": True,
+        "route": {k: _json_ready(v) for k, v in doc.items() if k != "_id"},
+        "target": {"release": release, "device": health.get("device")},
+        "takes_effect": "within ~30s (route cache TTL); in-flight items finish on their current engine",
+    }
+
+
 async def polymath_delete_document(
     corpus_id: str,
     doc_id: str,
@@ -3337,6 +3431,7 @@ ALL_TOOLS = (
     polymath_get_ingest_status,
     polymath_verify_ingestion,
     polymath_extraction_engine,
+    polymath_set_extraction_engine,
     polymath_delete_document,
     polymath_backfill_summaries,
 )
