@@ -3710,7 +3710,12 @@ async def polymath_engine_pool(
                 {"url": url, "reason": f"{type(exc).__name__}"[:60]})
     if replica_urls:
         db = ingestion_service.db
-        if db is not None:
+        if db is None:
+            # Never skip silently: report so the caller routes manually.
+            result["error"] = ("replicas verified but db not initialized in "
+                               "this process — pool NOT routed")
+            result["verified_replicas"] = replica_urls
+        else:
             await db["extraction_engine_routing"].update_one(
                 {"_id": "primary"},
                 {"$set": {"sidecar_pool": replica_urls}},
