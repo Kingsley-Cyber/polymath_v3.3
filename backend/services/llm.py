@@ -578,6 +578,17 @@ class LLMService:
             raise last_exception
         raise RuntimeError("Request failed after all retries")
 
+    # Wildcard prefixes the LiteLLM proxy config owns end-to-end (api_base +
+    # api_key live in litellm/config.yaml). Forwarding a per-call api_base for
+    # these makes the proxy bypass wildcard resolution, and litellm core cannot
+    # infer a provider from the custom prefix — the call 400s. The router must
+    # resolve them, so pool-entry base URLs are dropped for these prefixes.
+    ROUTER_OWNED_PREFIXES = frozenset({"ollama_cloud"})
+
+    @classmethod
+    def _router_owned(cls, model: str) -> bool:
+        return model.split("/", 1)[0].lower() in cls.ROUTER_OWNED_PREFIXES
+
     @staticmethod
     def _provider_for_model(model: str) -> str | None:
         """
@@ -669,7 +680,7 @@ class LLMService:
             "max_tokens": max_tokens,
             "stream": False,
         }
-        if api_base:
+        if api_base and not self._router_owned(model):
             body["api_base"] = api_base
         if response_format is not None:
             body["response_format"] = response_format
@@ -800,7 +811,7 @@ class LLMService:
         resolved_key = api_key or await self._resolve_api_key(model)
         if resolved_key:
             body["api_key"] = resolved_key
-        if api_base:
+        if api_base and not self._router_owned(model):
             body["api_base"] = api_base
         self._merge_provider_extra_params(
             body,
@@ -1036,7 +1047,7 @@ class LLMService:
         resolved_key = api_key or await self._resolve_api_key(model)
         if resolved_key:
             body["api_key"] = resolved_key
-        if api_base:
+        if api_base and not self._router_owned(model):
             body["api_base"] = api_base
         self._merge_provider_extra_params(
             body,

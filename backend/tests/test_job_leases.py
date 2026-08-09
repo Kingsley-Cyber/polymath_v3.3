@@ -268,3 +268,118 @@ async def test_lane_lease_allows_only_one_owner_until_expiry():
     assert second is None
     assert reclaimed is not None
     assert reclaimed["owner"] == "worker-b"
+
+
+class _AdoptableLaneCollection:
+    """Evaluates the real acquire query ($or predicates) against one row."""
+
+    def __init__(self, row):
+        self.row = row
+
+    @staticmethod
+    def _cond_matches(row, cond):
+        import re as _re
+
+        for field, expected in cond.items():
+            actual = row.get(field)
+            if isinstance(expected, dict):
+                if "$lte" in expected:
+                    if actual is None or not actual <= expected["$lte"]:
+                        return False
+                if "$exists" in expected:
+                    if bool(field in row) != bool(expected["$exists"]):
+                        return False
+                if "$regex" in expected:
+                    if not isinstance(actual, str) or not _re.match(
+                        expected["$regex"], actual
+                    ):
+                        return False
+            elif actual != expected:
+                return False
+        return True
+
+    async def find_one_and_update(self, query, update, **_kwargs):
+        row = self.row
+        if row is None or row.get("_id") != query.get("_id"):
+            row = {"_id": query["_id"]}
+        elif not any(self._cond_matches(row, cond) for cond in query.get("$or") or []):
+            return None
+        row = {**row, **update["$set"]}
+        self.row = row
+        return row
+
+
+@pytest.mark.asyncio
+async def test_lane_lease_same_batch_stale_owner_is_adopted():
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    collection = _AdoptableLaneCollection(
+        {
+            "_id": "corpus-1:summary",
+            "owner": "batch:B1:old-host:41",
+            "lease_until": now + timedelta(minutes=25),  # unexpired
+            "updated_at": now - timedelta(minutes=10),  # heartbeats stopped
+        }
+    )
+    db = {"ingest_lane_leases": collection}
+
+    adopted = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="batch:B1:new-host:7",
+        now=now,
+        adopt_prefix="batch:B1:",
+    )
+
+    assert adopted is not None
+    assert adopted["owner"] == "batch:B1:new-host:7"
+
+
+@pytest.mark.asyncio
+async def test_lane_lease_same_batch_fresh_owner_is_not_adopted():
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    collection = _AdoptableLaneCollection(
+        {
+            "_id": "corpus-1:summary",
+            "owner": "batch:B1:old-host:41",
+            "lease_until": now + timedelta(minutes=25),
+            "updated_at": now - timedelta(seconds=30),  # heartbeat alive
+        }
+    )
+    db = {"ingest_lane_leases": collection}
+
+    adopted = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="batch:B1:new-host:7",
+        now=now,
+        adopt_prefix="batch:B1:",
+    )
+
+    assert adopted is None
+
+
+@pytest.mark.asyncio
+async def test_lane_lease_foreign_batch_stale_owner_is_not_adopted():
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    collection = _AdoptableLaneCollection(
+        {
+            "_id": "corpus-1:summary",
+            "owner": "batch:OTHER:old-host:41",
+            "lease_until": now + timedelta(minutes=25),
+            "updated_at": now - timedelta(minutes=10),
+        }
+    )
+    db = {"ingest_lane_leases": collection}
+
+    adopted = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="batch:B1:new-host:7",
+        now=now,
+        adopt_prefix="batch:B1:",
+    )
+
+    assert adopted is None

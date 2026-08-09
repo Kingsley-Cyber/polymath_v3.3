@@ -59,8 +59,22 @@ async def acquire_lane_lease(
     owner: str,
     now: datetime | None = None,
     lease_seconds: int = DEFAULT_LANE_LEASE_SECONDS,
+    adopt_prefix: str | None = None,
+    adopt_stale_seconds: float = 180.0,
 ) -> dict[str, Any] | None:
-    """Atomically acquire one corpus/lane lease, reclaiming expired leases."""
+    """Atomically acquire one corpus/lane lease, reclaiming expired leases.
+
+    ``adopt_prefix`` — dead-owner takeover for the SAME logical owner. Lane
+    owners embed hostname:pid so two live runners can never share a lease,
+    but that means a killed container's runner (new hostname/pid) no longer
+    matches its own unexpired lease and the batch self-deadlocks for the
+    remaining lease TTL (observed 2026-08-09: every worker recreate froze
+    the fleet ~30min). A lease whose owner shares ``adopt_prefix`` (same
+    batch) AND whose heartbeat is older than ``adopt_stale_seconds`` (≥3
+    missed renewals — the process is dead, not busy) may be taken over.
+    find_one_and_update keeps the takeover atomic: of two racing adopters,
+    the loser's predicate no longer matches after the winner's write.
+    """
 
     now = now or datetime.utcnow()
     lease_id = uuid4().hex
@@ -74,6 +88,20 @@ async def acquire_lane_lease(
         "lease_id": lease_id,
         "lease_until": deadline,
     }
+    claim_predicates: list[dict[str, Any]] = [
+        {"lease_until": {"$lte": now}},
+        {"lease_until": {"$exists": False}},
+        {"owner": owner},
+    ]
+    if adopt_prefix:
+        claim_predicates.append(
+            {
+                "owner": {"$regex": f"^{re.escape(adopt_prefix)}"},
+                "updated_at": {
+                    "$lte": now - timedelta(seconds=float(adopt_stale_seconds))
+                },
+            }
+        )
     try:
         collection = db[LANE_LEASE_COLLECTION]
         if not hasattr(collection, "find_one_and_update"):
@@ -81,11 +109,7 @@ async def acquire_lane_lease(
         row = await collection.find_one_and_update(
             {
                 "_id": key,
-                "$or": [
-                    {"lease_until": {"$lte": now}},
-                    {"lease_until": {"$exists": False}},
-                    {"owner": owner},
-                ],
+                "$or": claim_predicates,
             },
             {
                 "$set": {
@@ -176,6 +200,7 @@ async def corpus_lane_lease(
     lane: str,
     owner: str,
     lease_seconds: int = DEFAULT_LANE_LEASE_SECONDS,
+    adopt_prefix: str | None = None,
 ):
     """Yield the lease row, or ``None`` when another controller owns it."""
 
@@ -185,6 +210,7 @@ async def corpus_lane_lease(
         lane=lane,
         owner=owner,
         lease_seconds=lease_seconds,
+        adopt_prefix=adopt_prefix,
     )
     heartbeat_task: asyncio.Task | None = None
     if lease:
@@ -193,7 +219,11 @@ async def corpus_lane_lease(
         _LOST_LANES.discard(str(corpus_id))
 
         async def _heartbeat() -> None:
-            interval = max(20.0, float(lease_seconds) / 3.0)
+            # Renew every ≤60s regardless of lease length: dead-owner
+            # adoption (acquire_lane_lease adopt_prefix) infers death from
+            # missed heartbeats, so the beat must be much finer than the
+            # 30-min lease TTL. One tiny update per lane per minute.
+            interval = max(20.0, min(60.0, float(lease_seconds) / 3.0))
             while True:
                 await asyncio.sleep(interval)
                 renewed = await renew_lane_lease(

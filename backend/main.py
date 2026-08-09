@@ -350,6 +350,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ingest_poll_task: asyncio.Task | None = None
     startup_repair_task: asyncio.Task | None = None
     auto_repair_lock = asyncio.Lock()
+    background_repair_tasks: set[asyncio.Task] = set()
 
     async def _stores_ready() -> bool:
         import httpx as _hx
@@ -436,7 +437,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 if bool(getattr(settings, "INGEST_AUTO_REPAIR_ENABLED", True)):
                     if now - last_repair_tick >= repair_interval:
                         last_repair_tick = now
-                        await _run_auto_corpus_repair_tick("poll")
+                        # Decoupled (2026-08-09): a reconcile pass over active
+                        # corpora can run for many minutes (per-doc census
+                        # scrolls + inline repair-lane execution). Awaiting it
+                        # here starved batch claiming — with only one poll loop
+                        # per worker, no new items were claimed until the pass
+                        # finished. The 10s recover cadence must never wait
+                        # behind repair; auto_repair_lock already serializes
+                        # passes, so an overdue tick during a live pass is a
+                        # cheap logged skip.
+                        repair_task = asyncio.create_task(
+                            _run_auto_corpus_repair_tick("poll")
+                        )
+                        background_repair_tasks.add(repair_task)
+                        repair_task.add_done_callback(background_repair_tasks.discard)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -513,6 +527,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("Shutting down Polymath RAG API")
+    for repair_task in list(background_repair_tasks):
+        repair_task.cancel()
     if startup_repair_task is not None:
         startup_repair_task.cancel()
         try:

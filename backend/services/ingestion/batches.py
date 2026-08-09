@@ -3603,6 +3603,11 @@ def start_local_batch_runner(
                             corpus_id=corpus_id,
                             lane=lane,
                             owner=owner,
+                            # Same-batch dead-owner takeover: a recreated
+                            # worker gets a new hostname/pid, so without this
+                            # a killed runner's unexpired lease self-deadlocks
+                            # its own batch for the lease TTL.
+                            adopt_prefix=f"batch:{batch_id}:",
                         )
                     )
                     if not lease:
