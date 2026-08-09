@@ -252,3 +252,63 @@ async def test_wake_tool_refuses_without_mac(monkeypatch):
     finally:
         _current_user_id.reset(token)
     assert out["status"] == "refused" and "mac" in out["reason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_throughput_knob_bounds_and_unsupported(monkeypatch):
+    from polymath_mcp.auth import SYSTEM_USER_ID, _current_user_id
+
+    class _Routing:
+        async def find_one(self, q):
+            return {"_id": "primary", "sidecar_url": "http://gpu-box:8738"}
+
+    class _Db(dict):
+        def __missing__(self, key):
+            value = _Routing(); self[key] = value; return value
+
+    token = _current_user_id.set(SYSTEM_USER_ID)
+    try:
+        with patch.object(type(mcp_tools.ingestion_service), "db",
+                          property(lambda self: _Db())):
+            low = await mcp_tools.polymath_set_engine_throughput(4)
+            high = await mcp_tools.polymath_set_engine_throughput(96)
+            import urllib.error
+            with patch("urllib.request.urlopen",
+                       side_effect=urllib.error.HTTPError("u", 404, "nf", {}, None)):
+                v1 = await mcp_tools.polymath_set_engine_throughput(48)
+    finally:
+        _current_user_id.reset(token)
+    assert low["status"] == "refused" and high["status"] == "refused"
+    assert v1["status"] == "engine_unsupported"
+
+
+@pytest.mark.asyncio
+async def test_throughput_knob_applies_within_bounds(monkeypatch):
+    from polymath_mcp.auth import SYSTEM_USER_ID, _current_user_id
+
+    class _Routing:
+        async def find_one(self, q):
+            return {"_id": "primary", "sidecar_url": "http://gpu-box:8738"}
+
+    class _Db(dict):
+        def __missing__(self, key):
+            value = _Routing(); self[key] = value; return value
+
+    class _Resp:
+        def read(self):
+            import json
+            return json.dumps({"vram_budget_gb": 60, "effective_batch": 128,
+                               "probed_ceiling": 192}).encode()
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+
+    token = _current_user_id.set(SYSTEM_USER_ID)
+    try:
+        with patch("urllib.request.urlopen", return_value=_Resp()), \
+             patch.object(type(mcp_tools.ingestion_service), "db",
+                          property(lambda self: _Db())):
+            out = await mcp_tools.polymath_set_engine_throughput(60)
+    finally:
+        _current_user_id.reset(token)
+    assert out["status"] == "applied"
+    assert out["vram_budget_gb"] == 60 and out["effective_batch"] == 128

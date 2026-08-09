@@ -3303,6 +3303,54 @@ async def polymath_wake_extraction_engine(
     return result
 
 
+async def polymath_set_engine_throughput(
+    vram_budget_gb: int,
+) -> dict[str, Any]:
+    """Set the extraction engine's GPU VRAM budget (throughput knob).
+
+    Bounded 8-60 GB (default at engine boot: 32). Larger budgets mean larger
+    GPU batches and higher windows/second on batched engine builds; the
+    qualification battery proves batch size never changes semantic output, so
+    this knob trades only memory for speed. Serial engine builds (v1) do not
+    support it and return engine_unsupported.
+    """
+    import urllib.request as _rq
+
+    from services.extraction import engine_routing
+
+    _require_user_id_for_write()
+    budget = int(vram_budget_gb)
+    if not 8 <= budget <= 60:
+        return {"status": "refused",
+                "reason": "vram_budget_gb must be within 8..60 (default 32)"}
+    route = None
+    db = ingestion_service.db
+    if db is not None:
+        route = await db[engine_routing.ROUTING_COLLECTION].find_one(
+            {"_id": engine_routing.ROUTING_DOC_ID})
+    url = str((route or {}).get("sidecar_url") or
+              os.environ.get("RELEX_SIDECAR_URL") or "").rstrip("/")
+    if not url:
+        return {"status": "refused", "reason": "no routed engine"}
+    body = json.dumps({"vram_budget_gb": budget}).encode()
+    req = _rq.Request(url + "/config", data=body,
+                      headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with _rq.urlopen(req, timeout=10) as resp:
+            out = json.loads(resp.read())
+    except _rq.HTTPError as exc:
+        if exc.code == 404:
+            return {"status": "engine_unsupported",
+                    "reason": "routed engine has no /config endpoint (serial v1 "
+                              "build) — deploy the batched v2 sidecar to use the "
+                              "throughput knob"}
+        return {"status": "error", "reason": f"HTTP {exc.code}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "reason": f"{type(exc).__name__}: {exc}"[:200]}
+    return {"status": "applied", "engine": url, **{
+        k: out.get(k) for k in ("vram_budget_gb", "effective_batch", "probed_ceiling")}}
+
+
 async def polymath_set_extraction_engine(
     sidecar_url: str,
     mode: Literal["production", "qualification"] = "production",
@@ -3500,6 +3548,7 @@ ALL_TOOLS = (
     polymath_extraction_engine,
     polymath_wake_extraction_engine,
     polymath_set_extraction_engine,
+    polymath_set_engine_throughput,
     polymath_delete_document,
     polymath_backfill_summaries,
 )

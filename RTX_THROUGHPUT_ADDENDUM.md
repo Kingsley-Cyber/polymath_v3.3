@@ -22,11 +22,21 @@ The current server loops one text per forward pass. Upgrade `scripts/relex_sidec
   so the allocator grows once and stays hot permanently.
   Do NOT hard-reserve memory with dummy tensors — the allocator keeps grown
   segments, which achieves the "always allocated" goal without starving the driver.
+- **Runtime VRAM budget endpoint** (`POST /config`): body
+  `{"vram_budget_gb": <int>}`, clamped to **8..60**, DEFAULT **32** at boot.
+  From the startup probe, build a small table mapping batch size → measured
+  VRAM; on /config, pick the largest probed batch whose VRAM fits the budget
+  and make it the effective batch. Respond with
+  `{"vram_budget_gb", "effective_batch", "probed_ceiling"}` and include the
+  same three fields in `GET /health`. The Mac's MCP exposes this to agents
+  (bounded, write-scoped) so throughput scales on demand.
 - Bump the release name to `relex-large-cuda-sidecar-v2-batched` in a COPY of the
   config (`relex_sidecar_cuda_v2.yaml`) — the Mac's qualification gate must see a
   distinct release. Serve v2 on port 8738 (second systemd unit) so v1 serial stays
-  untouched until v2 passes the Mac-side digest battery. After the Mac agent
-  qualifies v2, it will route production to :8738 and v1 can be disabled.
+  untouched until v2 passes the Mac-side digest battery. NOTE: the Mac's battery
+  will run at BOTH budget extremes (32GB and 60GB) — batch-size must not change
+  any output, or v2 stays unqualified. After qualification, production routes
+  to :8738 and v1 can be disabled.
 
 ## 2. Wake-on-LAN (no-human wake)
 

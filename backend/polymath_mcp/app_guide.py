@@ -211,6 +211,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
             "polymath_extraction_engine",
             "polymath_wake_extraction_engine",
             "polymath_set_extraction_engine",
+            "polymath_set_engine_throughput",
         ],
     },
     {
