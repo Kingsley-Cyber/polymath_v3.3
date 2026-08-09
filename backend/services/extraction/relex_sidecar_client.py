@@ -106,6 +106,12 @@ def infer(
     body = _post("/infer", payload, _infer_timeout() if timeout is None else timeout)
     if body.get("contract") != RELEX_CONTRACT:
         raise RelexSidecarError(f"contract mismatch: {body.get('contract')!r}")
+    expected_release = os.environ.get("RELEX_EXPECT_RELEASE", "").strip()
+    if expected_release and body.get("release") != expected_release:
+        raise RelexSidecarError(
+            f"release pin mismatch: sidecar={body.get('release')!r} "
+            f"expected={expected_release!r} — refusing unpinned inference"
+        )
     results = []
     for row in body["results"]:
         results.append(RelexResult(

@@ -1,0 +1,31 @@
+# GLiNER-Relex CUDA sidecar — SAME release pins as relex_sidecar.yaml,
+# different device/host. For the workstation GPU (RTX 6000 Pro) deployment:
+#   RELEX_SIDECAR_CONFIG=config/relex_sidecar_cuda.yaml python scripts/relex_sidecar_server.py
+# The Mac's worker points at it with RELEX_SIDECAR_URL=http://<gpu-box-ip>:8737
+# and (recommended) RELEX_EXPECT_RELEASE=relex-large-cuda-sidecar-v1.
+# PRODUCTION FLIP IS GATED: burned battery + digest comparison vs the MPS
+# baseline must pass first (cross-device numeric drift near the 0.30
+# thresholds is a semantic change until measured clean).
+release: relex-large-cuda-sidecar-v1
+role: qualification_candidate
+model:
+  id: knowledgator/gliner-relex-large-v1.0
+  revision: 4aedc9226a5ac9e2f6b5ea3e91c1ee577c88a290
+  weights_sha256: 7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a
+runtime:
+  device: cuda                      # server refuses silent CPU fallback
+  interpreter: .venv-relex-cuda
+  host: 0.0.0.0                     # LAN-exposed for the Mac's worker
+  port: 8737
+thresholds:
+  entity: 0.30
+  relation: 0.30
+labels:
+  entities: [person, organization, location, product, software, model,
+             document, dataset, concept, method, process, event, metric,
+             system, component, other]
+  relations: ["is a", "part of", "owns", "member of", "created by",
+              "located in", "uses", "depends on", "implements", "supports",
+              "produces", "consumes", "derived from", "defines", "measures",
+              "causes", "enables", "precedes"]
+output_contract: relex-infer-v1

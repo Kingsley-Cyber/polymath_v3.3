@@ -36,9 +36,10 @@ from pathlib import Path
 
 import yaml
 
-CONFIG = yaml.safe_load(
-    (Path(__file__).resolve().parents[2] / "config" / "relex_sidecar.yaml").read_text()
+_CONFIG_PATH = os.environ.get("RELEX_SIDECAR_CONFIG") or str(
+    Path(__file__).resolve().parents[2] / "config" / "relex_sidecar.yaml"
 )
+CONFIG = yaml.safe_load(Path(_CONFIG_PATH).read_text())
 HOST = CONFIG["runtime"]["host"]
 PORT = int(os.environ.get("RELEX_SIDECAR_PORT", CONFIG["runtime"]["port"]))
 
@@ -51,6 +52,12 @@ def _load_model():
     from gliner import GLiNER
 
     device = CONFIG["runtime"]["device"]
+    if device == "cuda" and not torch.cuda.is_available():
+        if os.environ.get("RELEX_SIDECAR_ALLOW_CPU") != "1":
+            print("FATAL: release pins device: cuda but CUDA is unavailable — "
+                  "refusing silent CPU fallback", file=sys.stderr)
+            raise SystemExit(2)
+        device = "cpu"
     if device == "mps" and not torch.backends.mps.is_available():
         if os.environ.get("RELEX_SIDECAR_ALLOW_CPU") != "1":
             print("FATAL: MPS unavailable and RELEX_SIDECAR_ALLOW_CPU!=1 — "
