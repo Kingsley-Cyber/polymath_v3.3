@@ -89,6 +89,23 @@ def routed_expected_release() -> str | None:
     return str(value) if value else None
 
 
+def routed_sidecar_pool() -> tuple[str, ...]:
+    """Replica pool for the extraction engine (2026-08-10 scale-out).
+
+    The single serial sidecar (~21 windows/s) was the measured fleet
+    ceiling; the routing doc may now carry ``sidecar_pool`` — a list of
+    identically-pinned replica URLs the client fans window batches across.
+    Falls back to the single routed URL; empty tuple means 'use env chain'.
+    """
+    route = active_route()
+    pool = (route or {}).get("sidecar_pool") or ()
+    urls = tuple(str(u).rstrip("/") for u in pool if str(u).strip())
+    if urls:
+        return urls
+    single = (route or {}).get("sidecar_url")
+    return (str(single).rstrip("/"),) if single else ()
+
+
 def qualified_releases(route: dict[str, Any] | None = None) -> tuple[str, ...]:
     row = route if route is not None else active_route()
     extra = tuple(str(r) for r in (row or {}).get("qualified_releases") or ())

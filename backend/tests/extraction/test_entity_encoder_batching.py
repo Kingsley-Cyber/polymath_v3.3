@@ -51,3 +51,63 @@ def test_predict_joint_single_call_when_under_batch(monkeypatch):
     provider = entity_encoder.RelexSidecarEntityProvider()
     entity_rows, _ = provider.predict_joint(["alpha text", "beta text"])
     assert len(calls) == 1 and len(entity_rows) == 2
+
+
+def test_infer_sharded_orders_and_distributes_across_pool(monkeypatch):
+    from services.extraction import relex_sidecar_client as client
+
+    calls = []
+
+    def fake_infer(texts, *, base_url=None, **_kwargs):
+        calls.append((base_url, tuple(texts)))
+        return [f"r:{t}" for t in texts]
+
+    monkeypatch.setattr(client, "infer", fake_infer)
+    monkeypatch.setattr(
+        client, "sidecar_pool", lambda: ("http://a:8737", "http://b:8738")
+    )
+
+    out = client.infer_sharded([f"t{i}" for i in range(7)], batch_size=2)
+
+    assert out == [f"r:t{i}" for i in range(7)]  # order preserved exactly
+    assert {base for base, _ in calls} == {"http://a:8737", "http://b:8738"}
+
+
+def test_infer_sharded_single_pool_degrades_to_serial(monkeypatch):
+    from services.extraction import relex_sidecar_client as client
+
+    bases = []
+
+    def fake_infer(texts, *, base_url=None, **_kwargs):
+        bases.append(base_url)
+        return [f"r:{t}" for t in texts]
+
+    monkeypatch.setattr(client, "infer", fake_infer)
+    monkeypatch.setattr(client, "sidecar_pool", lambda: ("http://a:8737",))
+
+    out = client.infer_sharded(["x", "y", "z"], batch_size=2)
+
+    assert out == ["r:x", "r:y", "r:z"]
+    assert bases == [None, None]  # serial path, default url resolution
+
+
+def test_infer_sharded_fails_over_once(monkeypatch):
+    from services.extraction import relex_sidecar_client as client
+
+    attempts = []
+
+    def fake_infer(texts, *, base_url=None, **_kwargs):
+        attempts.append(base_url)
+        if base_url == "http://a:8737":
+            raise client.RelexSidecarError("replica down")
+        return [f"r:{t}" for t in texts]
+
+    monkeypatch.setattr(client, "infer", fake_infer)
+    monkeypatch.setattr(
+        client, "sidecar_pool", lambda: ("http://a:8737", "http://b:8738")
+    )
+
+    out = client.infer_sharded(["x"], batch_size=2)
+
+    assert out == ["r:x"]
+    assert attempts == ["http://a:8737", "http://b:8738"]

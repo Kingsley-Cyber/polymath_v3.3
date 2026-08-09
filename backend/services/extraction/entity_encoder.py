@@ -209,14 +209,15 @@ class RelexSidecarEntityProvider:
             batch = max(1, int(os.environ.get("RELEX_INFER_BATCH", "16")))
         except ValueError:
             batch = 16
-        text_list = list(texts)
-        results = []
-        for start in range(0, len(text_list), batch):
-            results.extend(relex_sidecar_client.infer(
-                text_list[start:start + batch], entity_labels=label_strings,
-                relation_labels=_relex_relation_labels(),
-                **_relex_thresholds(),
-            ))
+        # Sharded across the replica pool when one is routed (2026-08-10):
+        # order-preserving, semantics-free — degrades to the serial loop on
+        # a single-URL pool. This is the fleet's extraction-throughput
+        # multiplier; the serial sidecar was the measured ceiling.
+        results = relex_sidecar_client.infer_sharded(
+            list(texts), batch_size=batch, entity_labels=label_strings,
+            relation_labels=_relex_relation_labels(),
+            **_relex_thresholds(),
+        )
         entity_rows: list[list[EntityPrediction]] = []
         relation_rows: list[list[dict]] = []
         for result in results:

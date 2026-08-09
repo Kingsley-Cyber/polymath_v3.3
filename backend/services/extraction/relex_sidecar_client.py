@@ -63,16 +63,41 @@ class RelexSidecarError(RuntimeError):
     pass
 
 
-def _post(path: str, payload: dict, timeout: float) -> dict:
+def sidecar_pool() -> tuple[str, ...]:
+    """All identically-pinned replica URLs (2026-08-10 scale-out).
+
+    Priority: routing doc ``sidecar_pool`` → env RELEX_SIDECAR_POOL
+    (comma-separated) → the single sidecar_url(). Every replica serves the
+    same sha-verified weights; the per-response release/contract handshake
+    still verifies each call, so a mis-provisioned replica fails closed.
+    """
+    try:
+        from services.extraction.engine_routing import routed_sidecar_pool
+
+        pool = routed_sidecar_pool()
+        if len(pool) > 1:
+            return pool
+    except Exception:  # noqa: BLE001 — routing is strictly optional
+        pass
+    raw = os.environ.get("RELEX_SIDECAR_POOL", "").strip()
+    if raw:
+        urls = tuple(u.strip().rstrip("/") for u in raw.split(",") if u.strip())
+        if urls:
+            return urls
+    return (sidecar_url(),)
+
+
+def _post(path: str, payload: dict, timeout: float, base_url: str | None = None) -> dict:
+    base = (base_url or sidecar_url()).rstrip("/")
     request = urllib.request.Request(
-        sidecar_url() + path, data=json.dumps(payload).encode(),
+        base + path, data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.loads(response.read())
     except (urllib.error.URLError, OSError) as exc:
-        raise RelexSidecarError(f"relex sidecar unreachable at {sidecar_url()}: {exc}") from exc
+        raise RelexSidecarError(f"relex sidecar unreachable at {base}: {exc}") from exc
 
 
 def health(timeout: float = 5.0) -> dict:
@@ -104,6 +129,7 @@ def infer(
     entity_threshold: float | None = None,
     relation_threshold: float | None = None,
     timeout: float | None = None,
+    base_url: str | None = None,
 ) -> list[RelexResult]:
     payload: dict[str, Any] = {"texts": list(texts)}
     if entity_labels is not None:
@@ -114,7 +140,10 @@ def infer(
         payload["entity_threshold"] = entity_threshold
     if relation_threshold is not None:
         payload["relation_threshold"] = relation_threshold
-    body = _post("/infer", payload, _infer_timeout() if timeout is None else timeout)
+    body = _post(
+        "/infer", payload, _infer_timeout() if timeout is None else timeout,
+        base_url=base_url,
+    )
     if body.get("contract") != RELEX_CONTRACT:
         raise RelexSidecarError(f"contract mismatch: {body.get('contract')!r}")
     expected_release = os.environ.get("RELEX_EXPECT_RELEASE", "").strip()
@@ -144,4 +173,76 @@ def infer(
                 for r in row["relations"]
             ),
         ))
+    return results
+
+
+def infer_sharded(
+    texts: Sequence[str],
+    *,
+    batch_size: int,
+    entity_labels: Sequence[str] | None = None,
+    relation_labels: Sequence[str] | None = None,
+    entity_threshold: float | None = None,
+    relation_threshold: float | None = None,
+) -> list[RelexResult]:
+    """Fan window batches across the replica pool, order-preserving.
+
+    The sidecar scores each window independently (transport batching is
+    semantics-free), so sharding across identically-pinned replicas changes
+    nothing about outputs — only wall clock. Concurrency equals the pool
+    size (each replica is a serial engine; more in-flight calls per replica
+    would just queue there). A failed shard gets ONE failover attempt on
+    the next replica; a second failure raises, keeping the recoverable-lane
+    retry semantics unchanged. With a single-URL pool this degrades to the
+    exact serial behavior predict_joint always had.
+    """
+    text_list = list(texts)
+    if not text_list:
+        return []
+    pool = sidecar_pool()
+    shards = [
+        (index, text_list[start:start + batch_size])
+        for index, start in enumerate(range(0, len(text_list), batch_size))
+    ]
+    if len(pool) <= 1:
+        results: list[RelexResult] = []
+        for _idx, shard in shards:
+            results.extend(infer(
+                shard, entity_labels=entity_labels,
+                relation_labels=relation_labels,
+                entity_threshold=entity_threshold,
+                relation_threshold=relation_threshold,
+            ))
+        return results
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _run(shard_index: int, shard_texts: list[str]) -> tuple[int, list[RelexResult]]:
+        primary = pool[shard_index % len(pool)]
+        try:
+            rows = infer(
+                shard_texts, entity_labels=entity_labels,
+                relation_labels=relation_labels,
+                entity_threshold=entity_threshold,
+                relation_threshold=relation_threshold,
+                base_url=primary,
+            )
+        except RelexSidecarError:
+            fallback = pool[(shard_index + 1) % len(pool)]
+            rows = infer(
+                shard_texts, entity_labels=entity_labels,
+                relation_labels=relation_labels,
+                entity_threshold=entity_threshold,
+                relation_threshold=relation_threshold,
+                base_url=fallback,
+            )
+        return shard_index, rows
+
+    ordered: dict[int, list[RelexResult]] = {}
+    with ThreadPoolExecutor(max_workers=len(pool)) as executor:
+        for shard_index, rows in executor.map(lambda s: _run(*s), shards):
+            ordered[shard_index] = rows
+    results = []
+    for shard_index in range(len(shards)):
+        results.extend(ordered[shard_index])
     return results
