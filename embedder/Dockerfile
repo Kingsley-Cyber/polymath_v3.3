@@ -6,6 +6,9 @@
 # sidecar's installation pattern, which already runs on this host.
 
 FROM python:3.11-slim
+# torch native ops JIT Triton kernels at CUDA warmup — needs a C toolchain
+# (gcc alone fails at link with missing Scrt1.o; RTX-node deployment 2026-08-09)
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

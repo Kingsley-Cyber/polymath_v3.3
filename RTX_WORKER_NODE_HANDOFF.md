@@ -113,6 +113,16 @@ Success signals, in order:
 3. Mongo check (can run from either machine): items with `owner` containing
    this box's container hostname appear in `ingest_batch_items`.
 
+## DEPLOYMENT FIXES (PROVEN 2026-08-09 — already reflected above/in repo)
+1. Embedder needs `MODEL_PATH: Qwen/Qwen3-Embedding-0.6B` + an HF-cache volume
+   (MODEL_NAME alone falls back to an empty /model path and crashes).
+2. Embedder image needs `gcc` AND `libc6-dev` (Triton JIT at CUDA warmup;
+   gcc alone fails linking with missing Scrt1.o). Now in embedder/Dockerfile.
+3. Worker requires `DEFAULT_ADMIN_PASSWORD` env — set a NODE-LOCAL random
+   value (bootstrap-only; never reuse the Mac's).
+4. Worker healthcheck must probe `/api/health/live` with a 120s start period
+   (the Dockerfile default probes the wrong endpoint for worker mode).
+
 ## Safety rails (do not skip)
 - NEVER point this worker at any Mongo/Qdrant/Neo4j other than the Mac's.
 - Do not run Mongo/Qdrant/Neo4j containers on this box — it is a WORKER,
