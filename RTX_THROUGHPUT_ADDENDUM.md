@@ -8,15 +8,20 @@ Three tasks: (1) max-throughput GPU batching with a large standing VRAM pool,
 
 The current server loops one text per forward pass. Upgrade `scripts/relex_sidecar_server.py`:
 
-- In `_infer`, process `texts` in GPU batches: `batch = int(os.environ.get("RELEX_GPU_BATCH", "32"))`,
+- In `_infer`, process `texts` in GPU batches: `batch = int(os.environ.get("RELEX_GPU_BATCH", "64"))`,
   and call `_STATE["model"].inference(texts=chunk, ...)` with per-chunk lists,
   concatenating results IN ORDER. Keep the lock; keep per-text output shape identical.
+- **Auto-probe the ceiling**: at startup, binary-search the largest stable batch
+  (64 → 96 → 128 → 192) with synthetic ~512-token texts, backing off on OOM.
+  Pin the discovered value as the effective batch and print it. Target: put a
+  real fraction of the 96GB to work — tens of GB resident under load is the
+  goal, not a 3GB idle model.
 - Standing VRAM pool: set env in the systemd unit:
   `Environment=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` and warm the pool at
-  startup by running one synthetic max-batch inference (32 texts × ~512 tokens of
-  lorem text) right after model load, so the allocator grows once and stays hot.
-  Do NOT hard-reserve 60GB with dummy tensors — the allocator keeps grown segments,
-  which achieves the "always allocated" goal without starving the driver.
+  startup by running one max-batch synthetic inference right after model load,
+  so the allocator grows once and stays hot permanently.
+  Do NOT hard-reserve memory with dummy tensors — the allocator keeps grown
+  segments, which achieves the "always allocated" goal without starving the driver.
 - Bump the release name to `relex-large-cuda-sidecar-v2-batched` in a COPY of the
   config (`relex_sidecar_cuda_v2.yaml`) — the Mac's qualification gate must see a
   distinct release. Serve v2 on port 8738 (second systemd unit) so v1 serial stays
@@ -45,8 +50,9 @@ The current server loops one text per forward pass. Upgrade `scripts/relex_sidec
 
 ## Completion report
 
-1. v2 batched server: port, release name, RELEX_GPU_BATCH, warm-pool VRAM reading
-   from `nvidia-smi` after warmup (expect tens of GB with large batches).
+1. v2 batched server: port, release name, the AUTO-PROBED batch ceiling,
+   warm-pool VRAM reading from `nvidia-smi` after warmup (expect tens of GB),
+   and measured windows/second at the pinned batch vs batch=1.
 2. WoL: settings changed, MAC ADDRESS (critical), test result if possible
    (sleep + wake from another device).
 3. Stop/start scripts paths.
