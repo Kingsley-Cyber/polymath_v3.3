@@ -1,3 +1,20 @@
+# ⚠️ MEASURED OUTCOME (2026-08-09): Task 1 PARKED — premise contradicted by data
+
+RTX-side measurement (v1 untouched, correctness gate passed — batched output
+byte-identical to serial): gliner sub-batches internally and is COMPUTE-bound.
+Throughput plateaus at ~21 win/s (serial 15.3); internal bs≈12 captures the
+whole gain at ~6 GB. bs=128 burns 44 GB and runs 2× SLOWER. "Tens of GB
+resident" buys nothing for this model. Also: PYTORCH_CUDA_ALLOC_CONF
+expandable_segments uses CUDA VMM APIs that WSL2's driver does not support —
+never set it under WSL.
+
+Verdict: v2 batched release skipped (~1.4× not worth a qualified release);
+scaling comes from the WORKER NODE route (RTX_WORKER_NODE_HANDOFF.md) and
+the coordinator promotion. Tasks 2 (Wake-on-LAN) and 3 (stop controls)
+below REMAIN WANTED.
+
+---
+
 # HANDOFF ADDENDUM — paste to Claude on the RTX workstation (after initial setup)
 
 Three tasks: (1) max-throughput GPU batching with a large standing VRAM pool,
