@@ -202,6 +202,7 @@ services:
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
       MIMO_API_KEY: ${MIMO_API_KEY:-}
       LONGCAT_API_KEY: ${LONGCAT_API_KEY:-}
+      OLLAMA_CLOUD_API_KEY: ${OLLAMA_CLOUD_API_KEY:-}
     depends_on:
       redis:
         condition: service_healthy

@@ -28,6 +28,15 @@ model_list:
       model: "ollama_chat/*"
       api_base: http://host.docker.internal:11434
 
+  # Ollama Cloud (ollama.com hosted) — OpenAI-compatible endpoint.
+  # Models use their bare cloud tags (deepseek-v4-flash:0731, minimax-m3);
+  # the ":…-cloud" suffix is a local-daemon proxy convention, not an API tag.
+  - model_name: "ollama_cloud/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://ollama.com/v1"
+      api_key: os.environ/OLLAMA_CLOUD_API_KEY
+
   # OpenAI models - wildcard pattern (requires OPENAI_API_KEY in environment)
   - model_name: "openai/*"
     litellm_params:

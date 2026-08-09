@@ -337,6 +337,21 @@ export const POOL_PROVIDER_PRESETS: PoolProviderPreset[] = [
     example_model: "qwen2.5:1.5b-instruct",
   },
   {
+    id: "ollama-cloud",
+    name: "Ollama Cloud",
+    litellm_provider: "ollama_cloud",
+    base_url: "https://ollama.com/v1",
+    example_model: "deepseek-v4-flash:0731",
+    example_models: [
+      "deepseek-v4-flash:0731",
+      "deepseek-v4-flash:preview",
+      "deepseek-v4-pro",
+      "minimax-m3",
+      "minimax-m2.7",
+    ],
+    default_max_concurrent: 8,
+  },
+  {
     id: "custom",
     name: "Custom (OpenAI-compat)",
     litellm_provider: "openai",

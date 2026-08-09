@@ -41,6 +41,10 @@ PROVIDER_PRESET_PREFIX: dict[str, str] = {
     # as ollama_chat/*; the older ollama/* route uses generate-style parsing
     # and drops/errors on native streamed thinking chunks.
     "ollama": "ollama_chat",
+    # ollama.com hosted models (deepseek-v4-flash:0731, minimax-m3, …).
+    # Dedicated wildcard route so the key stays in the LiteLLM container env,
+    # never in per-entry settings documents.
+    "ollama-cloud": "ollama_cloud",
     "custom": "openai",
     # OpenCode's own model cache exposes this as providerID="opencode-go"
     # with modelID values like "deepseek-v4-flash", "minimax-m2.7",
