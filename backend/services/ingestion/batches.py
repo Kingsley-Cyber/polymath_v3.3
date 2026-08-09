@@ -3630,11 +3630,16 @@ def start_local_batch_runner(
                             corpus_id=corpus_id,
                             lane=lane,
                             owner=owner,
-                            # Same-batch dead-owner takeover: a recreated
-                            # worker gets a new hostname/pid, so without this
-                            # a killed runner's unexpired lease self-deadlocks
-                            # its own batch for the lease TTL.
-                            adopt_prefix=f"batch:{batch_id}:",
+                            # Dead-owner takeover for ANY batch-runner lease
+                            # (staleness proves death — beats renew every 60s
+                            # and the threshold is 7 missed beats; the
+                            # lease_id fence still kills a wrongful steal).
+                            # Same-batch-only scoping froze corpora for the
+                            # full 30-min TTL whenever a killed worker held a
+                            # DIFFERENT batch of the same corpus (observed
+                            # 2026-08-10). Non-batch owners (reconciler lanes
+                            # like extraction_jobs.run:*) stay untouchable.
+                            adopt_prefix="batch:",
                         )
                     )
                     if not lease:

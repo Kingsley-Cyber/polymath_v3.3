@@ -361,7 +361,10 @@ async def test_lane_lease_same_batch_fresh_owner_is_not_adopted():
 
 
 @pytest.mark.asyncio
-async def test_lane_lease_foreign_batch_stale_owner_is_not_adopted():
+async def test_lane_lease_any_dead_batch_owner_is_adopted_with_generic_prefix():
+    """Production passes adopt_prefix="batch:" — a stale lease from ANY dead
+    batch runner (different batch, same corpus) is adoptable; same-batch-only
+    scoping froze corpora for the full TTL after worker recreates."""
     now = datetime(2026, 1, 1, 12, 0, 0)
     collection = _AdoptableLaneCollection(
         {
@@ -379,7 +382,35 @@ async def test_lane_lease_foreign_batch_stale_owner_is_not_adopted():
         lane="summary",
         owner="batch:B1:new-host:7",
         now=now,
-        adopt_prefix="batch:B1:",
+        adopt_prefix="batch:",
+    )
+
+    assert adopted is not None
+    assert adopted["owner"] == "batch:B1:new-host:7"
+
+
+@pytest.mark.asyncio
+async def test_lane_lease_non_batch_stale_owner_is_not_adopted():
+    """Reconciler-owned lanes (extraction_jobs.run:*) never match the
+    batch: adoption prefix, stale or not."""
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    collection = _AdoptableLaneCollection(
+        {
+            "_id": "corpus-1:summary",
+            "owner": "extraction_jobs.run:85a5:old-host:41",
+            "lease_until": now + timedelta(minutes=25),
+            "updated_at": now - timedelta(minutes=10),
+        }
+    )
+    db = {"ingest_lane_leases": collection}
+
+    adopted = await acquire_lane_lease(
+        db,
+        corpus_id="corpus-1",
+        lane="summary",
+        owner="batch:B1:new-host:7",
+        now=now,
+        adopt_prefix="batch:",
     )
 
     assert adopted is None
