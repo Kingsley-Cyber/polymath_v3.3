@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_JOB_LEASE_SECONDS = 15 * 60
 DEFAULT_JOB_MAX_ATTEMPTS = 5
 DEFAULT_LANE_LEASE_SECONDS = 30 * 60
+# A lane owner whose heartbeat is older than this is dead, not busy (the
+# heartbeat renews every ≤60s): same-batch runners may adopt its lease, and
+# batch schedulers treat its corpus as available.
+DEFAULT_LANE_ADOPT_STALE_SECONDS = 180.0
 SUPERSEDED_JOB_STATUS = "superseded"
 DEAD_LETTER_JOB_STATUS = "dead_letter"
 LANE_LEASE_COLLECTION = "ingest_lane_leases"
@@ -60,7 +64,7 @@ async def acquire_lane_lease(
     now: datetime | None = None,
     lease_seconds: int = DEFAULT_LANE_LEASE_SECONDS,
     adopt_prefix: str | None = None,
-    adopt_stale_seconds: float = 180.0,
+    adopt_stale_seconds: float = DEFAULT_LANE_ADOPT_STALE_SECONDS,
 ) -> dict[str, Any] | None:
     """Atomically acquire one corpus/lane lease, reclaiming expired leases.
 
