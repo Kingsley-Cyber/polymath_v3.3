@@ -71,6 +71,20 @@ def litellm_provider_for(preset_id: str | None) -> str | None:
     return PROVIDER_PRESET_PREFIX.get(preset_id)
 
 
+# Wildcard prefixes the LiteLLM proxy config owns end-to-end: api_base and
+# api_key live in litellm/config.yaml, never in pool entries. Forwarding a
+# per-call api_base for these makes the proxy bypass wildcard resolution, and
+# litellm core cannot infer a provider from the custom prefix — the call 400s
+# ("LLM Provider NOT provided"). Every payload builder that copies an entry's
+# base_url into the request body must gate on is_router_owned_model().
+ROUTER_OWNED_PREFIXES: frozenset = frozenset({"ollama_cloud"})
+
+
+def is_router_owned_model(model: str | None) -> bool:
+    prefix = str(model or "").split("/", 1)[0].strip().lower()
+    return prefix in ROUTER_OWNED_PREFIXES
+
+
 PROVIDER_PREFIX_ALIASES: dict[str, set[str]] = {
     "zai": {"zai", "z.ai"},
     "glm-coding": {"glm-coding", "zai", "z.ai"},

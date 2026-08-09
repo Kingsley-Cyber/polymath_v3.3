@@ -572,8 +572,10 @@ async def _test_chat_model_ref(entry: dict, *, db: Any = None) -> ModelRefTestRe
         "max_tokens": 1,
         "stream": False,
     }
+    from services.provider_presets import is_router_owned_model
+
     base_url = (entry.get("base_url") or "").strip() or None
-    if base_url:
+    if base_url and not is_router_owned_model(model):
         payload["api_base"] = base_url
     if entry.get("api_key"):
         payload["api_key"] = entry["api_key"]

@@ -26,6 +26,10 @@ from pymongo import ReturnDocument, UpdateOne
 from config import get_settings
 from models.schemas import IngestionConfig
 from services.ingestion import admission
+from services.provider_presets import (
+    is_router_owned_model as _is_router_owned_model,
+)
+
 
 logger = logging.getLogger(__name__)
 _UTC_EPOCH = datetime(1970, 1, 1)
@@ -2493,7 +2497,9 @@ async def _preflight_summary_canary(db, batch: dict) -> str | None:
         "temperature": 0,
         "max_tokens": 400,
     }
-    if entry.get("base_url"):
+    if entry.get("base_url") and not _is_router_owned_model(
+        payload.get("model")
+    ):
         payload["api_base"] = entry["base_url"]
     if entry.get("api_key"):
         payload["api_key"] = entry["api_key"]

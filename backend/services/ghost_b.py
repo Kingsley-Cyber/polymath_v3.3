@@ -54,6 +54,10 @@ SchemaResolver = Callable[[str, list[float], int], Awaitable[list[str]]]
 GhostBAuditSink = Callable[[dict[str, Any]], Awaitable[None]]
 ExtractionRoutingPolicy = Literal["work_stealing", "balanced", "primary_fallback"]
 _BALANCED_ROUTE_OFFSETS: dict[tuple[str, ...], int] = {}
+from services.provider_presets import (
+    is_router_owned_model as _is_router_owned_model,
+)
+
 
 logger = logging.getLogger(__name__)
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
@@ -4434,7 +4438,9 @@ async def extract_entities(
             "model": entry["model"],
             "temperature": 0,
         }
-        if entry.get("base_url"):
+        if entry.get("base_url") and not _is_router_owned_model(
+            payload_base.get("model")
+        ):
             payload_base["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload_base["api_key"] = entry["api_key"]
@@ -5391,7 +5397,9 @@ async def extract_entities(
                 {"role": "user", "content": user_prompt},
             ],
         }
-        if entry.get("base_url"):
+        if entry.get("base_url") and not _is_router_owned_model(
+            payload.get("model")
+        ):
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]

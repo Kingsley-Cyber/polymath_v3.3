@@ -578,16 +578,14 @@ class LLMService:
             raise last_exception
         raise RuntimeError("Request failed after all retries")
 
-    # Wildcard prefixes the LiteLLM proxy config owns end-to-end (api_base +
-    # api_key live in litellm/config.yaml). Forwarding a per-call api_base for
-    # these makes the proxy bypass wildcard resolution, and litellm core cannot
-    # infer a provider from the custom prefix — the call 400s. The router must
-    # resolve them, so pool-entry base URLs are dropped for these prefixes.
-    ROUTER_OWNED_PREFIXES = frozenset({"ollama_cloud"})
+    @staticmethod
+    def _router_owned(model: str) -> bool:
+        # Single source of truth in provider_presets: the proxy config owns
+        # these routes end-to-end, so pool-entry base URLs must not be
+        # forwarded (litellm can't infer a provider from a custom prefix).
+        from services.provider_presets import is_router_owned_model
 
-    @classmethod
-    def _router_owned(cls, model: str) -> bool:
-        return model.split("/", 1)[0].lower() in cls.ROUTER_OWNED_PREFIXES
+        return is_router_owned_model(model)
 
     @staticmethod
     def _provider_for_model(model: str) -> str | None:

@@ -24,6 +24,10 @@ from services.ghost_b import (
     UNIVERSAL_RELATION_SCHEMA,
     SchemaLens,
 )
+from services.provider_presets import (
+    is_router_owned_model as _is_router_owned_model,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -749,7 +753,9 @@ async def _profile_with_llm(
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
-    if entry.get("base_url"):
+    if entry.get("base_url") and not _is_router_owned_model(
+        payload.get("model")
+    ):
         payload["api_base"] = entry["base_url"]
     if entry.get("api_key"):
         payload["api_key"] = entry["api_key"]

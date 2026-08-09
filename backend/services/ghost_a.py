@@ -48,6 +48,10 @@ from services.schema_control import (
     validate_pydantic_projection,
     xml_json_contract_prompt,
 )
+from services.provider_presets import (
+    is_router_owned_model as _is_router_owned_model,
+)
+
 
 logger = logging.getLogger(__name__)
 _SUMMARY_RETRY_ATTEMPTS = 2
@@ -1004,7 +1008,9 @@ async def summarize_parents(
             # JSON after an operator retry or provider-contract fix.
             "cache": {"no-cache": True, "no-store": True},
         }
-        if entry.get("base_url"):
+        if entry.get("base_url") and not _is_router_owned_model(
+            payload.get("model")
+        ):
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
@@ -1144,7 +1150,9 @@ async def summarize_parents(
             ),
             "cache": {"no-cache": True, "no-store": True},
         }
-        if entry.get("base_url"):
+        if entry.get("base_url") and not _is_router_owned_model(
+            payload.get("model")
+        ):
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]

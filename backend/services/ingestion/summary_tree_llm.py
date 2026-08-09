@@ -6,6 +6,9 @@ import asyncio
 from typing import Any, Awaitable, Callable
 
 from config import get_settings
+from services.provider_presets import (
+    is_router_owned_model as _is_router_owned_model,
+)
 from services.extraction_provider_cards import (
     provider_payload_defaults,
     resolve_extraction_provider_card,
@@ -92,7 +95,9 @@ def summary_tree_llm_from_pool(
         }
         if response_format is not None:
             payload["response_format"] = response_format
-        if entry.get("base_url"):
+        if entry.get("base_url") and not _is_router_owned_model(
+            payload.get("model")
+        ):
             payload["api_base"] = entry["base_url"]
         if entry.get("api_key"):
             payload["api_key"] = entry["api_key"]
