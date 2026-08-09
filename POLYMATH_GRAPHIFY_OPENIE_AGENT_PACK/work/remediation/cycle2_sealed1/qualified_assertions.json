@@ -1,0 +1,524 @@
+[
+  {
+    "evidence_end": 1058,
+    "evidence_start": 957,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Skyloom",
+    "predicate": "will shortly is well of",
+    "qualifiers": {},
+    "subject": "which"
+  },
+  {
+    "evidence_end": 1058,
+    "evidence_start": 957,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "which",
+    "predicate": "will meet shortly",
+    "qualifiers": {},
+    "subject": "we"
+  },
+  {
+    "evidence_end": 1187,
+    "evidence_start": 1059,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "them",
+    "predicate": "holds together",
+    "qualifiers": {},
+    "subject": "What"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "multicast",
+    "predicate": "encrypted",
+    "qualifiers": {},
+    "subject": "copperline supports"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "product s own manual",
+    "predicate": "does not appear in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the feature work",
+    "predicate": "has ever seen",
+    "qualifiers": {},
+    "subject": "nobody at cinder mesa"
+  },
+  {
+    "evidence_end": 3318,
+    "evidence_start": 3119,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the product s own manual",
+    "predicate": "does not appear in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "frame transport",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "frame transport",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Ironvale",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "the dcu"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Ironvale",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "planned ironvale migration is ever approved",
+    "predicate": "will depend instead",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Ironvale",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "frame transport",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "the dcu"
+  },
+  {
+    "evidence_end": 4098,
+    "evidence_start": 3905,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "planned migration is ever approved",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "Decommutation and Calibration Unit"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the station scheduler",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "the pass planning service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass planning service owns station scheduler surfaced in vendor audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass planning service owns scheduler surfaced in vendor audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "vendor audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the statement that the pass planning service owns the station scheduler surfaced in a vendor audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a vendor audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "the statement that the pass planning service owns the station scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "scheduler surfaced in vendor audit last spring",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "scheduler surfaced in audit last spring",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "vendor audit",
+    "predicate": "surfaced in",
+    "qualifiers": {},
+    "subject": "Station Scheduler"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "station scheduler surfaced in vendor audit last spring",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "Pass Planning Service"
+  },
+  {
+    "evidence_end": 5533,
+    "evidence_start": 5360,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "pass planning service owns scheduler surfaced in audit last spring",
+    "predicate": "was never substantiated",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "hypothetical deployment",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "stonevault",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "long term cold storage",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "in hypothetical deployment sketched once on whiteboard and left there",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 5747,
+    "evidence_start": 5534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a hypothetical hosted deployment",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "Skyloom"
+  },
+  {
+    "evidence_end": 6694,
+    "evidence_start": 6546,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "two a m special",
+    "predicate": "politely calls",
+    "qualifiers": {},
+    "subject": "code shift log"
+  },
+  {
+    "evidence_end": 6945,
+    "evidence_start": 6695,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "nearly two years",
+    "predicate": "stated For",
+    "qualifiers": {},
+    "subject": "the station wiki"
+  },
+  {
+    "evidence_end": 6945,
+    "evidence_start": 6695,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "that the trend service produces the anomaly notices",
+    "predicate": "stated",
+    "qualifiers": {},
+    "subject": "the station wiki"
+  },
+  {
+    "evidence_end": 6945,
+    "evidence_start": 6695,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the anomaly notices",
+    "predicate": "produces",
+    "qualifiers": {},
+    "subject": "the trend service"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the first summary that reached headquarters",
+    "predicate": "was incorrectly reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "data loss in mission telemetry archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "headquarters",
+    "predicate": "reached",
+    "qualifiers": {},
+    "subject": "that"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "summary",
+    "predicate": "was reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "mission telemetry",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "first summary reached headquarters",
+    "predicate": "was reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "first summary reached headquarters",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in summary reached",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "loss",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the mission telemetry archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "the march blackout event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in summary reached headquarters",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "data loss in mission telemetry archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in first summary reached headquarters",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported in summary reached",
+    "predicate": "caused",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "data loss",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "the march blackout event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it was reported",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "March Blackout Event"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "that the march blackout event caused data loss in the mission telemetry archive",
+    "predicate": "was incorrectly reported",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "summary reached headquarters",
+    "predicate": "was reported in",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 7489,
+    "evidence_start": 7245,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Mission Telemetry Archive",
+    "predicate": "causes",
+    "qualifiers": {},
+    "subject": "march event"
+  },
+  {
+    "evidence_end": 8655,
+    "evidence_start": 8569,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "antennas at all",
+    "predicate": "will not mention",
+    "qualifiers": {},
+    "subject": "she"
+  }
+]

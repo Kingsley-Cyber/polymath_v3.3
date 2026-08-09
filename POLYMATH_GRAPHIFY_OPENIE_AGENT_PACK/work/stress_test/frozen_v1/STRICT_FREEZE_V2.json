@@ -1,0 +1,33 @@
+{
+  "freeze_id": "technical-book-66-strict-v2",
+  "fixture": {
+    "bytes": 10366,
+    "path": "fixture.md",
+    "sha256": "2c0499505455b782cd6a4a2a9bf888141a820e89919eb0866bf9ba4270bd2391"
+  },
+  "answer_key": {
+    "path": "gold_triples.json",
+    "positive_assertions": 66,
+    "qualified_assertions": 5,
+    "sha256": "8e402f5e2f16ca8011bd23facf3f70a52c846b7618a58a8659105d1801d7d7a2"
+  },
+  "matching_policy": {
+    "documentation_path": "MATCHING_POLICY.md",
+    "documentation_sha256": "183d719c41ba3e6d25b2cac19851bd2c6c1e8ada02fcd074c888c07db040fbe4",
+    "policy_path": "SCORING_POLICY_V2.json",
+    "policy_sha256": "9de099dbec4053be29fd0113b55759c4d186b68783b9cc68098b4ea04298b393",
+    "version": "technical-book-66-matching-v2"
+  },
+  "namespace": {
+    "corpus_id": "0a858214-cc58-5615-9b4b-ba177ffd3ca3",
+    "document_id": "9e3e45389e2e73da5cc6838d98f99f7d59b3dccbf1cb08035f8ad496628365c7",
+    "mongo_database": "graphify_e2e_technical_book_stress_v1_bc4ad2c7",
+    "name": "technical_book_stress_v1",
+    "production_writes_authorized": false
+  },
+  "scorer": {
+    "path": "backend/scripts/audit_graphify_stress_frozen.py",
+    "sha256": "976f87b913f6334910daac54153a93c487949da00a7fdee462a029e1e8652c85",
+    "version": "stress-answer-key-scorer-v4-qualified-taxonomy"
+  }
+}

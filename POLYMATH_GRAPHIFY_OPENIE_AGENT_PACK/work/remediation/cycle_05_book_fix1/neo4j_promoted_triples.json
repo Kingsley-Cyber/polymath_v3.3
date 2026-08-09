@@ -1,0 +1,538 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "rebuildability contract",
+    "object_entity_id": "entity:rebuildability-contract",
+    "predicate": "defines",
+    "subject": "architecture guide",
+    "subject_entity_id": "entity:architecture-guide"
+  },
+  {
+    "evidence_count": 0,
+    "object": "temporary query latency",
+    "object_entity_id": "entity:temporary-query-latency",
+    "predicate": "causes",
+    "subject": "august recovery event",
+    "subject_entity_id": "entity:august-recovery-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "el paso",
+    "object_entity_id": "entity:el-paso",
+    "predicate": "related_to",
+    "subject": "august recovery event",
+    "subject_entity_id": "entity:august-recovery-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "replay process",
+    "object_entity_id": "entity:replay-process",
+    "predicate": "supports",
+    "subject": "canonical event store",
+    "subject_entity_id": "entity:canonical-event-store"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical event dataset",
+    "object_entity_id": "entity:canonical-event-dataset",
+    "predicate": "produces",
+    "subject": "canonical storage process",
+    "subject_entity_id": "entity:canonical-storage-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mongodb",
+    "object_entity_id": "entity:mongodb",
+    "predicate": "uses",
+    "subject": "canonical storage process",
+    "subject_entity_id": "entity:canonical-storage-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "retention policy",
+    "object_entity_id": "entity:retention-policy",
+    "predicate": "defines",
+    "subject": "data retention guide",
+    "subject_entity_id": "entity:data-retention-guide"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical event store",
+    "object_entity_id": "entity:canonical-event-store",
+    "predicate": "derived_from",
+    "subject": "derived graph projection",
+    "subject_entity_id": "entity:derived-graph-projection"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical event store",
+    "object_entity_id": "entity:canonical-event-store",
+    "predicate": "derived_from",
+    "subject": "derived search index",
+    "subject_entity_id": "entity:derived-search-index"
+  },
+  {
+    "evidence_count": 0,
+    "object": "equipment name",
+    "object_entity_id": "entity:equipment-name",
+    "predicate": "detects",
+    "subject": "enrichment service",
+    "subject_entity_id": "entity:enrichment-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "relational retrieval",
+    "object_entity_id": "entity:relational-retrieval",
+    "predicate": "related_to",
+    "subject": "graph traversal",
+    "subject_entity_id": "entity:graph-traversal"
+  },
+  {
+    "evidence_count": 0,
+    "object": "validated assertion batches",
+    "object_entity_id": "entity:validated-assertion-batches",
+    "predicate": "consumes",
+    "subject": "graph writer",
+    "subject_entity_id": "entity:graph-writer"
+  },
+  {
+    "evidence_count": 0,
+    "object": "neo4j",
+    "object_entity_id": "entity:neo4j",
+    "predicate": "uses",
+    "subject": "graph writer",
+    "subject_entity_id": "entity:graph-writer"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical",
+    "object_entity_id": "entity:canonical",
+    "predicate": "depends_on",
+    "subject": "harbor",
+    "subject_entity_id": "entity:harbor"
+  },
+  {
+    "evidence_count": 0,
+    "object": "qdrant",
+    "object_entity_id": "entity:qdrant",
+    "predicate": "uses",
+    "subject": "harbor",
+    "subject_entity_id": "entity:harbor"
+  },
+  {
+    "evidence_count": 0,
+    "object": "identity service",
+    "object_entity_id": "entity:identity-service",
+    "predicate": "depends_on",
+    "subject": "harbor gateway",
+    "subject_entity_id": "entity:harbor-gateway"
+  },
+  {
+    "evidence_count": 0,
+    "object": "event envelope",
+    "object_entity_id": "entity:event-envelope",
+    "predicate": "produces",
+    "subject": "harbor gateway",
+    "subject_entity_id": "entity:harbor-gateway"
+  },
+  {
+    "evidence_count": 0,
+    "object": "envoy",
+    "object_entity_id": "entity:envoy",
+    "predicate": "uses",
+    "subject": "harbor gateway",
+    "subject_entity_id": "entity:harbor-gateway"
+  },
+  {
+    "evidence_count": 0,
+    "object": "credential metadata",
+    "object_entity_id": "entity:credential-metadata",
+    "predicate": "stores",
+    "subject": "identity service",
+    "subject_entity_id": "entity:identity-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "service accounts",
+    "object_entity_id": "entity:service-accounts",
+    "predicate": "stores",
+    "subject": "identity service",
+    "subject_entity_id": "entity:identity-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "postgresql",
+    "object_entity_id": "entity:postgresql",
+    "predicate": "uses",
+    "subject": "identity service",
+    "subject_entity_id": "entity:identity-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "projection failure process",
+    "object_entity_id": "entity:projection-failure-process",
+    "predicate": "defines",
+    "subject": "incident response guide",
+    "subject_entity_id": "entity:incident-response-guide"
+  },
+  {
+    "evidence_count": 0,
+    "object": "kafka",
+    "object_entity_id": "entity:kafka",
+    "predicate": "depends_on",
+    "subject": "ingestion worker",
+    "subject_entity_id": "entity:ingestion-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "normalized event",
+    "object_entity_id": "entity:normalized-event",
+    "predicate": "produces",
+    "subject": "ingestion worker",
+    "subject_entity_id": "entity:ingestion-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "pydantic",
+    "object_entity_id": "entity:pydantic",
+    "predicate": "uses",
+    "subject": "ingestion worker",
+    "subject_entity_id": "entity:ingestion-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "event transport process",
+    "object_entity_id": "entity:event-transport-process",
+    "predicate": "supports",
+    "subject": "kafka",
+    "subject_entity_id": "entity:kafka"
+  },
+  {
+    "evidence_count": 0,
+    "object": "duplicate graph nodes",
+    "object_entity_id": "entity:duplicate-graph-nodes",
+    "predicate": "causes",
+    "subject": "malformed aliases",
+    "subject_entity_id": "entity:malformed-aliases"
+  },
+  {
+    "evidence_count": 0,
+    "object": "graph projection layer",
+    "object_entity_id": "entity:graph-projection-layer",
+    "predicate": "part_of",
+    "subject": "neo4j",
+    "subject_entity_id": "entity:neo4j"
+  },
+  {
+    "evidence_count": 0,
+    "object": "graph traversal",
+    "object_entity_id": "entity:graph-traversal",
+    "predicate": "supports",
+    "subject": "neo4j",
+    "subject_entity_id": "entity:neo4j"
+  },
+  {
+    "evidence_count": 0,
+    "object": "free text equipment references",
+    "object_entity_id": "entity:free-text-equipment-references",
+    "predicate": "detects",
+    "subject": "normalization code",
+    "subject_entity_id": "entity:normalization-code"
+  },
+  {
+    "evidence_count": 0,
+    "object": "spacy",
+    "object_entity_id": "entity:spacy",
+    "predicate": "uses",
+    "subject": "normalization code",
+    "subject_entity_id": "entity:normalization-code"
+  },
+  {
+    "evidence_count": 0,
+    "object": "event envelope",
+    "object_entity_id": "entity:event-envelope",
+    "predicate": "derived_from",
+    "subject": "normalized event",
+    "subject_entity_id": "entity:normalized-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical event dataset",
+    "object_entity_id": "entity:canonical-event-dataset",
+    "predicate": "owns",
+    "subject": "northstar labs",
+    "subject_entity_id": "entity:northstar-labs"
+  },
+  {
+    "evidence_count": 0,
+    "object": "recovery report",
+    "object_entity_id": "entity:recovery-report",
+    "predicate": "uses",
+    "subject": "northstar labs",
+    "subject_entity_id": "entity:northstar-labs"
+  },
+  {
+    "evidence_count": 0,
+    "object": "runtime metrics",
+    "object_entity_id": "entity:runtime-metrics",
+    "predicate": "consumes",
+    "subject": "observability service",
+    "subject_entity_id": "entity:observability-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "operations dashboard",
+    "object_entity_id": "entity:operations-dashboard",
+    "predicate": "produces",
+    "subject": "observability service",
+    "subject_entity_id": "entity:observability-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "recovery report",
+    "object_entity_id": "entity:recovery-report",
+    "predicate": "related_to",
+    "subject": "operations dashboard",
+    "subject_entity_id": "entity:operations-dashboard"
+  },
+  {
+    "evidence_count": 0,
+    "object": "malformed aliases",
+    "object_entity_id": "entity:malformed-aliases",
+    "predicate": "causes",
+    "subject": "parser bug",
+    "subject_entity_id": "entity:parser-bug"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical event dataset",
+    "object_entity_id": "entity:canonical-event-dataset",
+    "predicate": "consumes",
+    "subject": "projection worker",
+    "subject_entity_id": "entity:projection-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "rebuild dataset",
+    "object_entity_id": "entity:rebuild-dataset",
+    "predicate": "consumes",
+    "subject": "projection worker",
+    "subject_entity_id": "entity:projection-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "schema registry",
+    "object_entity_id": "entity:schema-registry",
+    "predicate": "depends_on",
+    "subject": "projection worker",
+    "subject_entity_id": "entity:projection-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "assertion compilation process",
+    "object_entity_id": "entity:assertion-compilation-process",
+    "predicate": "implements",
+    "subject": "projection worker",
+    "subject_entity_id": "entity:projection-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "projection assertions",
+    "object_entity_id": "entity:projection-assertions",
+    "predicate": "produces",
+    "subject": "projection worker",
+    "subject_entity_id": "entity:projection-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "redis",
+    "object_entity_id": "entity:redis",
+    "predicate": "uses",
+    "subject": "projection worker",
+    "subject_entity_id": "entity:projection-worker"
+  },
+  {
+    "evidence_count": 0,
+    "object": "vector search",
+    "object_entity_id": "entity:vector-search",
+    "predicate": "supports",
+    "subject": "qdrant",
+    "subject_entity_id": "entity:qdrant"
+  },
+  {
+    "evidence_count": 0,
+    "object": "authorization service",
+    "object_entity_id": "entity:authorization-service",
+    "predicate": "depends_on",
+    "subject": "query service",
+    "subject_entity_id": "entity:query-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "hybrid retrieval process",
+    "object_entity_id": "entity:hybrid-retrieval-process",
+    "predicate": "implements",
+    "subject": "query service",
+    "subject_entity_id": "entity:query-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "neo4j",
+    "object_entity_id": "entity:neo4j",
+    "predicate": "uses",
+    "subject": "query service",
+    "subject_entity_id": "entity:query-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "qdrant",
+    "object_entity_id": "entity:qdrant",
+    "predicate": "uses",
+    "subject": "query service",
+    "subject_entity_id": "entity:query-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "replay process",
+    "object_entity_id": "entity:replay-process",
+    "predicate": "defines",
+    "subject": "recovery guide",
+    "subject_entity_id": "entity:recovery-guide"
+  },
+  {
+    "evidence_count": 0,
+    "object": "recovery time objective",
+    "object_entity_id": "entity:recovery-time-objective",
+    "predicate": "defines",
+    "subject": "recovery report",
+    "subject_entity_id": "entity:recovery-report"
+  },
+  {
+    "evidence_count": 0,
+    "object": "recovery report",
+    "object_entity_id": "entity:recovery-report",
+    "predicate": "produces",
+    "subject": "recovery test process",
+    "subject_entity_id": "entity:recovery-test-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "replay process",
+    "object_entity_id": "entity:replay-process",
+    "predicate": "uses",
+    "subject": "recovery test process",
+    "subject_entity_id": "entity:recovery-test-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "canonical event dataset",
+    "object_entity_id": "entity:canonical-event-dataset",
+    "predicate": "consumes",
+    "subject": "replay process",
+    "subject_entity_id": "entity:replay-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "rebuild dataset",
+    "object_entity_id": "entity:rebuild-dataset",
+    "predicate": "produces",
+    "subject": "replay process",
+    "subject_entity_id": "entity:replay-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "projection recovery",
+    "object_entity_id": "entity:projection-recovery",
+    "predicate": "supports",
+    "subject": "replay process",
+    "subject_entity_id": "entity:replay-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "evidence ledger",
+    "object_entity_id": "entity:evidence-ledger",
+    "predicate": "related_to",
+    "subject": "run ledger",
+    "subject_entity_id": "entity:run-ledger"
+  },
+  {
+    "evidence_count": 0,
+    "object": "event envelope",
+    "object_entity_id": "entity:event-envelope",
+    "predicate": "defines",
+    "subject": "schema registry",
+    "subject_entity_id": "entity:schema-registry"
+  },
+  {
+    "evidence_count": 0,
+    "object": "p95 query latency",
+    "object_entity_id": "entity:p95-query-latency",
+    "predicate": "defines",
+    "subject": "service level objective",
+    "subject_entity_id": "entity:service-level-objective"
+  },
+  {
+    "evidence_count": 0,
+    "object": "projection lag",
+    "object_entity_id": "entity:projection-lag",
+    "predicate": "defines",
+    "subject": "service level objective",
+    "subject_entity_id": "entity:service-level-objective"
+  },
+  {
+    "evidence_count": 0,
+    "object": "harbor",
+    "object_entity_id": "entity:harbor",
+    "predicate": "consumes",
+    "subject": "validated assertion batches",
+    "subject_entity_id": "entity:validated-assertion-batches"
+  },
+  {
+    "evidence_count": 0,
+    "object": "projection assertions",
+    "object_entity_id": "entity:projection-assertions",
+    "predicate": "consumes",
+    "subject": "validation service",
+    "subject_entity_id": "entity:validation-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "validated assertion batch",
+    "object_entity_id": "entity:validated-assertion-batch",
+    "predicate": "produces",
+    "subject": "validation service",
+    "subject_entity_id": "entity:validation-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "identity rules",
+    "object_entity_id": "entity:identity-rules",
+    "predicate": "uses",
+    "subject": "validation service",
+    "subject_entity_id": "entity:validation-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "predicate constraints",
+    "object_entity_id": "entity:predicate-constraints",
+    "predicate": "uses",
+    "subject": "validation service",
+    "subject_entity_id": "entity:validation-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "provenance checks",
+    "object_entity_id": "entity:provenance-checks",
+    "predicate": "uses",
+    "subject": "validation service",
+    "subject_entity_id": "entity:validation-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "semantic retrieval",
+    "object_entity_id": "entity:semantic-retrieval",
+    "predicate": "related_to",
+    "subject": "vector search",
+    "subject_entity_id": "entity:vector-search"
+  }
+]

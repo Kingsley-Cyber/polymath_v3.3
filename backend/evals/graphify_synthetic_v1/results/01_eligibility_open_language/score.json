@@ -1,0 +1,172 @@
+{
+  "family": "01_eligibility_open_language",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_01_92a1496549",
+    "corpus_id": "8b3674cf-84aa-5af4-aad4-954b604b4935",
+    "elapsed_seconds": 12.0,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 13,
+    "failed": 0,
+    "optional_failed": 0,
+    "total": 13
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [
+    "pinion api | consumes | incoming events",
+    "priya anand | works for | quartzline analytics",
+    "tobias venn | member of | telemetry group",
+    "vaultstone | defines | cold storage service"
+  ],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "cold storage service",
+      "incoming events",
+      "larkspur queue",
+      "pinion api",
+      "priya anand",
+      "quartzline analytics",
+      "sable index",
+      "telemetry group",
+      "tobias venn",
+      "vaultstone"
+    ],
+    "promoted_edge_count": 6
+  },
+  "extracted_entities": [
+    "2027",
+    "2029",
+    "Dr. Imani Reyes",
+    "Imani Reyes",
+    "Larkspur Queue",
+    "Lisbon",
+    "March 2028",
+    "Maren Solis",
+    "Pinion API",
+    "Priya Anand",
+    "Quartzline",
+    "Quartzline Analytics",
+    "Rust",
+    "Sable Index",
+    "Telemetry Group",
+    "Tobias Venn",
+    "Vaultstone",
+    "cold-storage service",
+    "founding team",
+    "incoming events",
+    "normalized batches",
+    "quarterly meeting",
+    "registry filing",
+    "vendor brochure"
+  ],
+  "item_results": [
+    {
+      "id": "E01",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Maren Solis founded Quartzline Analytics in 2027."
+    },
+    {
+      "id": "E02",
+      "check": "passive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Quartzline Analytics was founded by Maren Solis, and the founding team grew quickly."
+    },
+    {
+      "id": "E03",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Dr. Imani Reyes leads the Telemetry Group."
+    },
+    {
+      "id": "E04",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Tobias Venn joined the Telemetry Group in March 2028."
+    },
+    {
+      "id": "E05",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Maren Solis works from the Lisbon office, while Priya Anand works for Quartzline Analytics as a fiel"
+    },
+    {
+      "id": "E06",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Maren Solis works from the Lisbon office, while Priya Anand works for Quartzline Analytics as a fiel"
+    },
+    {
+      "id": "E07",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Pinion API reads incoming events from the Larkspur Queue."
+    },
+    {
+      "id": "E08",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Pinion API sends normalized batches to the Sable Index."
+    },
+    {
+      "id": "E09",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Quartzline migrated its archives to the Vaultstone store in 2029."
+    },
+    {
+      "id": "E10",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Vaultstone is a cold-storage service written in Rust."
+    },
+    {
+      "id": "E11",
+      "check": "direction_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Larkspur Queue is read by the Pinion API whenever a backlog forms."
+    },
+    {
+      "id": "E12",
+      "check": "negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The quarterly meeting ran long."
+    },
+    {
+      "id": "E13",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "A vendor brochure claimed that Quartzline Analytics was founded by Tobias Venn, but the registry fil"
+    }
+  ]
+}

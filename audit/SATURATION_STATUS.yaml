@@ -1,0 +1,61 @@
+# Saturation closeout status — 2026-08-08 (owner protocol)
+architecture_freeze: passed            # one-encoder relex single-pass topology frozen
+single_encoder_contract: passed        # GLiNER2/bi/composite retired to evaluation
+relex_single_pass: passed              # census-captured relations; forbidden-2nd-pass test
+host_mps_runtime: passed               # sidecar 8737, container->host proven
+
+adapter_compiler:
+  gold_blind: passed                   # profiler reads document text only
+  declarative_only: passed             # packs in config/ontology_adapter
+  per_corpus_python: prohibited        # structurally impossible via compiler
+  s13_three_mode: passed               # generic .433 < compiled .500 < oracle .667
+
+semantic_saturation:
+  threshold_space_exhausted: passed    # grid {0.25,0.30,0.40}^2; (0.30,0.30) Pareto pin
+  adapter_levers_exhausted: open       # pack vocabulary v1; owner declares freeze
+  structured_lanes_exhausted: passed   # kv/table lanes + title/frontmatter miner; code = BY_DESIGN
+  relation_waterfall_complete: passed  # 38->26->15->9->9->4->3->3, every loss owned
+  unexplained_residual_classes: 0
+  admissible_improvements_remaining: 0 # last lever (title miner) exercised + verified
+
+knowledge_safety:
+  burned_leakage: 0
+  qualified_assertions_preserved: passed
+  open_semantics_preserved: passed     # native predicates/facets retained; nearest-vague impossible
+
+semantic_optimization_closeout:
+  status: CLOSED
+  reason: >
+    All sanctioned semantic levers exhausted. Two adversarial qualification
+    packets converged to zero leakage after mechanism-level assertion-context
+    completion. All known residuals classified. UNKNOWN = 0.
+
+held_out_generalization:
+  packet_v1: consumed                  # exposed epistemic-scope + catenative classes
+  packet_v2: consumed                  # exposed inverted-conditional + interrogative
+  adversarial_convergence: PASSED      # both packets certify clean post-sweep
+  post_doctrine_fresh_packet_run: false
+  status: SUPERSEDED_BY_PRODUCTION_GATE   # honest: no fresh packet after the sweep
+
+production_reopen_policy:
+  new_mechanism_class:
+    action: reopen_owning_layer_only
+    fixture_first: true
+    retest_burned_batteries: true
+
+operations:
+  crash_recovery: pending
+  idempotency: pending
+  soak: pending
+
+storage:
+  q8: passed                           # canonical projection, parity gate
+  mongo_conservation: passed
+  neo4j_projection: passed
+
+release:
+  clean_commit: pending                # this change set commits now
+  release_pins: passed                 # model/revision/hash/device/thresholds pinned
+  freeze_manifest: pending             # cut at held-out + ops pass
+
+verdict: SEMANTIC_OPTIMIZATION_CLOSED_PENDING_HELD_OUT_AND_OPS

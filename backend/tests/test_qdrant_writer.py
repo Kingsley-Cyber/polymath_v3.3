@@ -73,7 +73,13 @@ async def test_create_collection_retries_when_timeout_did_not_create(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_create_collection_forwards_binary_quantization_config():
+async def test_create_collection_forwards_binary_quantization_config(monkeypatch):
+    # Validates the quantized code path; pin the flag so the test does not
+    # depend on the deployment .env (q9 ships with quantization disabled).
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
+
     class CaptureClient:
         def __init__(self):
             self.kwargs = None
@@ -95,6 +101,38 @@ async def test_create_collection_forwards_binary_quantization_config():
     )
 
     assert client.kwargs["quantization_config"] is desired
+
+
+@pytest.mark.asyncio
+async def test_q9_quantization_disabled_creates_unquantized_collections(monkeypatch):
+    # q9 speed-first contract: with the flag off, no quantization config is
+    # forwarded and no quantized search params are produced — collections are
+    # created with full-precision vectors only.
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", False
+    )
+
+    class CaptureClient:
+        def __init__(self):
+            self.kwargs = None
+
+        async def collection_exists(self, _collection_name):
+            return False
+
+        async def create_collection(self, **kwargs):
+            self.kwargs = kwargs
+
+    assert qdrant_writer.binary_quantization_config() is None
+    assert qdrant_writer.binary_quantization_search_params() is None
+
+    client = CaptureClient()
+    await qdrant_writer._create_collection_with_retry(
+        client,
+        collection_name="corpus_abcd_naive",
+        vectors_config={},
+        quantization_config=qdrant_writer.binary_quantization_config(),
+    )
+    assert "quantization_config" not in client.kwargs
 
 
 @pytest.mark.asyncio
@@ -125,7 +163,10 @@ async def test_payload_index_retries_transient_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_compat_uses_query_points_on_qdrant_client_118():
+async def test_search_compat_uses_query_points_on_qdrant_client_118(monkeypatch):
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     client = _QueryPointsOnlyClient()
     query_filter = qdrant_writer.Filter(must=[])
 
@@ -167,7 +208,11 @@ async def test_collection_availability_positive_result_is_cached():
 
 
 @pytest.mark.asyncio
-async def test_summary_tree_batch_search_preserves_query_order_and_filters():
+async def test_summary_tree_batch_search_preserves_query_order_and_filters(monkeypatch):
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
+
     class BatchClient:
         def __init__(self):
             self.exists_calls = 0
@@ -427,7 +472,10 @@ async def test_existing_collections_still_get_payload_indexes_repaired():
 
 
 @pytest.mark.asyncio
-async def test_existing_collections_get_binary_quantization_reconciled_once():
+async def test_existing_collections_get_binary_quantization_reconciled_once(monkeypatch):
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     client = _ExistingCollectionClient(quantized=False)
 
     await qdrant_writer.ensure_collections_for_corpus(client, "abcdef123456", dim=1024)
@@ -442,7 +490,11 @@ async def test_existing_collections_get_binary_quantization_reconciled_once():
 
 
 @pytest.mark.asyncio
-async def test_quantization_timeout_is_accepted_after_matching_readback():
+async def test_quantization_timeout_is_accepted_after_matching_readback(monkeypatch):
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
+
     class TimeoutAfterApplyClient:
         def __init__(self):
             self.quantization_config = None
@@ -537,12 +589,14 @@ async def test_existing_collection_dimension_mismatch_fails_loudly():
 class _DeleteClient:
     def __init__(self) -> None:
         self.selectors = []
+        self.deleted_collections: list[str] = []
 
     async def collection_exists(self, _collection_name: str) -> bool:
         return True
 
-    async def delete(self, *, points_selector, **_kwargs):
+    async def delete(self, *, collection_name=None, points_selector, **_kwargs):
         self.selectors.append(points_selector)
+        self.deleted_collections.append(collection_name)
         return SimpleNamespace(operation_id=1)
 
 
@@ -557,7 +611,9 @@ async def test_doc_replace_can_preserve_existing_summary_points():
         preserve_summary_points=True,
     )
 
-    assert len(client.selectors) == 3
+    # naive / hrag / graph + the q8 candidate evidence collection.
+    assert len(client.selectors) == 4
+    assert client.deleted_collections[-1] == "corpus_abcdef12_evidence"
     for selector in client.selectors:
         assert selector.must_not
         assert selector.must_not[0].key == "chunk_type"

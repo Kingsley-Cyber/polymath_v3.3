@@ -1,0 +1,200 @@
+# Adversarial conjunction-resolution fixtures.
+#
+# These test coordinated argument structures to ensure the FrameExtractor
+# does NOT perform Cartesian expansion across clause boundaries.
+#
+# Conjunction inheritance rules:
+#   A subject is inherited through coordination ONLY when:
+#     1. candidate token has dep=conj
+#     2. its coordination head is the licensed subject
+#     3. both belong to the same predicate clause
+#     4. there is no intervening independent finite predicate
+#     5. the resulting subject and object remain distinct
+#
+# Each fixture specifies:
+#   sentence: the exact source sentence
+#   entities: (surface, start, end, type) relative to sentence
+#   expected_triples: list of (subject, predicate, object) that SHOULD be extracted
+#   forbidden_triples: list of (subject, predicate, object) that MUST NOT appear
+#   verdict: CONJUNCTION_SAFE | CONJUNCTION_CARTESIAN_BUG
+
+fixtures:
+  # =====================================================================
+  # Shared subject, shared object: "A and B support C"
+  # Expected: A→support→C, B→support→C
+  # =====================================================================
+
+  - id: conj_shared_subj_001
+    sentence: "Django and Flask streamline functional programming."
+    entities:
+      - surface: "Django"
+        start: 0
+        end: 6
+        type: PRODUCT
+      - surface: "Flask"
+        start: 11
+        end: 16
+        type: PRODUCT
+      - surface: "functional programming"
+        start: 28
+        end: 50
+        type: CONCEPT
+    expected_triples:
+      - ["Django", "streamline", "functional programming"]
+      - ["Flask", "streamline", "functional programming"]
+    forbidden_triples: []
+    verdict: CONJUNCTION_SAFE
+
+  # =====================================================================
+  # Shared subject, conjoined object: "A supports B and C"
+  # Expected: A→support→B, A→support→C
+  # =====================================================================
+
+  - id: conj_shared_obj_001
+    sentence: "The platform streamlines authentication and authorization."
+    entities:
+      - surface: "The platform"
+        start: 0
+        end: 12
+        type: PRODUCT
+      - surface: "authentication"
+        start: 25
+        end: 39
+        type: CONCEPT
+      - surface: "authorization"
+        start: 44
+        end: 57
+        type: CONCEPT
+    expected_triples:
+      - ["The platform", "streamline", "authentication"]
+      - ["The platform", "streamline", "authorization"]
+    forbidden_triples: []
+    verdict: CONJUNCTION_SAFE
+
+  # =====================================================================
+  # Conjoined subject AND object: "A and B support C and D"
+  # Expected: A→C, A→D, B→C, B→D (Cartesian within same clause is OK)
+  # =====================================================================
+
+  - id: conj_both_001
+    sentence: "Redis and Memcached streamline caching and session storage."
+    entities:
+      - surface: "Redis"
+        start: 0
+        end: 5
+        type: PRODUCT
+      - surface: "Memcached"
+        start: 10
+        end: 19
+        type: PRODUCT
+      - surface: "caching"
+        start: 31
+        end: 38
+        type: CONCEPT
+      - surface: "session storage"
+        start: 43
+        end: 58
+        type: CONCEPT
+    expected_triples:
+      - ["Redis", "streamline", "caching"]
+      - ["Redis", "streamline", "session storage"]
+      - ["Memcached", "streamline", "caching"]
+      - ["Memcached", "streamline", "session storage"]
+    forbidden_triples: []
+    verdict: CONJUNCTION_SAFE
+
+  # =====================================================================
+  # Two independent clauses: "A supports B, and C supports D"
+  # Expected: A→support→B, C→support→D
+  # FORBIDDEN: A→support→D, C→support→B (cross-clause Cartesian)
+  # =====================================================================
+
+  - id: conj_independent_001
+    sentence: "OAuth streamlines delegation, and SAML streamlines federation."
+    entities:
+      - surface: "OAuth"
+        start: 0
+        end: 5
+        type: PRODUCT
+      - surface: "delegation"
+        start: 18
+        end: 28
+        type: CONCEPT
+      - surface: "SAML"
+        start: 34
+        end: 38
+        type: PRODUCT
+      - surface: "federation"
+        start: 51
+        end: 61
+        type: CONCEPT
+    expected_triples:
+      - ["OAuth", "streamline", "delegation"]
+      - ["SAML", "streamline", "federation"]
+    forbidden_triples:
+      - ["OAuth", "streamline", "federation"]
+      - ["SAML", "streamline", "delegation"]
+    verdict: CONJUNCTION_SAFE
+
+  # =====================================================================
+  # Parenthetical insertion: "A, along with B, supports C"
+  # Expected: A→support→C only
+  # FORBIDDEN: B→support→C (parenthetical is not a conjoined subject)
+  # =====================================================================
+
+  - id: conj_parenthetical_001
+    sentence: "Kubernetes, along with Docker, streamlines containerization."
+    entities:
+      - surface: "Kubernetes"
+        start: 0
+        end: 10
+        type: PRODUCT
+      - surface: "Docker"
+        start: 23
+        end: 29
+        type: PRODUCT
+      - surface: "containerization"
+        start: 43
+        end: 59
+        type: CONCEPT
+    expected_triples:
+      - ["Kubernetes", "streamline", "containerization"]
+    forbidden_triples:
+      - ["Docker", "streamline", "containerization"]
+    verdict: CONJUNCTION_SAFE
+
+  # =====================================================================
+  # Control/raising: "A encourages B to create C"
+  # Expected: A→encourage→B (main clause)
+  # B→create→C is a separate embedded clause, not a conjunction
+  # =====================================================================
+
+  - id: conj_control_001
+    sentence: "The grant encourages researchers to publish findings."
+    entities:
+      - surface: "The grant"
+        start: 0
+        end: 9
+        type: PRODUCT
+      - surface: "researchers"
+        start: 21
+        end: 32
+        type: PERSON
+      - surface: "findings"
+        start: 44
+        end: 52
+        type: CONCEPT
+    expected_triples:
+      - ["The grant", "encourage", "researchers"]
+    forbidden_triples:
+      - ["The grant", "encourage", "findings"]
+      - ["researchers", "encourage", "findings"]
+    verdict: CONJUNCTION_SAFE
+
+# =====================================================================
+# Regression targets
+# =====================================================================
+# 1. Shared-subject conjunctions expand correctly (no missed conjuncts)
+# 2. Independent clauses do NOT cross-pollinate (no Cartesian explosion)
+# 3. Parenthetical insertions are not treated as conjoined subjects
+# 4. Control/raising verbs do not create spurious subject-object pairs

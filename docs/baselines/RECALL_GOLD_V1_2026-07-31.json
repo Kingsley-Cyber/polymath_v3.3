@@ -1,0 +1,90 @@
+{
+  "gold_version": "recall_gold_v1",
+  "authored_utc": "2026-07-31",
+  "seed": "recall_gold_v1_2026_07_31",
+  "protocol": "BLIND. Authored from chunk TEXT ONLY, before any system output was generated or viewed. Ordering enforces this: the gold file is committed before extraction runs.",
+  "entity_standard": "graph_worthy, matching gliner_entity_gate_v1: a specific, nameable referent worth being a NODE. Excludes pronouns, bare generic nouns, adjectives, document furniture.",
+  "relation_standard": "The text ASSERTS this subject/predicate/object, directly and positively. Excludes hypotheticals, negations, and relations only implied.",
+  "chunks": [
+    {
+      "n": 1, "chunk_id": "0862a33b1f9e91a8737b",
+      "entities": ["CAPTCHA"],
+      "relations": [
+        {"s": "CAPTCHA", "p": "detects", "o": "spam"},
+        {"s": "companies", "p": "uses", "o": "CAPTCHA"}
+      ],
+      "note": "Nearly all nouns here are generic (form, companies, spam, software, prospects). CAPTCHA is the one real named referent. Relations involve one generic endpoint each -- included because the ASSERTION is real; scored separately."
+    },
+    {
+      "n": 2, "chunk_id": "077d627cf3eeba6bdcd1",
+      "entities": ["Michael Boyd", "Royal Shakespeare Company", "William Shakespeare", "thrust stage"],
+      "relations": [
+        {"s": "Michael Boyd", "p": "affiliated_with", "o": "Royal Shakespeare Company"}
+      ],
+      "note": "Boyd proposes an analogy -- attributed/hypothetical, so the stage-brain analogy is NOT an asserted relation."
+    },
+    {
+      "n": 3, "chunk_id": "0efd208a531118f285c0",
+      "entities": ["Microsoft", "red team", "LLMs", "prompt attacks"],
+      "relations": [
+        {"s": "Microsoft", "p": "produces", "o": "write-up on red teaming"},
+        {"s": "organizations", "p": "owns", "o": "security red team"}
+      ]
+    },
+    {
+      "n": 4, "chunk_id": "07a075c0e1858cb1ca9d",
+      "entities": ["Web", "Internet", "Gutenberg press", "electronic literature", "personal computers"],
+      "relations": []
+      ,"note": "Claims here are broad historical assertions with generic or abstract endpoints; none is a clean subject-predicate-object between two nameable entities."
+    },
+    {
+      "n": 5, "chunk_id": "033a36d717fe37b9500a",
+      "entities": ["Q & A", "Dog Day Afternoon", "art director", "costume designer"],
+      "relations": []
+      ,"note": "The instruction NOT to consult is a negation -- excluded by the asserted-positive standard."
+    },
+    {
+      "n": 6, "chunk_id": "07a075c0e1858cb1ca9d_bib",
+      "entities": ["Cornell University Press", "Gone Home", "The Fullbright Company", "Blackwell", "G. Frasca", "G. Genette", "S. Gaynor", "Ludology Meets Narratology", "Narrative Discourse"],
+      "relations": [
+        {"s": "Gone Home", "p": "created_by", "o": "S. Gaynor"},
+        {"s": "Gone Home", "p": "created_by", "o": "The Fullbright Company"},
+        {"s": "Narrative Discourse", "p": "created_by", "o": "G. Genette"},
+        {"s": "Ludology Meets Narratology", "p": "created_by", "o": "G. Frasca"}
+      ],
+      "note": "Bibliography. Entities are real and nameable; the authorship relations ARE asserted by the citation format. Deliberately labeled fully -- the earlier bibliographic SUPPRESSION in frame_extractor will show up as recall loss here, which is the honest cost of that precision guard."
+    },
+    {
+      "n": 7, "chunk_id": "0301e69613191ecefe93",
+      "entities": ["Quebec", "Figure 2.5"],
+      "relations": [
+        {"s": "general manager", "p": "located_in", "o": "Quebec"}
+      ],
+      "note": "hotel/marketers/respondents are generic. 'top box' is jargon, not a node."
+    },
+    {
+      "n": 8, "chunk_id": "0821ed954590ebf0fe7d",
+      "entities": ["strange situation test"],
+      "relations": []
+      ,"note": "Almost entirely generic abstract prose. One named psychological instrument."
+    },
+    {
+      "n": 9, "chunk_id": "033a36d717fe37b9500a_b",
+      "entities": ["Al", "Barney", "second assistant cameraman", "focus puller", "camera operator"],
+      "relations": [
+        {"s": "Barney", "p": "detects", "o": "camera noise"},
+        {"s": "camera crew", "p": "part_of", "o": "operator"},
+        {"s": "camera crew", "p": "part_of", "o": "focus puller"},
+        {"s": "camera crew", "p": "part_of", "o": "second assistant"}
+      ],
+      "note": "Barney REDUCES camera noise -- 'detects' is the nearest Literal predicate and is a poor fit. Flagged: the predicate vocabulary lacks a 'reduces/mitigates' value."
+    },
+    {
+      "n": 10, "chunk_id": "09ca7b9e55759e0171bd",
+      "entities": ["Proclamation Lead", "prediction-based lead"],
+      "relations": [
+        {"s": "prediction-based lead", "p": "instance_of", "o": "Proclamation Lead"}
+      ]
+    }
+  ]
+}

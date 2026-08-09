@@ -1,0 +1,576 @@
+{
+  "counts": {
+    "ARGUMENT_ALIGNMENT": 0,
+    "ATTRIBUTION": 0,
+    "CONDITIONAL_SCOPE": 0,
+    "DIRECTION": 0,
+    "ENTITY_TYPE": 3,
+    "GATE_POLICY": 15,
+    "MISSING_PAIR": 7,
+    "MODALITY": 0,
+    "POLARITY": 0,
+    "PREDICATE_MAPPING": 3
+  },
+  "failures": [
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T001"
+      },
+      "failure_class": "ENTITY_TYPE",
+      "gold": {
+        "evidence": "Harbor accepts telemetry from industrial sensors deployed at a regional facility in El Paso.",
+        "id": "T001",
+        "object": "Industrial Sensor Telemetry",
+        "object_type": "Dataset",
+        "predicate": "consumes",
+        "subject": "Harbor",
+        "subject_type": "Software"
+      },
+      "id": "T001",
+      "reason": "canonical object endpoint was not available"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T002"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "This chapter follows a fictional platform, Harbor, operated by Northstar Labs",
+        "id": "T002",
+        "object": "Harbor",
+        "object_type": "Software",
+        "predicate": "related_to",
+        "subject": "Northstar Labs",
+        "subject_type": "Org"
+      },
+      "id": "T002",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T003"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "MongoDB stores Harbor's canonical event evidence.",
+        "id": "T003",
+        "object": "MongoDB",
+        "object_type": "Software",
+        "predicate": "uses",
+        "subject": "Harbor",
+        "subject_type": "Software"
+      },
+      "id": "T003",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T009"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "the Harbor Gateway produces an Event Envelope",
+        "id": "T009",
+        "object": "Event Envelope",
+        "object_type": "Dataset",
+        "predicate": "produces",
+        "subject": "Harbor Gateway",
+        "subject_type": "Service"
+      },
+      "id": "T009",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T010"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Schema Registry defines the Event Envelope contract.",
+        "id": "T010",
+        "object": "Event Envelope",
+        "object_type": "Dataset",
+        "predicate": "defines",
+        "subject": "Schema Registry",
+        "subject_type": "Service"
+      },
+      "id": "T010",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T014"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "Kafka supports the Event Transport Process",
+        "id": "T014",
+        "object": "Event Transport Process",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Kafka",
+        "subject_type": "Software"
+      },
+      "id": "T014",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T015"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "The worker produces a Normalized Event",
+        "id": "T015",
+        "object": "Normalized Event",
+        "object_type": "Dataset",
+        "predicate": "produces",
+        "subject": "Ingestion Worker",
+        "subject_type": "Service"
+      },
+      "id": "T015",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T019"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Canonical Storage Process uses MongoDB",
+        "id": "T019",
+        "object": "MongoDB",
+        "object_type": "Software",
+        "predicate": "uses",
+        "subject": "Canonical Storage Process",
+        "subject_type": "Process"
+      },
+      "id": "T019",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T023"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Projection Worker consumes the Canonical Event Dataset",
+        "id": "T023",
+        "object": "Canonical Event Dataset",
+        "object_type": "Dataset",
+        "predicate": "consumes",
+        "subject": "Projection Worker",
+        "subject_type": "Service"
+      },
+      "id": "T023",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T025"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Projection Worker implements the Assertion Compilation Process.",
+        "id": "T025",
+        "object": "Assertion Compilation Process",
+        "object_type": "Process",
+        "predicate": "implements",
+        "subject": "Projection Worker",
+        "subject_type": "Service"
+      },
+      "id": "T025",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T026"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "It also depends on the Schema Registry",
+        "id": "T026",
+        "object": "Schema Registry",
+        "object_type": "Service",
+        "predicate": "depends_on",
+        "subject": "Projection Worker",
+        "subject_type": "Service"
+      },
+      "id": "T026",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T027"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "They are consumed by the Validation Service",
+        "id": "T027",
+        "object": "Projection Assertions",
+        "object_type": "Dataset",
+        "predicate": "consumes",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T027",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": true,
+        "id": "T028"
+      },
+      "failure_class": "PREDICATE_MAPPING",
+      "gold": {
+        "evidence": "applies identity rules, predicate constraints, and provenance checks",
+        "id": "T028",
+        "object": "Identity Rules",
+        "object_type": "Concept",
+        "predicate": "uses",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T028",
+      "reason": "endpoint pair existed but the required surface or canonical predicate did not"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T029"
+      },
+      "failure_class": "ENTITY_TYPE",
+      "gold": {
+        "evidence": "applies identity rules, predicate constraints, and provenance checks",
+        "id": "T029",
+        "object": "Predicate Constraints",
+        "object_type": "Concept",
+        "predicate": "uses",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T029",
+      "reason": "canonical object endpoint was not available"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": true,
+        "id": "T030"
+      },
+      "failure_class": "PREDICATE_MAPPING",
+      "gold": {
+        "evidence": "applies identity rules, predicate constraints, and provenance checks",
+        "id": "T030",
+        "object": "Provenance Checks",
+        "object_type": "Concept",
+        "predicate": "uses",
+        "subject": "Validation Service",
+        "subject_type": "Service"
+      },
+      "id": "T030",
+      "reason": "endpoint pair existed but the required surface or canonical predicate did not"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T039"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "Graph Traversal is related to Relational Retrieval",
+        "id": "T039",
+        "object": "Relational Retrieval",
+        "object_type": "Concept",
+        "predicate": "related_to",
+        "subject": "Graph Traversal",
+        "subject_type": "Process"
+      },
+      "id": "T039",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T043"
+      },
+      "failure_class": "ENTITY_TYPE",
+      "gold": {
+        "evidence": "A small Redis deployment coordinates leases for projection jobs.",
+        "id": "T043",
+        "object": "Projection Job Coordination",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Redis",
+        "subject_type": "Software"
+      },
+      "id": "T043",
+      "reason": "canonical object endpoint was not available"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T044"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Run Ledger is related to the Evidence Ledger",
+        "id": "T044",
+        "object": "Evidence Ledger",
+        "object_type": "Document",
+        "predicate": "related_to",
+        "subject": "Run Ledger",
+        "subject_type": "Document"
+      },
+      "id": "T044",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T045"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Recovery Guide defines the Replay Process.",
+        "id": "T045",
+        "object": "Replay Process",
+        "object_type": "Process",
+        "predicate": "defines",
+        "subject": "Recovery Guide",
+        "subject_type": "Document"
+      },
+      "id": "T045",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T053"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "produces a Recovery Report",
+        "id": "T053",
+        "object": "Recovery Report",
+        "object_type": "Document",
+        "predicate": "produces",
+        "subject": "Recovery Test Process",
+        "subject_type": "Process"
+      },
+      "id": "T053",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T055"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "Northstar Labs uses the Recovery Report during quarterly operational reviews.",
+        "id": "T055",
+        "object": "Recovery Report",
+        "object_type": "Document",
+        "predicate": "uses",
+        "subject": "Northstar Labs",
+        "subject_type": "Org"
+      },
+      "id": "T055",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T056"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Incident Response Guide defines the Projection Failure Process.",
+        "id": "T056",
+        "object": "Projection Failure Process",
+        "object_type": "Process",
+        "predicate": "defines",
+        "subject": "Incident Response Guide",
+        "subject_type": "Document"
+      },
+      "id": "T056",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T057"
+      },
+      "failure_class": "PREDICATE_MAPPING",
+      "gold": {
+        "evidence": "The August Recovery Event occurred in El Paso",
+        "id": "T057",
+        "object": "El Paso",
+        "object_type": "Location",
+        "predicate": "related_to",
+        "subject": "August Recovery Event",
+        "subject_type": "Event"
+      },
+      "id": "T057",
+      "reason": "endpoint pair existed but the required surface or canonical predicate did not"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": false,
+        "endpoint_pair_generated": false,
+        "id": "T058"
+      },
+      "failure_class": "MISSING_PAIR",
+      "gold": {
+        "evidence": "That event caused temporary query latency",
+        "id": "T058",
+        "object": "Temporary Query Latency",
+        "object_type": "Metric",
+        "predicate": "causes",
+        "subject": "August Recovery Event",
+        "subject_type": "Event"
+      },
+      "id": "T058",
+      "reason": "both endpoint entities existed but no directed endpoint pair was generated"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T062"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "produces the Operations Dashboard",
+        "id": "T062",
+        "object": "Operations Dashboard",
+        "object_type": "Document",
+        "predicate": "produces",
+        "subject": "Observability Service",
+        "subject_type": "Service"
+      },
+      "id": "T062",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T063"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Operations Dashboard is related to the Recovery Report",
+        "id": "T063",
+        "object": "Recovery Report",
+        "object_type": "Document",
+        "predicate": "related_to",
+        "subject": "Operations Dashboard",
+        "subject_type": "Document"
+      },
+      "id": "T063",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T064"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "The Canonical Event Store supports the Replay Process",
+        "id": "T064",
+        "object": "Replay Process",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Canonical Event Store",
+        "subject_type": "Dataset"
+      },
+      "id": "T064",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    },
+    {
+      "checkpoints": {
+        "correct_canonical_assertion_promoted": false,
+        "correct_surface_proposition_generated": true,
+        "endpoint_pair_generated": true,
+        "id": "T065"
+      },
+      "failure_class": "GATE_POLICY",
+      "gold": {
+        "evidence": "the Replay Process supports projection recovery",
+        "id": "T065",
+        "object": "Projection Recovery",
+        "object_type": "Process",
+        "predicate": "supports",
+        "subject": "Replay Process",
+        "subject_type": "Process"
+      },
+      "id": "T065",
+      "reason": "correct canonical candidate existed but was not promoted to Neo4j"
+    }
+  ]
+}

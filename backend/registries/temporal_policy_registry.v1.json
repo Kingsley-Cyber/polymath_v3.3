@@ -1,0 +1,253 @@
+{
+  "registry": "temporal_policy",
+  "version": "v1",
+  "authority": "executor-proposed, owner-ratifiable",
+  "owner_ratification_required": true,
+  "source": "CONTINUITY/TEMPORAL_CONTRACT_V1.md; owner sequencing decision 2026-08-03",
+  "changes_require_new_version": true,
+  "policy_note": "Versioned per-source-type date-selection precedence for the canonical temporal envelope (T1). Descriptive only until T2 adapter emission is enabled (TEMPORAL_ENVELOPE_ENABLED=shadow|enforce). File times are recorded as candidates but may never win selection; unknown stays unknown; conflicts are retained, not normalized away.",
+  "clocks": [
+    "source_published_at",
+    "source_recorded_at",
+    "original_work_published_at",
+    "edition_published_at",
+    "electronic_edition_published_at",
+    "source_updated_at",
+    "transcript_generated_at",
+    "source_acquired_at",
+    "system_recorded_at"
+  ],
+  "query_clock_families": [
+    "valid_time",
+    "source_time",
+    "transaction_time"
+  ],
+  "interval_semantics": "half_open",
+  "global_rules": {
+    "file_time_never_publication_time": true,
+    "missing_dates_remain_null": true,
+    "no_llm_date_inference": true,
+    "no_network_date_resolution": true,
+    "conflicting_candidates_retained": true,
+    "selection_is_projection_not_destruction": true,
+    "relative_without_anchor": "unresolved_anchor",
+    "ambiguous_locale": "do_not_guess"
+  },
+  "source_policies": {
+    "transcript": {
+      "policy_id": "transcript_recording_precedence_v1",
+      "target_clock": "source_recorded_at",
+      "additional_clocks": [
+        "source_published_at",
+        "transcript_generated_at"
+      ],
+      "ladder": [
+        {
+          "method": "user_supplied_recording_time",
+          "confidence": "high"
+        },
+        {
+          "method": "transcript_metadata_recording",
+          "confidence": "high"
+        },
+        {
+          "method": "platform_event_timestamp",
+          "confidence": "medium"
+        },
+        {
+          "method": "transcript_header_date",
+          "confidence": "low"
+        },
+        {
+          "method": "title_date_parse",
+          "confidence": "low"
+        }
+      ]
+    },
+    "meeting_transcript": {
+      "policy_id": "meeting_recording_precedence_v1",
+      "target_clock": "source_recorded_at",
+      "additional_clocks": [
+        "transcript_generated_at"
+      ],
+      "ladder": [
+        {
+          "method": "meeting_agenda_date",
+          "confidence": "high"
+        },
+        {
+          "method": "user_supplied_recording_time",
+          "confidence": "high"
+        },
+        {
+          "method": "transcript_metadata_recording",
+          "confidence": "medium"
+        },
+        {
+          "method": "transcript_header_date",
+          "confidence": "low"
+        }
+      ]
+    },
+    "epub": {
+      "policy_id": "epub_edition_precedence_v1",
+      "target_clock": "edition_published_at",
+      "additional_clocks": [
+        "original_work_published_at",
+        "electronic_edition_published_at"
+      ],
+      "ladder": [
+        {
+          "method": "edition_publication_metadata",
+          "confidence": "high"
+        },
+        {
+          "method": "package_publication_metadata",
+          "confidence": "medium"
+        },
+        {
+          "method": "epub_dc_date",
+          "confidence": "medium"
+        },
+        {
+          "method": "bundled_catalog_metadata",
+          "confidence": "medium"
+        },
+        {
+          "method": "copyright_title_page_date",
+          "confidence": "low"
+        }
+      ]
+    },
+    "research_paper": {
+      "policy_id": "research_paper_precedence_v1",
+      "target_clock": "source_published_at",
+      "additional_clocks": [
+        "source_updated_at"
+      ],
+      "ladder": [
+        {
+          "method": "publication_metadata",
+          "confidence": "high"
+        },
+        {
+          "method": "online_first_date",
+          "confidence": "medium"
+        },
+        {
+          "method": "citation_pattern",
+          "confidence": "medium"
+        },
+        {
+          "method": "revision_date",
+          "confidence": "low"
+        }
+      ]
+    },
+    "news_article": {
+      "policy_id": "news_article_precedence_v1",
+      "target_clock": "source_published_at",
+      "additional_clocks": [
+        "source_updated_at",
+        "source_acquired_at"
+      ],
+      "ladder": [
+        {
+          "method": "publication_metadata",
+          "confidence": "high"
+        },
+        {
+          "method": "html_meta_published",
+          "confidence": "high"
+        },
+        {
+          "method": "text_head_published",
+          "confidence": "high"
+        },
+        {
+          "method": "citation_pattern",
+          "confidence": "medium"
+        },
+        {
+          "method": "text_head_date_line",
+          "confidence": "low"
+        },
+        {
+          "method": "text_head_copyright",
+          "confidence": "low"
+        }
+      ]
+    },
+    "markdown_notes": {
+      "policy_id": "markdown_notes_precedence_v1",
+      "target_clock": "source_published_at",
+      "additional_clocks": [
+        "source_updated_at"
+      ],
+      "ladder": [
+        {
+          "method": "frontmatter_published",
+          "confidence": "high"
+        },
+        {
+          "method": "frontmatter_date",
+          "confidence": "medium"
+        },
+        {
+          "method": "repository_commit_date",
+          "confidence": "low"
+        },
+        {
+          "method": "text_head_date_line",
+          "confidence": "low"
+        }
+      ]
+    },
+    "pdf": {
+      "policy_id": "pdf_precedence_v1",
+      "target_clock": "source_published_at",
+      "additional_clocks": [
+        "edition_published_at"
+      ],
+      "ladder": [
+        {
+          "method": "publication_metadata",
+          "confidence": "high"
+        },
+        {
+          "method": "text_head_published",
+          "confidence": "high"
+        },
+        {
+          "method": "citation_pattern",
+          "confidence": "medium"
+        },
+        {
+          "method": "text_head_date_line",
+          "confidence": "low"
+        },
+        {
+          "method": "filename_year",
+          "confidence": "low"
+        }
+      ]
+    },
+    "json_api_record": {
+      "policy_id": "json_api_record_precedence_v1",
+      "target_clock": "source_published_at",
+      "additional_clocks": [
+        "source_acquired_at"
+      ],
+      "ladder": [
+        {
+          "method": "provided_metadata",
+          "confidence": "high"
+        },
+        {
+          "method": "api_timestamp_field",
+          "confidence": "medium"
+        }
+      ]
+    }
+  }
+}

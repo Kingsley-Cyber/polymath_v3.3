@@ -74,8 +74,43 @@ more like a research workbench:
 | **Chat RAG** | Agent-Zero-inspired synthesis style, live reasoning streams, source-aware rendering, and pressure-tested answers for design/research questions. |
 | **Retrieval** | Vector, hybrid, and graph-augmented tiers with reranking, HyDE controls, facet-aware coverage, and evidence provenance. |
 | **Graph Query** | Query-specific graph views, evidence packets for research/nuance/ideation, bridges/gaps/hubs, and richer graph visualization controls. |
+| **Extraction** | One release-pinned encoder (GLiNER-Relex-large) behind a routable GPU sidecar — Apple-MPS or LAN CUDA, byte-identical pins, qualification-gated switching. Deterministic stages, crash-proof receipts, fail-closed on engine loss. |
 | **Model routing** | LiteLLM wildcard routing with DeepSeek, GLM 5.1, MiMo, OpenRouter, Anthropic, OpenAI, Gemini, Mistral, Ollama, and custom providers. |
 | **Web RAG** | Optional live-web retrieval with cache, trust signals, reranking, and visible trace events. |
+
+---
+
+## Extraction release — `extraction-v1`
+
+The semantic extraction stack is **frozen, qualified, and operationally
+drilled** (see [`release/extraction-v1.yaml`](release/extraction-v1.yaml) for
+every pin):
+
+- **One encoder, one pass** — `knowledgator/gliner-relex-large-v1.0` at a
+  pinned revision and weights hash, served over HTTP by a GPU sidecar.
+  Entities and relation candidates come from a single inference pass per
+  window; thresholds are release properties, never tuning knobs.
+- **Evidence-first honesty** — model output never becomes a canonical fact
+  without corroboration; uncertain or qualified language parks as
+  QUALIFIED/OPEN instead of polluting the graph. Adversarial qualification
+  packets converged to zero leakage.
+- **Receipts everywhere** — every stage writes content-hashed artifacts and
+  receipts; crash recovery adopts durable work instead of re-inferring
+  (drilled at every kill point: pre-inference, pre-persistence, pre-receipt,
+  mid-inference engine loss, per-store writes).
+- **Vector conservation** — every chunk is either an eligible child vector or
+  carries an explicit BY_DESIGN omission receipt; the cross-store verifier
+  enforces the identity and the UI badge cannot read COMPLETE otherwise.
+- **Deterministic dual-engine** — the encoder seam is one URL. A Mongo
+  control document routes between the Mac's MPS sidecar and a LAN CUDA
+  workstation; flips verify exact weight pins, refuse unqualified builds,
+  and agents can wake the GPU box on demand (Wake-on-LAN MCP tool). The
+  CUDA lane qualified with exact battery conservation (book 60/66 · sealed
+  44/51 · families 8-PASS · leakage 0 — identical to the MPS baseline).
+
+Operational entry points: [`RUNBOOK_E2E.md`](RUNBOOK_E2E.md) (owner runbook),
+[`RTX_SETUP_HANDOFF.md`](RTX_SETUP_HANDOFF.md) (GPU workstation deployment),
+[`audit/`](audit/) (saturation status, residual ledger, doctrine).
 
 ---
 
@@ -634,6 +669,10 @@ mcp_servers:
     url: https://mcp.example.com/mcp
     headers:
       Authorization: Bearer YOUR_POLYMATH_MCP_KEY
+  runpod_docs:
+    url: https://docs.runpod.io/mcp
+    connect_timeout: 30
+    timeout: 120
 ```
 
 After editing Hermes config, verify the live agent path end-to-end:
@@ -645,6 +684,35 @@ scripts/verify_hermes_mcp.py
 The verifier compares `~/.hermes/config.yaml` against this repo's
 `MCP_PUBLIC_URL`, checks that Hermes has a bearer header, then performs a live
 streamable-HTTP MCP smoke call without printing the secret token.
+
+Hermes must not infer ingestion execution from names. After
+`polymath_get_ingest_status` reaches `complete`, it must call
+`polymath_verify_ingestion` for the exact `corpus_id + doc_id` and report only
+that tool's `safe_claims`. In particular, `local_extraction` names the
+deterministic schema contract; a receipt with
+`execution_location=remote_runpod_serverless` proves the work ran on RunPod.
+Qdrant or Mongo location never proves where embeddings were computed.
+
+RunPod now publishes two separate MCP servers:
+
+```yaml
+# No authentication. Search current RunPod contracts and documentation.
+runpod_docs:
+  url: https://docs.runpod.io/mcp
+
+# Optional infrastructure control plane. Put RUNPOD_API_KEY in ~/.hermes/.env.
+runpod:
+  command: npx
+  args: ["-y", "@runpod/mcp-server@latest"]
+  env:
+    RUNPOD_API_KEY: ${RUNPOD_API_KEY}
+```
+
+The API MCP manages RunPod infrastructure. It does not replace Polymath's
+extraction data plane. Polymath's current certified extraction adapter remains
+queue-based (`/run` plus `/status/{job_id}`); load-balancing endpoints use a
+different direct-HTTP worker contract and must be introduced as a separate
+explicit route, never by silently changing an existing endpoint.
 
 Use Settings -> MCP Server to generate user-scoped MCP keys for remote
 agents. `MCP_API_KEY` in `.env` remains available for trusted system agents
@@ -761,9 +829,13 @@ polymath_v3.3/
 │       └── stores/           Zustand state
 ├── embedder/                 GPU embedder service (Qwen3 1024d)
 ├── reranker/                 Legacy Python reranker service; Docker uses llama.cpp by default
-├── docling_svc/              PDF/DOCX → markdown service
 ├── litellm/config.yaml       wildcard LLM router config
-└── docker-compose.yml        all 11 services
+├── config/                   extraction registries + sidecar release pins
+├── release/                  immutable release manifests (extraction-v1)
+├── audit/                    saturation status, residual ledger, doctrine
+├── scripts/                  ops: qualification harnesses, storage guardrail
+├── docs/archive/             historical mission docs & continuity notes
+└── docker-compose*.yml       core + overrides (offline-ingest, opskill, daily)
 ```
 
 ---

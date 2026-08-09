@@ -27,6 +27,7 @@ from models.extraction_artifact import (
     ExtractionProvenance,
     FieldMethod,
     OffsetSpan,
+    QUARANTINE_ONLY_ENGINE,
 )
 from services.ingestion.enrich import (
     extract_aliases,
@@ -72,12 +73,15 @@ def _unique_exact_span(text: str, value: str) -> OffsetSpan:
 
 
 def _capabilities(engine: ExtractionEngine) -> EngineCapabilities:
-    # Current engine truth, not an aspiration: only the legacy-local enrich
-    # stack structures deterministic facts today.  Facts remain optional for
-    # queryability on every engine.  RunPod's native v3 wire carries entity
-    # offsets; the older shared ExtractionResult shape does not.
+    # Current engine truth, not an aspiration: no live production engine
+    # structures deterministic facts today (relex_local honestly emits an
+    # empty facts list). The retired legacy-local enrich stack did, and
+    # pre-migration artifacts must keep that capability for quarantine
+    # accounting. Facts remain optional for queryability on every engine.
+    # RunPod's native v3 wire carries entity offsets; the older shared
+    # ExtractionResult shape does not.
     return EngineCapabilities(
-        deterministic_facts_supported=engine == "legacy_local",
+        deterministic_facts_supported=engine == QUARANTINE_ONLY_ENGINE,
         facts_required_for_queryability=False,
         exact_entity_offsets_supported=engine == "runpod_flash",
         exact_relation_evidence_supported=True,

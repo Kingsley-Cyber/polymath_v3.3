@@ -934,9 +934,15 @@ def fuse_planned_pools(
     *,
     max_candidates: int,
     corpus_ids: list[str] | None = None,
-    rrf_k: float = 60.0,
+    rrf_k: float | None = None,
+    retriever_weights: dict[str, float] | None = None,
 ) -> tuple[list[SourceChunk], dict[str, object]]:
     """Fuse lane-local ranks with required-lane and corpus reservations."""
+
+    from services.retriever.cross_domain_rrf import (
+        planned_retriever_rrf_weights,
+        rrf_k as configured_rrf_k,
+    )
 
     max_candidates = max(1, int(max_candidates))
     scores: dict[str, float] = {}
@@ -944,10 +950,14 @@ def fuse_planned_pools(
     lane_keys: dict[str, list[str]] = {}
     retriever_counts: dict[str, int] = {}
 
-    retriever_weights = {"dense": 1.0, "summary": 0.75, "lexical": 0.85, "graph": 0.9}
+    if rrf_k is None:
+        rrf_k = configured_rrf_k()
+    rrf_k = float(rrf_k)
+    if retriever_weights is None:
+        retriever_weights = planned_retriever_rrf_weights()
     excluded_operational_artifacts = 0
     for pool in pools:
-        weight = retriever_weights.get(pool.retriever, 0.8)
+        weight = float(retriever_weights.get(pool.retriever, 0.8))
         retriever_counts[pool.retriever] = retriever_counts.get(
             pool.retriever, 0
         ) + len(pool.chunks)
@@ -1084,6 +1094,14 @@ def fuse_planned_pools(
         "required_lanes": required_lanes,
         "retriever_counts": retriever_counts,
         "excluded_operational_artifacts": excluded_operational_artifacts,
+        "weighted_rrf": True,
+        "rrf_k": rrf_k,
+        "retriever_weights": dict(retriever_weights),
+        "direct_lane_strongest": float(retriever_weights.get("dense", 0.0))
+        >= max(
+            (float(v) for k, v in retriever_weights.items() if k != "dense"),
+            default=0.0,
+        ),
     }
 
 

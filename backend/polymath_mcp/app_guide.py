@@ -31,8 +31,9 @@ Recommended agent workflow:
    ideation, or gap synthesis. Use polymath_graph_map_query for visual graph
    payloads and polymath_graph_question_suggestions to refine questions.
 5. Update the knowledge base: create a corpus if needed, ingest URL or upload
-   document bytes, poll polymath_get_ingest_status until complete, then verify
-   with search/chat before reporting success.
+   document bytes, poll polymath_get_ingest_status until complete, call
+   polymath_verify_ingestion, then verify with search/chat before reporting
+   success.
 
 Ingestion profile handshake:
 - Before ingesting ambiguous files or URLs, ask the user or calling agent which
@@ -54,6 +55,14 @@ Ingestion profile handshake:
   document and one unsupported/negative query. If the negative query only
   retrieves adjacent material, report that the corpus does not establish it
   instead of stretching nearby evidence.
+- Before saying "fully ingested", "query ready", "graph complete", "ran
+  locally", "ran on RunPod", or naming a summary provider, call
+  polymath_verify_ingestion for that exact corpus_id + doc_id.
+- Report only the verifier's safe_claims. If an execution location is unknown,
+  say unknown. "local_extraction" is a deterministic wire-contract name and
+  does not prove that computation ran on the MCP host.
+- Never use corpus-wide counts as document proof. Completion and execution
+  claims require document-scoped identity joins and persisted receipts.
 
 Evidence rules:
 - Corpus claims should come from hydrated corpus chunks.
@@ -189,6 +198,22 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
         ],
     },
     {
+        "name": "execution",
+        "enabled_by_default": True,
+        "required_scope": "read",
+        "purpose": (
+            "Observe the extraction engine (sidecar release pins, device, "
+            "health, queue load) before planning heavy ingestion or claiming "
+            "throughput. The engine is one URL — MPS host GPU or a LAN CUDA "
+            "workstation — with identical release pins either way."
+        ),
+        "tools": [
+            "polymath_extraction_engine",
+            "polymath_wake_extraction_engine",
+            "polymath_set_extraction_engine",
+        ],
+    },
+    {
         "name": "ingestion",
         "enabled_by_default": True,
         "required_scope": "write",
@@ -200,6 +225,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
             "polymath_ingest_from_url",
             "polymath_upload_document",
             "polymath_get_ingest_status",
+            "polymath_verify_ingestion",
             "polymath_backfill_summaries",
             "polymath_delete_document",
         ],
@@ -296,6 +322,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
                 "polymath_ingest_from_url",
                 "polymath_upload_document",
                 "polymath_get_ingest_status",
+                "polymath_verify_ingestion",
                 "polymath_backfill_summaries",
                 "polymath_delete_document",
             ],
@@ -332,6 +359,7 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
             "polymath_ingest_from_url",
             "polymath_upload_document",
             "polymath_get_ingest_status",
+            "polymath_verify_ingestion",
             "polymath_backfill_summaries",
             "polymath_delete_document",
         ],
@@ -340,6 +368,17 @@ APP_CAPABILITY_MAP: dict[str, Any] = {
 
 
 AGENT_WORKFLOWS: list[dict[str, Any]] = [
+    {
+        "name": "ingest_then_research",
+        "steps": [
+            "polymath_extraction_engine — engine reachable? busy? which device?",
+            "polymath_plan_ingestion + polymath_check_source — plan, dedupe",
+            "polymath_create_corpus / polymath_upload_document — submit",
+            "polymath_get_ingest_status until terminal; failures park recoverable and auto-resume",
+            "polymath_verify_ingestion — the mandatory gate: safe_claims + vector_conservation.holds",
+            "then research: polymath_search / polymath_graph_query / polymath_chat_query",
+        ],
+    },
     {
         "name": "answer_existing_corpus",
         "steps": [
@@ -369,6 +408,7 @@ AGENT_WORKFLOWS: list[dict[str, Any]] = [
             "polymath_create_corpus if no existing corpus fits",
             "polymath_ingest_from_url or polymath_upload_document",
             "poll polymath_get_ingest_status until complete or failed",
+            "call polymath_verify_ingestion and report only its safe_claims",
             "verify with polymath_search on known document terms",
             "run one unsupported/negative query and report if the corpus does not establish it",
             "summarize with polymath_chat_query",
@@ -462,6 +502,13 @@ TOOL_PLAYBOOK: list[dict[str, Any]] = [
         "when_to_use": "Poll async ingestion until complete before searching.",
     },
     {
+        "tool": "polymath_verify_ingestion",
+        "when_to_use": (
+            "Mandatory final evidence gate before reporting query readiness, "
+            "store completion, provider identity, or execution location."
+        ),
+    },
+    {
         "tool": "polymath_delete_document",
         "when_to_use": "Remove confirmed failed or unwanted documents; irreversible.",
     },
@@ -535,8 +582,9 @@ def get_app_guide(
         payload["agent_instructions_summary"] = (
             "Use Fast Search for speed, Hybrid Search for exact text, Graph "
             "Augmentation for full vector+Mongo+Neo4j synthesis. When updating "
-            "the app, ingest asynchronously, poll until complete, and verify "
-            "retrieval before reporting success."
+            "the app, ingest asynchronously, poll until complete, call "
+            "polymath_verify_ingestion, and verify retrieval before reporting "
+            "success."
         )
     return payload
 

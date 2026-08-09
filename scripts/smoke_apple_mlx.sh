@@ -22,13 +22,11 @@ should_start() {
 VERIFY_ARGS=(
   --embedder-url "${EMBEDDER_URL:-http://localhost:8082}"
   --reranker-url "${RERANKER_URL:-http://localhost:8081}"
-  --docling-url "${DOCLING_URL:-http://localhost:8500}"
   --wait "${APPLE_MLX_SMOKE_WAIT:-30}"
 )
 
 should_start "${START_EMBEDDER:-true}" || VERIFY_ARGS+=(--skip-embedder)
 should_start "${START_RERANKER:-true}" || VERIFY_ARGS+=(--skip-reranker)
-should_start "${START_DOCLING:-false}" || VERIFY_ARGS+=(--skip-docling)
 
 "${PY}" "${REPO_ROOT}/scripts/verify_apple_mlx_runtime.py" \
   "${VERIFY_ARGS[@]}"

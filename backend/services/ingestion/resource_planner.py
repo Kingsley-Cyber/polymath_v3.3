@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
-ExtractionBackend = Literal["off", "local_mac_llm", "cloud_api", "remote_vllm", "mixed"]
+ExtractionBackend = Literal["off", "local_cpu"]
 EmbeddingBackend = Literal["local_metal", "cpu", "remote", "disabled"]
 StorageMode = Literal["local_disk", "mounted_volume", "network_share"]
 
@@ -218,31 +218,6 @@ def detect_system_resources() -> SystemResources:
     )
 
 
-def _entry_dict(entry: Any) -> dict[str, Any]:
-    if hasattr(entry, "model_dump"):
-        return entry.model_dump()
-    if isinstance(entry, dict):
-        return dict(entry)
-    return dict(entry or {})
-
-
-def entry_uses_remote_vllm(entry: Any) -> bool:
-    from services.extraction_provider_cards import extraction_lane_uses_private_vllm
-
-    return extraction_lane_uses_private_vllm(entry)
-
-
-def _pool_concurrency(pool: list[Any] | tuple[Any, ...] | None) -> int:
-    total = 0
-    for entry in pool or []:
-        data = _entry_dict(entry)
-        try:
-            total += max(1, int(data.get("max_concurrent") or 1))
-        except (TypeError, ValueError):
-            total += 1
-    return total
-
-
 def classify_storage_mode(source_location: str | None) -> StorageMode:
     raw = (source_location or "").strip()
     lower = raw.lower()
@@ -273,35 +248,12 @@ def classify_extraction_backend(
     extraction_engine: str | None,
     extraction_pool: list[Any] | tuple[Any, ...] | None,
 ) -> tuple[ExtractionBackend, tuple[str, ...]]:
-    engine = str(extraction_engine or "local").lower()
-    if engine == "inherit":
-        engine = "local"
-    lanes: list[str] = []
-    if engine in {"legacy_local", "dual", "local_then_cloud", "local_then_enrich"}:
-        lanes.append("local_mac_llm")
-    if engine == "runpod_flash":
-        lanes.append("cloud_api")
-    uses_provider_llm = engine in {
-        "local",
-        "cloud",
-        "dual",
-        "local_then_cloud",
-        "local_then_enrich",
-    }
-    if uses_provider_llm:
-        lanes.append(
-            "remote_vllm"
-            if any(entry_uses_remote_vllm(entry) for entry in extraction_pool or [])
-            else "cloud_api"
-        )
+    engine = str(extraction_engine or "graphify_cpu").lower()
+    if engine == "graphify_cpu":
+        return "local_cpu", ("local_cpu",)
     if engine == "off":
         return "off", ("off",)
-    unique_lanes = tuple(dict.fromkeys(lanes))
-    if len(unique_lanes) > 1:
-        return "mixed", unique_lanes
-    if unique_lanes:
-        return unique_lanes[0], unique_lanes  # type: ignore[return-value]
-    return "local_mac_llm", ("local_mac_llm",)
+    raise ValueError(f"unsupported extraction engine: {engine}")
 
 
 def plan_ingestion_resources(
@@ -325,15 +277,7 @@ def plan_ingestion_resources(
     )
     embedding_backend = classify_embedding_backend(config=config, resources=resources)
     storage_mode = classify_storage_mode(source_location)
-    lane_concurrency = _pool_concurrency(extraction_pool) or int(
-        getattr(settings, "EXTRACTION_MAX_CONCURRENT", 8)
-    )
-    has_remote_vllm = "remote_vllm" in extraction_lanes
-    max_concurrent = min(
-        int(getattr(settings, "EXTRACTION_GLOBAL_MAX_CONCURRENT", 180)),
-        lane_concurrency,
-        60 if has_remote_vllm else lane_concurrency,
-    )
+    max_concurrent = max(1, int(getattr(settings, "EXTRACTION_MAX_CONCURRENT", 8)))
 
     requested_ram_cap = int(getattr(settings, "INGEST_BACKEND_RAM_TARGET_MB", 16_384))
     effective_ram = resources.effective_ram_mb or requested_ram_cap
@@ -349,76 +293,21 @@ def plan_ingestion_resources(
         warnings.append(
             f"process RSS {resources.process_rss_mb}MB exceeds soft limit {rss_soft_limit_mb}MB"
         )
-    if has_remote_vllm:
-        requested_doc_cap = max(
-            1,
-            int(getattr(settings, "EXTRACTION_MANAGED_VLLM_MAX_ACTIVE_DOCS", 2)),
-        )
-        # Remote vLLM keeps model/KV memory on the RTX host, so Mac/backend
-        # RAM mainly covers orchestration buffers, validation, and DB writes.
-        # Prefer 2 active docs while orchestration memory is moderate. The hard
-        # RSS cap below still halves chunk-call concurrency at the soft limit.
-        two_doc_rss_ratio = float(
-            getattr(settings, "INGEST_REMOTE_VLLM_TWO_DOC_RSS_RATIO", 0.75)
-        )
-        two_doc_rss_ratio = min(0.95, max(0.50, two_doc_rss_ratio))
-        rss_allows_two_docs = (
-            resources.process_rss_mb is None
-            or resources.process_rss_mb < int(rss_soft_limit_mb * two_doc_rss_ratio)
-        )
-        roomy = (
-            not rss_high
-            and rss_allows_two_docs
-            and storage_mode != "network_share"
-            and resources.cpu_cores >= 8
-            and ram_cap_mb >= 4_096
-        )
-        extraction_active_docs = min(requested_doc_cap, 2 if roomy else 1)
-        model_phase_docs = min(
-            max(1, int(getattr(settings, "INGEST_MANAGED_VLLM_MODEL_PHASE_DOCS", 2))),
-            extraction_active_docs,
-        )
-        notes.append("remote_vllm extraction does not reserve Mac Metal")
-        if not roomy and not rss_high and resources.process_rss_mb is not None:
-            notes.append(
-                "remote_vllm second doc held by RSS pressure "
-                f"({resources.process_rss_mb}MB >= "
-                f"{int(rss_soft_limit_mb * two_doc_rss_ratio)}MB)"
-            )
-    else:
-        extraction_active_docs = max(
-            1,
-            int(getattr(settings, "EXTRACTION_MAX_ACTIVE_DOCS", 1)),
-        )
-        model_phase_docs = max(
-            1,
-            int(getattr(settings, "INGEST_MAX_MODEL_PHASE_DOCS", 1)),
-        )
-        if "local_mac_llm" in extraction_lanes and embedding_backend == "local_metal":
-            extraction_active_docs = min(extraction_active_docs, 1)
-            model_phase_docs = min(model_phase_docs, 1)
-            notes.append("local extraction and local embeddings share Metal; doc fanout pinned")
+    extraction_active_docs = max(
+        1,
+        int(getattr(settings, "EXTRACTION_MAX_ACTIVE_DOCS", 1)),
+    )
+    model_phase_docs = max(
+        1,
+        int(getattr(settings, "INGEST_MAX_MODEL_PHASE_DOCS", 1)),
+    )
 
     configured_embed_batch = max(1, int(getattr(settings, "EMBED_BATCH_SIZE", 32)))
-    if embedding_backend == "local_metal" and has_remote_vllm and not rss_high:
-        embedding_batch_size = min(128, max(configured_embed_batch, 64))
-    elif embedding_backend in {"local_metal", "cpu"} and ("local_mac_llm" in extraction_lanes or rss_high):
+    if embedding_backend in {"local_metal", "cpu"} and rss_high:
         embedding_batch_size = min(configured_embed_batch, 16)
     else:
         embedding_batch_size = configured_embed_batch
-
-    if has_remote_vllm and lane_concurrency <= 0:
-        warnings.append("remote_vllm profile selected but extraction pool is empty")
-    if has_remote_vllm and max_concurrent < 60:
-        notes.append(f"remote_vllm concurrency capped by configured chips at {max_concurrent}")
-
-    recommended_profile = (
-        "runpod_burst"
-        if str(extraction_engine or "").strip().lower() == "runpod_flash"
-        else "rtx_assisted"
-        if has_remote_vllm
-        else "mac_queryable_first"
-    )
+    recommended_profile = "mac_queryable_first"
     name_parts = [extraction_backend, embedding_backend, storage_mode]
     return ResourceProfile(
         name="+".join(name_parts),

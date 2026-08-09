@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from services.ingestion import verify
+from services.storage.record_status import active_record_clause
 
 
 class _Cursor:
@@ -17,7 +18,11 @@ class _Cursor:
 
 
 class _FakeChunks:
-    async def count_documents(self, _query):
+    async def count_documents(self, query):
+        # One eligible chunk, zero by-design omissions: the 3b conservation
+        # identity (eligible + stamped == active) holds at 1 + 0 == 1.
+        if "vector_omitted_by_design" in repr(query):
+            return 0
         return 1
 
     async def find_one(self, _query, _projection=None):
@@ -112,7 +117,12 @@ async def test_expected_child_count_includes_noisy_chunks_for_qdrant():
     )
 
     assert count == 2
-    assert "$or" not in db.chunks.query
+    # Query = {"$and": [base, active-record clause]}: no noisy-kind exclusion
+    # in the base, but tombstoned chunks never count (delete → re-ingest of
+    # the same content-derived doc_id must not over-expect Qdrant points).
+    base, active = db.chunks.query["$and"]
+    assert "$or" not in base
+    assert active == active_record_clause()
 
 
 @pytest.mark.asyncio
@@ -144,7 +154,9 @@ async def test_expected_child_count_excludes_noisy_chunks_for_neo4j():
     )
 
     assert count == 1
-    assert "$or" in db.chunks.query
+    base, active = db.chunks.query["$and"]
+    assert "$or" in base
+    assert active == active_record_clause()
 
 
 @pytest.mark.asyncio
@@ -186,7 +198,8 @@ async def test_verify_ingest_checks_graph_retrieval_indexes(monkeypatch):
     assert ok is True
     assert errors == []
     wait_mock.assert_awaited_once()
-    assert expected_count_mock.await_count == 2
+    # qdrant expectation + 3b conservation identity + neo4j check
+    assert expected_count_mock.await_count == 3
     assert all(
         call.kwargs.get("exclude_noisy") is True
         for call in expected_count_mock.await_args_list

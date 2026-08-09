@@ -1,0 +1,35 @@
+pack_name: POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK
+version: 1.0.0
+runtime:
+  entity_model: fastino/gliner2-base-v1
+  device: cpu
+  require_cpu_only: true
+  model_instances: 1
+  batch_size: 8
+  disallow:
+    - mps
+    - mlx
+    - cuda
+    - gpu
+    - lfm
+    - rebel
+    - glirel_runtime
+    - relex_runtime_after_promotion
+openie:
+  provider: triplet-extract
+  mode: balanced_cpu
+  write_direct_to_graph: false
+workflow:
+  state_path: work/workflow_state.json
+  receipts_dir: work/receipts
+  reports_dir: work/reports
+  artifacts_dir: work/artifacts
+acceptance:
+  entity_exact_span_f1_min: 0.85
+  entity_type_f1_min: 0.85
+  generic_noun_fp_rate_max: 0.05
+  gold_pair_recall_min: 0.65
+  directed_triple_precision_min: 0.90
+  directed_triple_recall_min: 0.60
+  directed_triple_f1_min: 0.72
+  speed_ratio_min: 1.5

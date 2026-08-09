@@ -14,6 +14,7 @@ from services.retriever.tier0_router import (
     select_adaptive_routes,
     select_title_aligned_routes,
 )
+from services.storage import qdrant_writer
 
 
 def test_route_diversity_reorders_but_preserves_relevant_neighborhood():
@@ -147,7 +148,11 @@ class _RouteClient:
 
 
 @pytest.mark.asyncio
-async def test_tier0_router_is_fair_per_lane_and_corpus():
+async def test_tier0_router_is_fair_per_lane_and_corpus(monkeypatch):
+    # Pins the quantized search-param path; q9 ships with quantization off.
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     router = Tier0DocumentRouter.__new__(Tier0DocumentRouter)
     router.client = _RouteClient()
 

@@ -1,0 +1,329 @@
+# D — Credit-pattern fixture corpus
+#
+# Tests the TOKEN_PATTERN lane (credit_patterns.py) that extracts
+# work → created_by → person relations from document metadata fragments.
+#
+# Promotion gate:
+#   adjudicated precision ≥ 0.95
+#   all evidence offsets exact
+#   no quoted/negated credit accepted
+#   no ordinary prose misclassified as metadata
+#   deterministic multi-author expansion
+#   no unrelated candidate changes
+#
+# Causal assertion: D − C → only CREDIT_PATTERN records
+
+fixtures:
+  # =====================================================================
+  # POSITIVE CASES — must extract created_by relations
+  # =====================================================================
+
+  # --- Parenthetical title credits ---
+
+  - id: credit_pos_001
+    text: "A CHRISTMAS STORY\n\n(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)"
+    entities:
+      - {start: 0, end: 17, text: "A CHRISTMAS STORY", type: "concept"}
+      - {start: 35, end: 48, text: "Jean Shepherd", type: "concept"}
+      - {start: 51, end: 62, text: "Leigh Brown", type: "concept"}
+      - {start: 65, end: 74, text: "Bob Clark", type: "concept"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "A CHRISTMAS STORY"
+        object: "Jean Shepherd"
+        surface_predicate: "screenplay by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 17]
+        object_offsets: [35, 48]
+      - subject: "A CHRISTMAS STORY"
+        object: "Leigh Brown"
+        surface_predicate: "screenplay by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 17]
+        object_offsets: [51, 62]
+      - subject: "A CHRISTMAS STORY"
+        object: "Bob Clark"
+        surface_predicate: "screenplay by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 17]
+        object_offsets: [65, 74]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  - id: credit_pos_002
+    text: "THE SHAWSHANK REDEMPTION\n\n(screenplay by Frank Darabont)"
+    entities:
+      - {start: 0, end: 24, text: "THE SHAWSHANK REDEMPTION", type: "concept"}
+      - {start: 41, end: 55, text: "Frank Darabont", type: "concept"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "THE SHAWSHANK REDEMPTION"
+        object: "Frank Darabont"
+        surface_predicate: "screenplay by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 24]
+        object_offsets: [41, 55]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Colon and dash metadata ---
+
+  - id: credit_pos_003
+    text: "THE FILM\n\nDirector: Jane Smith"
+    entities:
+      - {start: 0, end: 8, text: "THE FILM", type: "concept"}
+      - {start: 20, end: 30, text: "Jane Smith", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "THE FILM"
+        object: "Jane Smith"
+        surface_predicate: "director:"
+        canonical_predicate: created_by
+        subject_offsets: [0, 8]
+        object_offsets: [20, 30]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  - id: credit_pos_004
+    text: "MY NOVEL\n\nAuthor — John Doe"
+    entities:
+      - {start: 0, end: 8, text: "MY NOVEL", type: "document"}
+      - {start: 19, end: 27, text: "John Doe", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "MY NOVEL"
+        object: "John Doe"
+        surface_predicate: "author —"
+        canonical_predicate: created_by
+        subject_offsets: [0, 8]
+        object_offsets: [19, 27]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Written by ---
+
+  - id: credit_pos_005
+    text: "THE DOCUMENT\n\nWritten by Jane Doe"
+    entities:
+      - {start: 0, end: 12, text: "THE DOCUMENT", type: "document"}
+      - {start: 25, end: 33, text: "Jane Doe", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "THE DOCUMENT"
+        object: "Jane Doe"
+        surface_predicate: "written by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 12]
+        object_offsets: [25, 33]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Multiple credited people (and separator) ---
+
+  - id: credit_pos_006
+    text: "THE REPORT\n\nWritten by Alice Brown and Robert Green"
+    entities:
+      - {start: 0, end: 10, text: "THE REPORT", type: "document"}
+      - {start: 23, end: 34, text: "Alice Brown", type: "person"}
+      - {start: 39, end: 51, text: "Robert Green", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "THE REPORT"
+        object: "Alice Brown"
+        surface_predicate: "written by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 10]
+        object_offsets: [23, 34]
+      - subject: "THE REPORT"
+        object: "Robert Green"
+        surface_predicate: "written by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 10]
+        object_offsets: [39, 51]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Directed by ---
+
+  - id: credit_pos_007
+    text: "THE MOVIE\n\nDirected by Christopher Nolan"
+    entities:
+      - {start: 0, end: 9, text: "THE MOVIE", type: "concept"}
+      - {start: 23, end: 41, text: "Christopher Nolan", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "THE MOVIE"
+        object: "Christopher Nolan"
+        surface_predicate: "directed by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 9]
+        object_offsets: [23, 41]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Story by ---
+
+  - id: credit_pos_008
+    text: "THE ADAPTATION\n\nStory by Stephen King"
+    entities:
+      - {start: 0, end: 14, text: "THE ADAPTATION", type: "concept"}
+      - {start: 25, end: 37, text: "Stephen King", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "THE ADAPTATION"
+        object: "Stephen King"
+        surface_predicate: "story by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 14]
+        object_offsets: [25, 37]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Front matter / heading-adjacent ---
+
+  - id: credit_pos_009
+    text: "DESIGN PATTERNS\n\nWritten by Erich Gamma\n\nChapter 1: Introduction"
+    entities:
+      - {start: 0, end: 15, text: "DESIGN PATTERNS", type: "document"}
+      - {start: 28, end: 40, text: "Erich Gamma", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records:
+      - subject: "DESIGN PATTERNS"
+        object: "Erich Gamma"
+        surface_predicate: "written by"
+        canonical_predicate: created_by
+        subject_offsets: [0, 15]
+        object_offsets: [28, 40]
+    expected_decision: ACCEPT_SYNTAX_HIGH
+
+  # --- Organization/team creator ---
+
+  - id: credit_pos_010
+    text: "THE FRAMEWORK\n\nCreated by Alice Brown and Robert Green"
+    entities:
+      - {start: 0, end: 13, text: "THE FRAMEWORK", type: "software"}
+      - {start: 26, end: 37, text: "Alice Brown", type: "person"}
+      - {start: 42, end: 54, text: "Robert Green", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    # "created by" is NOT in _CREDIT_MARKERS — only screenplay/written/directed/
+    # director/author/story/novel. This tests that we don't over-match.
+    expected_decision: NONE
+
+  # =====================================================================
+  # ADVERSARIAL NEGATIVES — must NOT extract
+  # =====================================================================
+
+  # --- Quoted text ---
+
+  - id: credit_neg_001
+    text: 'The review criticized the "screenplay by Jean Shepherd" for its pacing.'
+    entities:
+      - {start: 27, end: 55, text: "screenplay by Jean Shepherd", type: "concept"}
+      - {start: 41, end: 54, text: "Jean Shepherd", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "Credit marker inside quotes — not a metadata fragment"
+
+  # --- Ordinary prose ---
+
+  - id: credit_neg_002
+    text: "The review criticized the screenplay by Jean Shepherd for its pacing."
+    entities:
+      - {start: 26, end: 53, text: "screenplay by Jean Shepherd", type: "concept"}
+      - {start: 40, end: 53, text: "Jean Shepherd", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "Ordinary prose — no preceding work title entity"
+
+  # --- Negation / missing value ---
+
+  - id: credit_neg_003
+    text: "THE FILM\n\nDirector: unavailable."
+    entities:
+      - {start: 0, end: 8, text: "THE FILM", type: "concept"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "No person name after marker"
+
+  - id: credit_neg_004
+    text: "THE BOOK\n\nWritten by no identified author."
+    entities:
+      - {start: 0, end: 8, text: "THE BOOK", type: "document"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "No valid person name — 'no identified author' is not a name"
+
+  # --- Nested parentheses ---
+
+  - id: credit_neg_005
+    text: "THE FILM (2020) (see also (the sequel))\n\nThe plot was discussed."
+    entities:
+      - {start: 0, end: 8, text: "THE FILM", type: "concept"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "No credit marker present"
+
+  # --- Malformed line ---
+
+  - id: credit_neg_006
+    text: "THE FILM\n\nDirector:"
+    entities:
+      - {start: 0, end: 8, text: "THE FILM", type: "concept"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "Marker present but no name follows"
+
+  # --- Multiple titles near one credit ---
+
+  - id: credit_neg_007
+    text: "FILM A and FILM B were both discussed.\n\nThe screenplay by Jane Smith was praised."
+    entities:
+      - {start: 0, end: 6, text: "FILM A", type: "concept"}
+      - {start: 11, end: 17, text: "FILM B", type: "concept"}
+      - {start: 59, end: 68, text: "Jane Smith", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "Credit marker in ordinary prose, not a metadata fragment"
+
+  # --- Discussed credit (quoted) ---
+
+  - id: credit_neg_008
+    text: 'She discussed "Written by Jane Doe" in her lecture.'
+    entities:
+      - {start: 26, end: 34, text: "Jane Doe", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "Quoted credit — not a metadata fragment"
+
+  # --- Inspired by (not a credit marker) ---
+
+  - id: credit_neg_009
+    text: "THE FILM\n\nThe film was inspired by a screenplay by Jean Shepherd."
+    entities:
+      - {start: 0, end: 8, text: "THE FILM", type: "concept"}
+      - {start: 51, end: 64, text: "Jean Shepherd", type: "person"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "'inspired by' is not a credit marker; 'screenplay by' is embedded in prose"
+
+  # --- Archive contains (ordinary prose) ---
+
+  - id: credit_neg_010
+    text: "The archive contains a screenplay by an unknown author."
+    entities:
+      - {start: 23, end: 54, text: "screenplay by an unknown author", type: "concept"}
+    source_family: CREDIT_PATTERN
+    expected_records: []
+    expected_decision: NONE
+    reason: "Ordinary prose — no preceding work title, no valid person name"
+
+# =====================================================================
+# Regression targets
+# =====================================================================
+# 1. All positive cases extract with exact offsets
+# 2. All negative cases produce zero records
+# 3. Multi-author expansion is deterministic
+# 4. No quoted/negated/prose credit accepted
+# 5. source_family=TOKEN_PATTERN, dependency_parse_used=False

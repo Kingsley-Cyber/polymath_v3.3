@@ -18,6 +18,7 @@ from typing import Any
 from pymongo import ReplaceOne, UpdateOne
 
 from db.queue_integrity import bulk_upsert_durable_jobs
+from models.release_stamp import current_release_stamp
 from services.extraction_provider_cards import safe_extraction_pool_contract
 from services.ingestion.job_leases import (
     claim_runnable_jobs,
@@ -184,6 +185,12 @@ def classify_extraction_status(row: dict[str, Any] | None) -> tuple[str, str]:
     if not row:
         return "queued", "missing_extraction"
     status = str(row.get("status") or "").lower()
+    if status in ("deleted", "deleting"):
+        # Record-status tombstone from the delete cascade, not an extraction
+        # outcome. doc_id is content-derived, so re-ingesting a deleted file
+        # resurrects the document over these rows — they must classify as
+        # never-extracted, not fall through to a phantom "extraction_error".
+        return "queued", "missing_extraction"
     if status == "ok":
         if row.get("promoted_at"):
             return "promoted", "graph_promoted"
@@ -431,6 +438,10 @@ def _stamp_extraction_row_identity(
     row["doc_version"] = identity.get("doc_version")
     row["extraction_contract_hash"] = contract_hash
     row["stage_identity"] = identity
+    # Step 3 — release-identity stamp: descriptive only, non-authoritative.
+    # All pins stay null until the active release registry exists; nothing
+    # here infers values from manifests or git state.
+    row["release_stamp"] = current_release_stamp()
 
 
 def _ensure_extraction_artifact_id(

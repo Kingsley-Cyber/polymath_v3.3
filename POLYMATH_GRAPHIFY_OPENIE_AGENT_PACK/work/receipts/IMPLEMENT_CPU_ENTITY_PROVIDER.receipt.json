@@ -1,0 +1,21 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/validation/cpu_only_provider.json"
+  ],
+  "finished_at": "2026-08-06T23:40:02.047819+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "live_proof_seconds": 6.3265898329991614,
+    "model_load_count": 1,
+    "prediction_rows": 2
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_CPU_ENTITY_PROVIDER",
+  "started_at": "2026-08-06T23:40:02.047395+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_gliner2_cpu_provider.py"
+  ],
+  "warnings": []
+}

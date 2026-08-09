@@ -50,12 +50,24 @@ wtpsplit-lite==0.2.0
 
 # === Document Parsing ===
 pypdf==4.2.0
+# q9 deterministic parsing contract — pinned PDF text extractor replacing
+# Docling for text PDFs (pure Rust, no models, no OCR). Wheels exist for
+# macOS arm64/x86_64 and manylinux x86_64/aarch64.
+pdf-inspector==0.2.6
 beautifulsoup4==4.12.3
-# Certified deterministic extraction/claim spine. Keep these exact and aligned
-# with runpod_flash_extractor/requirements.custom-image.in; the model wheel hash
-# is part of the locked runtime identity.
+# Certified deterministic relation/claim spine. The spaCy model hash and
+# Graphify provider pins are part of the locked runtime identity.
 spacy==3.8.14
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
+# Sole semantic entity provider for the canonical Graphify path. These pins
+# define the certified in-process CPU runtime and are recorded in stage receipts.
+gliner2==1.3.2
+triplet-extract @ git+https://github.com/adlumal/triplet-extract.git@89417ae62214728deca112aa8f4d27ff6c854d08
+torch==2.12.0
+transformers==4.57.6
+peft==0.20.0
+accelerate==1.14.0
+safetensors==0.7.0
 # Live-web static page extraction. Used before any JS-rendering fallback.
 trafilatura>=1.8.0,<2.0.0
 # Universal catch-all via unstructured partitioner (docx, pptx, xlsx, epub, odt, rtf, ...)

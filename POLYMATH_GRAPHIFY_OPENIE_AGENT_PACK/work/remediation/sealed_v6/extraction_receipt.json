@@ -1,0 +1,32 @@
+{
+  "answer_key": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/sealed_v6_placeholder_key.json",
+  "artifact_digest": "37d0314ebbe303aa861d84228da21015b3c4cf92739c906896ec3a054f3b99a7",
+  "corpus_id": "4335d32d-2f35-51f5-b822-8c2f975c524d",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 13,
+    "qualified_gold": 0,
+    "qualified_retained": 61
+  },
+  "document_id": "3ab827d7ecb0145eb6a12f6943f9d9dbf99d1237787a60458d12b465a27c5df5",
+  "elapsed_seconds": 166.9050148749957,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 13,
+      "assertion_support": 13,
+      "mentions": 39,
+      "nodes": 20,
+      "relations": 13
+    },
+    "digest": "814bc63718a19dbc0343ffd1762f3e23c13b28278cffc708b5c892d66adb2cbf",
+    "repeat_digest": "814bc63718a19dbc0343ffd1762f3e23c13b28278cffc708b5c892d66adb2cbf"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_sealed_qualification_v6_8b061156",
+  "namespace": "sealed_qualification_v6",
+  "source": "/Users/king/Downloads/# Adaptive Evidence Graphs for Audi (1).txt",
+  "status": "unscored"
+}

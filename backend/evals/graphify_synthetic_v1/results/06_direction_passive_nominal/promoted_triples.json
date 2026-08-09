@@ -1,0 +1,22 @@
+[
+  {
+    "subject": "glowline metrics",
+    "predicate": "defines",
+    "object": "redlark"
+  },
+  {
+    "subject": "glowline metrics",
+    "predicate": "derived_from",
+    "object": "redlark"
+  },
+  {
+    "subject": "pinion api",
+    "predicate": "depends_on",
+    "object": "falcon cache"
+  },
+  {
+    "subject": "quartzline analytics",
+    "predicate": "owns",
+    "object": "sable index"
+  }
+]

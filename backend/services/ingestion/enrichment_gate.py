@@ -1,17 +1,18 @@
 """E1 — quality-gated RTX enrichment decision (§13-H, owner-ratified).
 
-"Fast Local Graph + RTX Enrichment": the local GLiNER/GLiREL pass always runs
-first and builds the bulk graph skeleton; this module owns the PURE decision
-of whether the cloud/RTX lane runs a second pass and which chunks it sees.
+"Fast Local Graph + RTX Enrichment": the local deterministic Relex pass
+always runs first and builds the bulk graph skeleton; this module owns the
+PURE decision of whether the cloud/RTX lane runs a second pass and which
+chunks it sees.
 RTX is a precision booster, not the engine — selection is bounded by
 max_chunk_ratio so enrichment can never balloon into re-extracting the doc.
 
 Gate signals (all present in the local pass's ExtractionBatchReport.metrics):
   coverage          extracted/requested chunks — misses and empty spans
-  facts_per_chunk   GLiNER/GLiREL is weak on facts (measured 0.4/chunk vs
-                    RTX 2.35/chunk, 2026-07-05)
-  related_to_ratio  GLiREL predicate ambiguity — high generic ratio means
-                    typed relations degraded to the sentinel
+  facts_per_chunk   the local deterministic lane is weak on facts (measured
+                    0.4/chunk vs RTX 2.35/chunk, 2026-07-05)
+  related_to_ratio  predicate ambiguity — high generic ratio means typed
+                    relations degraded to the sentinel
 
 Duck-typed against result/failure/task objects (chunk_id / entities /
 relations / facts / predicate attributes) — no ghost_b import, no I/O,

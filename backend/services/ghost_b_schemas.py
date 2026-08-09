@@ -70,6 +70,7 @@ Predicate = Literal[
     "implements",
     "depends_on",
     "produces",
+    "consumes",
     "stores",
     "detects",
     "supports",

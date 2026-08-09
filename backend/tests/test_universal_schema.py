@@ -2382,6 +2382,40 @@ def test_related_to_refinement_leaves_ambiguous_ontology_pair_as_fallback():
     )
 
 
+def test_related_to_refinement_preserves_explicit_validated_related_cue():
+    document = {
+        "canonical_name": "run ledger",
+        "primary_entity_type": "Document",
+    }
+    other_document = {
+        "canonical_name": "evidence ledger",
+        "primary_entity_type": "Document",
+    }
+
+    assert (
+        refine_related_to_predicate(
+            "related_to",
+            document,
+            other_document,
+            source_predicate="related_to",
+            evidence_phrase="The Run Ledger is related to the Evidence Ledger.",
+            relation_cue="related",
+        )
+        == "related_to"
+    )
+    assert (
+        refine_related_to_predicate(
+            "related_to",
+            {"canonical_name": "august recovery event", "primary_entity_type": "Event"},
+            {"canonical_name": "el paso", "primary_entity_type": "Location"},
+            source_predicate="related_to",
+            evidence_phrase="The August Recovery Event occurred in El Paso.",
+            relation_cue="occurred in",
+        )
+        == "related_to"
+    )
+
+
 def test_related_to_refinement_recovers_source_predicate_with_evidence():
     subject = {
         "canonical_name": "module",

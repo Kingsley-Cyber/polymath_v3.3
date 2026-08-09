@@ -345,34 +345,11 @@ function getBatchItemStatusLabel(item: IngestBatchItemResponse): string {
   return item.status;
 }
 
-function defaultBatchProfile(corpus: CorpusResponse): IngestProfileName {
-  const cfg = corpus.default_ingestion_config;
-  const engine = cfg.extraction_engine ?? "local";
-  if (engine === "runpod_flash") return "runpod_burst";
-  const hasRemotePool =
-    (cfg.extraction_models ?? []).some((m) => {
-      const url = (m.base_url ?? "").toLowerCase();
-      const provider = (m.provider_preset ?? "").toLowerCase();
-      const model = (m.model ?? "").toLowerCase();
-      const extras = m.extra_params ?? {};
-      return (
-        provider === "vllm-rtx" ||
-        provider === "vllm" ||
-        url.includes("/v1") ||
-        url.includes("192.168.") ||
-        model.includes("polymath-extract") ||
-        model.includes("vllm") ||
-        extras.resource_class === "rtx" ||
-        extras.resource_class === "remote_vllm" ||
-        extras.managed_vllm === true
-      );
-    }) || ["cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(engine);
-  return hasRemotePool ? "rtx_assisted" : "mac_queryable_first";
+function defaultBatchProfile(_corpus: CorpusResponse): IngestProfileName {
+  return "mac_queryable_first";
 }
 
 const PROFILE_LABELS: Record<IngestProfileName, string> = {
-  rtx_assisted: "RTX assisted",
-  runpod_burst: "Runpod burst",
   mac_queryable_first: "Mac queryable-first",
   mac_safe: "Mac optimized",
 };
@@ -845,7 +822,7 @@ export function CorpusDetail({
           {
             chunk_summarization: overrides.chunk_summarization,
             concurrency: 6,
-            profile: localBatchProfile ?? "runpod_extract_first",
+            profile: localBatchProfile ?? "mac_queryable_first",
           },
           (done, total, name) =>
             setRetryHint(`Uploading ${done}/${total}: ${name}`),
@@ -3926,20 +3903,10 @@ function IngestOverridesPanel({
 }) {
   const cfg = corpus.default_ingestion_config;
   const summaryDefault = cfg.summary_models?.[0]?.model ?? "(none)";
-  const extractionEngine = cfg.extraction_engine ?? "cloud";
-  const extractionUsesProvider = ["local", "cloud", "dual", "local_then_cloud", "local_then_enrich"].includes(
-    extractionEngine,
-  );
-  const extractionPool = cfg.models_linked ? cfg.summary_models ?? [] : cfg.extraction_models ?? [];
-  const extractionDefault = extractionUsesProvider
-    ? extractionPool.length
-      ? extractionPool
-          .map((m) => `${m.provider_preset || "custom"}:${m.model} @${m.max_concurrent}`)
-          .join(" | ")
-      : "provider pool empty"
-    : extractionEngine === "off"
-      ? "off — vectors only"
-      : "legacy GLiNER/GLiREL sidecar";
+  const extractionEngine = cfg.extraction_engine ?? "graphify_cpu";
+  const extractionDefault = extractionEngine === "off"
+    ? "off, vectors only"
+    : "Graphify CPU (canonical)";
 
   const [editEmbed, setEditEmbed] = useState(false);
   const [editSummary, setEditSummary] = useState(false);
@@ -4086,9 +4053,7 @@ function IngestOverridesPanel({
         </div>
       </OverrideRow>
 
-      {/* Extraction row — per-batch overrides intentionally do not replace
-          provider-card extraction routing. The corpus contract owns which
-          provider/model pool Ghost B uses. */}
+      {/* Extraction is owned by the corpus contract and is not overridable per batch. */}
       <div className="flex items-start justify-between gap-3 py-2">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wide text-content-tertiary">
@@ -4098,11 +4063,9 @@ function IngestOverridesPanel({
             {extractionDefault}
           </div>
           <div className="text-[11px] text-content-tertiary">
-            {extractionUsesProvider
-              ? "Provider-card LLM extraction is configured on the corpus; strict schema gates run before graph promotion."
-              : extractionEngine === "off"
-                ? "Graph extraction is disabled for this corpus."
-                : "Legacy local sidecar mode. Configure provider-card RTX/cloud extraction in Corpus Manager."}
+            {extractionEngine === "off"
+              ? "Graph extraction is disabled for this corpus."
+              : "Pinned GLiNER2 and deterministic relation stages run in-process on CPU with no provider fallback."}
           </div>
         </div>
       </div>

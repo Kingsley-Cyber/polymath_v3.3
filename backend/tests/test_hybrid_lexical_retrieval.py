@@ -133,6 +133,10 @@ async def _fake_legacy_collection_layout(_client, _collection_name):
 
 @pytest.mark.asyncio
 async def test_fast_funnel_b_uses_qdrant_dense_sparse_rrf_when_available(monkeypatch):
+    # Pins the quantized search-param path; q9 ships with quantization off.
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
     client = _FakeQdrantClient()
     funnel = FunnelB()
@@ -189,6 +193,9 @@ async def test_fast_funnel_a_summaries_use_qdrant_dense_sparse_rrf_when_availabl
 @pytest.mark.asyncio
 async def test_fast_funnel_b_falls_back_to_dense_for_legacy_collection(monkeypatch):
     monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
+    monkeypatch.setattr(
         qdrant_writer, "_collection_layout", _fake_legacy_collection_layout
     )
     client = _FakeQdrantClient()
@@ -215,6 +222,9 @@ async def test_fast_funnel_b_falls_back_to_dense_for_legacy_collection(monkeypat
 
 @pytest.mark.asyncio
 async def test_fast_funnel_b_rrf_failure_falls_back_to_dense(monkeypatch):
+    monkeypatch.setattr(
+        qdrant_writer.settings, "QDRANT_BINARY_QUANTIZATION_ENABLED", True
+    )
     monkeypatch.setattr(qdrant_writer, "_collection_layout", _fake_collection_layout)
     client = _FakeQdrantClient(fail_first=True)
     funnel = FunnelB()

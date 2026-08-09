@@ -1,0 +1,30 @@
+{
+  "created_at": "2026-08-07T03:05:32.895631+00:00",
+  "first_after": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "gates": {
+    "first_and_second_graph_equal": true,
+    "no_duplicate_counts_after_second_run": true,
+    "verifier_passed": true
+  },
+  "second_after": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "source": "work/metrics/idempotency_final.json",
+  "status": "PASSED"
+}

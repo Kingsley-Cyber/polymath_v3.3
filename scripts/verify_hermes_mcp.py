@@ -118,11 +118,12 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
     init = client.request(
         "initialize",
         {
-            "protocolVersion": "2025-03-26",
+            "protocolVersion": module.CURRENT_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "polymath-hermes-mcp-verify", "version": "1.0"},
         },
     )
+    client.accept_protocol(init)
     client.notify("notifications/initialized")
     tools = client.request("tools/list")
     tool_names = {
@@ -132,7 +133,9 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
     required = {
         "polymath_mcp_status",
         "polymath_check_source",
+        "polymath_app_guide",
         "polymath_plan_ingestion",
+        "polymath_verify_ingestion",
         "polymath_backfill_summaries",
     }
     missing = sorted(required - tool_names)
@@ -140,6 +143,9 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
         raise RuntimeError(f"missing expected MCP tools: {missing}")
 
     status = client.call_tool("polymath_mcp_status", {"detail": "summary"})
+    guide = client.call_tool("polymath_app_guide", {"detail": "full"})
+    if "polymath_verify_ingestion" not in str(guide.get("agent_instructions") or ""):
+        raise RuntimeError("Polymath MCP instructions are missing the evidence gate")
     plan = client.call_tool(
         "polymath_plan_ingestion",
         {
@@ -151,6 +157,12 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
     )
     if plan.get("profile") != "transcript" or plan.get("summary_required") is not True:
         raise RuntimeError(f"unexpected ingestion plan: {plan}")
+    receipt = client.call_tool(
+        "polymath_verify_ingestion",
+        {"doc_id": "__hermes_contract_probe_missing__"},
+    )
+    if receipt.get("contract_version") != "polymath.ingestion_evidence.v1":
+        raise RuntimeError(f"unexpected ingestion evidence contract: {receipt}")
 
     return {
         "status": "ok",
@@ -158,6 +170,8 @@ def _run_smoke(url: str, token: str) -> dict[str, Any]:
         "tool_count": len(tool_names),
         "mcp_status": status.get("status"),
         "connection_endpoint": (status.get("connection") or {}).get("endpoint"),
+        "protocol_version": client.protocol_version,
+        "ingestion_evidence_contract": receipt.get("contract_version"),
         "ingestion_plan": {
             "profile": plan.get("profile"),
             "summary_required": plan.get("summary_required"),

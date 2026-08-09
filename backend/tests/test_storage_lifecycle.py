@@ -156,6 +156,8 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
         "summary_jobs",
         "graph_promotion_jobs",
         "ingest_batch_items",
+        "ingestion_runs",
+        "control_plane_outbox",
     ]
     db = _FakeDb({name: _FakeCollection() for name in names})
 
@@ -168,7 +170,7 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
     assert db["summary_tree"].delete_many_calls == [
         {"corpus_id": "corpus-1", "doc_id": "doc-1"}
     ]
-    for name in names[1:-1]:
+    for name in names[1:6]:
         query, update = db[name].update_many_calls[0]
         assert query == {"corpus_id": "corpus-1", "doc_id": "doc-1"}
         assert update["$set"]["status"] == "superseded"
@@ -177,6 +179,15 @@ async def test_retire_document_derived_state_clears_tree_and_retires_jobs():
     batch_query, batch_update = db["ingest_batch_items"].update_many_calls[0]
     assert batch_query == {"corpus_id": "corpus-1", "doc_id": "doc-1"}
     assert batch_update["$set"]["document_deleted"] is True
+    # Control-plane ledger: the run row is excluded and the outbox intent
+    # consumed so a deleted doc never lingers as query_ready/actionable.
+    run_query, run_update = db["ingestion_runs"].update_many_calls[0]
+    assert run_query["corpus_id"] == "corpus-1" and run_query["doc_id"] == "doc-1"
+    assert run_update["$set"]["status"] == "excluded"
+    assert run_update["$set"]["certificate_id"] is None
+    outbox_query, outbox_update = db["control_plane_outbox"].update_many_calls[0]
+    assert outbox_query["consumed_at"] is None
+    assert outbox_update["$set"]["reason"] == "document_deleted"
     assert result["summary_tree"] == 0
 
 
@@ -190,13 +201,15 @@ async def test_retire_corpus_derived_state_clears_tree_and_retires_all_jobs():
         "summary_jobs",
         "graph_promotion_jobs",
         "ingest_batch_items",
+        "ingestion_runs",
+        "control_plane_outbox",
     ]
     db = _FakeDb({name: _FakeCollection() for name in names})
 
     await retire_corpus_derived_state(db, corpus_id="corpus-1")
 
     assert db["summary_tree"].delete_many_calls == [{"corpus_id": "corpus-1"}]
-    for name in names[1:-1]:
+    for name in names[1:6]:
         query, update = db[name].update_many_calls[0]
         assert query == {"corpus_id": "corpus-1", "status": {"$ne": "superseded"}}
         assert update["$set"]["status"] == "superseded"
@@ -204,6 +217,12 @@ async def test_retire_corpus_derived_state_clears_tree_and_retires_all_jobs():
     assert db["ingest_batch_items"].update_many_calls[0][0] == {
         "corpus_id": "corpus-1"
     }
+    run_query, run_update = db["ingestion_runs"].update_many_calls[0]
+    assert run_query["corpus_id"] == "corpus-1"
+    assert run_update["$set"]["status"] == "excluded"
+    outbox_query, outbox_update = db["control_plane_outbox"].update_many_calls[0]
+    assert outbox_query == {"corpus_id": "corpus-1", "consumed_at": None}
+    assert outbox_update["$set"]["reason"] == "corpus_deleted"
 
 
 @pytest.mark.asyncio

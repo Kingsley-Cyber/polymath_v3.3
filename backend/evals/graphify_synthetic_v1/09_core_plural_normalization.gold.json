@@ -1,0 +1,32 @@
+{
+  "fixture": "09_core_plural_normalization.md",
+  "purpose": "Casing-core and number identity from the sealed-run misses: sentence-initial generic NPs must not be cored to their first word ('Voltage sag' is not an entity named 'Voltage'); plural mentions unify with the singular entity; clause-complement objects trim correctly; indefinite quantified NPs never mint.",
+  "items": [
+    {"id": "CN01", "check": "positive", "evidence": "Voltage sag causes breaker trips on the eastern quay.",
+     "expect": {"type": "canonical", "subject": "voltage sag", "predicate": "causes", "object": "breaker trips", "status": "ASSERTED_TRUE", "optional": true},
+     "must_not": {"entities": ["Voltage", "voltage (as a standalone node)"], "notes": "the Thermal-sensor-saturation class: a sentence-initial capital on a generic NP is positional, not a name core. Edge itself optional (generic-concept pair); the forbidden node is the point"}},
+    {"id": "CN02", "check": "positive", "evidence": "Rejected manifests are consumed by the Exception Desk.",
+     "expect": {"type": "canonical", "subject": "Exception Desk", "predicate": "consumes", "object": "rejected manifests", "any_of": ["consumes"], "status": "ASSERTED_TRUE", "optional": true},
+     "must_not": {"entities": ["Rejected", "rejected (as a standalone node)"], "notes": "the 'Accepted envelopes' class: sentence-initial participle must not become an entity"}},
+    {"id": "CN03", "check": "control", "evidence": "The Exception Desk produces the Correction Queue.",
+     "expect": {"type": "canonical", "subject": "Exception Desk", "predicate": "produces", "object": "Correction Queue", "status": "ASSERTED_TRUE"}},
+    {"id": "CN04", "check": "positive", "evidence": "The Stowage Planner consumes Load Manifests.",
+     "expect": {"type": "canonical", "subject": "Stowage Planner", "predicate": "consumes", "object": "Load Manifest", "any_of": ["consumes"], "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "plural identity: 'Load Manifests' and 'Load Manifest' are ONE entity; the edge must match the singular gold"}},
+    {"id": "CN05", "check": "positive", "evidence": "Each Load Manifest is derived from the Booking Ledger.",
+     "expect": {"type": "canonical", "subject": "Load Manifest", "predicate": "derived_from", "object": "Booking Ledger", "status": "ASSERTED_TRUE"}},
+    {"id": "CN06", "check": "positive", "evidence": "The Berth Fairness Charter defines berth fairness as the guarantee that no carrier waits more than one tide cycle.",
+     "expect": {"type": "canonical", "subject": "Berth Fairness Charter", "predicate": "defines", "object": "berth fairness", "status": "ASSERTED_TRUE"},
+     "must_not": {"entities": ["berth (as a standalone node)", "guarantee"], "notes": "the defines-as frame: object is the defined term, trimmed before the 'as' complement, never truncated to its first word"}},
+    {"id": "CN07", "check": "junk_negative", "evidence": "Norvale Group owns nearly everything on the south quay, according to a dockside joke.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "entities": ["nearly everything", "everything"], "notes": "indefinite quantified NP must never mint ('owns nearly everything' FP class)"}},
+    {"id": "CN08", "check": "control", "evidence": "The Stowage Planner depends on the Booking Ledger.",
+     "expect": {"type": "canonical", "subject": "Stowage Planner", "predicate": "depends_on", "object": "Booking Ledger", "status": "ASSERTED_TRUE"}}
+  ],
+  "negative_entities": ["Voltage", "Rejected", "nearly everything", "everything", "eastern quay", "dockside joke", "one tide cycle", "guarantee"],
+  "invariants": [
+    "graph nodes {load manifest, load manifests} collapse to one",
+    "no single-word node exists whose only textual support is a sentence-initial capital on a generic phrase"
+  ]
+}

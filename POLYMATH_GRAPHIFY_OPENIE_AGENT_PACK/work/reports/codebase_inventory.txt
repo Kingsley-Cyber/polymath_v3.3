@@ -1,0 +1,2625 @@
+{
+  "counts": {
+    "files": 5542,
+    "schemas": 39,
+    "tests": 438
+  },
+  "entrypoint_candidates": [
+    {
+      "markers": [
+        "if __name__ == '__main__'"
+      ],
+      "path": ".qoder/repowiki/knowledge/en/Polymath v3.3 Hierarchical RAG Platform/Polymath RAG Backend Service/Backend Entry Point, Configuration & Operational Scripts/coding_conventions.md"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": ".qoder/repowiki/knowledge/en/Polymath v3.3 Hierarchical RAG Platform/Polymath RAG Backend Service/Graph Services & Database Infrastructure/Entity Deduplication & Resolution Pipeline/coding_conventions.md"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": ".qoder/repowiki/knowledge/en/Polymath v3.3 Hierarchical RAG Platform/Polymath RAG Backend Service/Graph Services & Database Infrastructure/Graph Entity Cleaning & Junk Removal/coding_conventions.md"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/run_single_document_stress.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/score_technical_answer_key.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/controller.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/build_manifest.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/check_cpu_policy.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/check_parse_once.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/evaluate_result.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/new_receipt.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/regenerate_fixtures.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/repo_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/run_e2e.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/validate_fixtures.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/verify_manifest.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/controller.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/scripts/inspect_repo.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/scripts/run_e2e.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/scripts/score_quality.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/scripts/score_speed.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/scripts/self_test.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/acceptance_gates.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/conservation.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/cpu_only.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/exact_offsets.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/graph_idempotency.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/parse_once.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/validators/provider_reachability.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/stress_test/frozen_v1/scorer_v1_legacy.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/evals/frame_motif_t9_2_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/evals/semantic_resolution_t9_1_census.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "backend/main.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/migrations/001_per_corpus_qdrant.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "backend/modal_embedder.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\"",
+        "FastMCP("
+      ],
+      "path": "backend/polymath_mcp/server.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/_probe_cq_retrieve.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/adjudicate_d_e_candidates.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/aggregate_chat_cost_ledger.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/annotate_entity_quality.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/apply_mongo_validators.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/assess_speed_bench_test.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/audit_claim_assessment_ugo.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/audit_claim_compiler_ugo.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/audit_graphify_stress_frozen.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/audit_local_extraction_ugo.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/audit_semantic_parent_eligibility_mark.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/audit_t83_negation_signatures.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_child_domain.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_corpus_lexicon.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_doc_anchors.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_doc_artifacts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_facts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_mechanisms.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_parent_domains.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_parent_domains_llm.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_passthrough_sections.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_q8_evidence_collection.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_qdrant_graph_defaults.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_qdrant_payload_text.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_related_to_mitigation.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_relates_to_support_metadata.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_relation_support_records.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_relations.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_semantic_facets.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_summary_tree_index.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_summary_tree_metadata.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/backfill_tree_concepts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/bench_gliner_relex.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/benchmark_book_ingestion_pressure.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/benchmark_semantic_extraction_remote.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/bibliographic_backfill.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/build_librarian_cards.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/canary_graph_release_gate_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/capture_raptor_baseline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/check_markdown_links.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/cleanup_orphan_catalog.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/compare_ablation_runs.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/compare_embedding_instruction_ab.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/diagnose_atomic_claim_anchor_coverage.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/entity_gate_sample.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/extraction_coverage_check.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/freeze_heldout_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/gate_diagnostic.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/gate_v2_sample.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/graph_projection_control_plane_close.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/graphify_e2e_client.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/label_structural_shadow_projections.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/mark_permanent_integration_fixture.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/materialize_gsem_fixture_retrieval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/materialize_semantic_digest_claim_inputs.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/materialize_t91_document_profiles.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/mine_dependency_patterns.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/normalize_extraction_provenance.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/orphan_ownership_manifest.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/p0_1_summary_integrity.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/p0_5_facet_decontamination.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/p1b_precision_audit.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/polymath_failed_chunk_backfill.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/polymath_graph_replay_backlog.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/polymath_summary_backfill_scoped.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/predicate_confusion_matrix.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/probe_book_ingestion_pipeline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/probe_shelf_roles.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/probe_structured_output_capabilities.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/probe_tier3_tool_capability.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/probe_tier_latency.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/promote_backfilled_relations.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/promote_relations_targeted.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/prune_ineligible_graph_edges.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/pt9_smoke_test.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/purge_orphan_graph_edges.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/q9_phase0_snapshot.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/qualify_relex_batching.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/reclassify_citation_chunks.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/reconcile_tier0_profiles.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/reconcile_verified_documents.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/regen_relex_benchmark.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/regen_relex_benchmark_batched.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/register_runpod_account.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/relation_stage_trace.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/repair_incidental_source_identities.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/repair_nonsemantic_source_shells.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/report_graphify_s04.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/rerun_candidate_synthesis.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/rescore_heldout_v4.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/rpre_export_sample.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/rpre_measure.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/rpre_sample_relations.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_candidate_adoption_suite.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_canonical_heldout_negative_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_chat_cost_live_gate.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_claim_anchor_additivity_replay.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_claim_anchor_micro_ab.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_complex_query_dark_canary.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_complex_query_fixture_e2e.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_complex_query_generation_probes.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_complex_query_validation_delta.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_deterministic_summary_materialization.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_eval_with_embedder_preflight.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_expanded_dark_canary.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_final_acceptance_v1.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_gold_entity_syntax_ceiling.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graph_semantic_e2e_phase2_plus.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graph_semantic_e2e_phase7_10.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_argument_adapter.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_assertion_assembler.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_completion.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_fixture_e2e.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_openie.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_predicate_compiler.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_proposition_reducer.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_reducer.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_relations.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_graphify_stress_answer_key.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_heldout_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_openie_relation_kill_switch.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_q8_parity_harness.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_q9_quality_use_suite.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_relation_eligibility.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_relex_fixture_baseline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_runpod_green_lockdown.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_temporal_canonical_window.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_tier0_bridge_diagnostic.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_two_lane_anchoring_ab.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_two_lane_canonical_window.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_two_lane_zero_provider_diagnosis.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/run_waterfall_pressure_diagnostic.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_mark_atomic_b4.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_mark_atomic_preflight.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_mark_paid_pass.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_mark_prose_phase2.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_mark_sentence_hybrid_canary.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_mark_sentence_hybrid_preflight.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/semantic_gateway_ugo_canary.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/shadow_a_graph_release_gate_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/shadow_b_graph_release_gate_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/shadow_mode_corroboration.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/soak_local_embedder.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/unified_shadow_pipeline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts/verify_gliner2_cpu_provider.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts_backfill_promote.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts_migrate_multitenant.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts_probe_query_plan.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts_probe_tier0.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/scripts_probe_waterfall.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/services/graph/entity_dedup/apply.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/services/graph/entity_dedup/dryrun.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/services/graph/entity_dedup/squash_shadow.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/services/graph/junk_cleanup.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/services/ingestion/enrich.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "backend/services/ingestion/summary_backfill.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "embedder/main.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/ghost_b_cascade_infer.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/glirel_infer.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/onnx_equivalence_check.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/phase2_entity_contract.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/phase4_latency_baseline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/pipeline_config.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/polymath_local_extractor.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/run_on_mac.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/tools/batch_pipeline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "local_ghost_b/tools/chunk_with_gliner.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "modal_embedder.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "reranker/main.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "runpod_flash_extractor/app.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/_debug_rag.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/generate_phase6_artifacts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/generate_phase7_artifacts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/generate_phase8_artifacts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/live_phase8_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/run_isolated_alias_e2e.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/alias_pipeline/verify_phase8_durability.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "scripts/apple_ml_services/chunk_svc/main.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "scripts/apple_ml_services/embedder_mlx/main.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\"",
+        "FastAPI("
+      ],
+      "path": "scripts/apple_ml_services/relex_extract_svc/main.py"
+    },
+    {
+      "markers": [
+        "FastAPI("
+      ],
+      "path": "scripts/apple_ml_services/reranker_mlx/main.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\"",
+        "FastAPI("
+      ],
+      "path": "scripts/apple_ml_services/slm_enrich_mlx/main.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/autoresearch_polymath_local_extraction.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bake_runpod_extraction_assets.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_glirel_relation_lane.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_local_draft_schema_pipeline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_local_extractor_contract.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_local_keep_command_extraction.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_local_line_proposal_extraction.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_local_model_adherence.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_local_two_stage_extraction.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_mlx_fused_extraction_model.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_mlx_slm_relation_proposer.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bench_python_deterministic_relation_compiler.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/benchmark_glirel_claim_compiler_c2.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/benchmark_semantic_extraction_local.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/bootstrap_models.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/build_execution_plan_audit.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/build_modernbert_predicate_dataset.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/check_buildline_coverage.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/cross_domain/inventory_schema_vectors.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/cross_domain/probe_graph_block.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/cross_domain/run_cross_domain_canary.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/dedupe_corpus.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/dump_ghost_b_payload.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/generate_modernbert_concept_examples.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/grade_extraction_quality_rubric.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/graph/inspect_ghost_shape.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/graph/probe_graph_assertion_retrieval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/graph/project_q9_assertions.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/graph_hop_pruning_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/linear_polymath_model_pipeline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/mcp_e2e_smoke.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/polymath_download.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/prefetch_tree_sitter_grammars.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/probe_reranker_calibration.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/probe_rtx_extraction.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/probe_runpod_custom_image_runtime.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/publish_glirel_to_hf.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/pull_apple_mlx_models.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/q9/inspect_enrichment_terminal.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/q9/inspect_facts_control_plane.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/q9/run_q9_conversation_html_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/q9/run_q9_retrieval_alias_probes.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/replay_ghost_b_chunks.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/retrieval_eval_metrics.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/retrieval_source_precision.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/retrieval_three_tier_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/run_hybrid_random_30_chunks.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/run_mlx_json_speed_sweep.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/run_runpod_same_chunk_reference.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/scan_tracked_secrets.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/score_local_extraction_gold.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/select_runpod_e2e_documents.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/senior_status_sync.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_apple_mlx_runtime.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_hermes_mcp.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_local_extraction_stack_compat.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_runpod_custom_image_contract.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_runpod_e2e_preregistration.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_runpod_extraction_runtime_closure.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_runtime_contracts.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "scripts/verify_semantic_gateway_runtime_parity.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/b4_dlq_shape_classification.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_bluegreen_ops.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_deploy_both.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_flash_active_manifest.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_flash_deploy_one.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_flash_deploy_retry.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_flash_inventory.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_reextract.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/cp1_d4_runpod_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_burst_settings_operator.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_chunk_identity_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_corpus_readonly_fingerprint.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_ecom_15doc_modernization.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_ecom_modernization_closure.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_emergency_stop.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_empty_entity_diagnosis.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_full_corpus_projection.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_heldout_negative_v2_attribution.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_identity_index_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_identity_live_preflight.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_identity_repair.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_identity_schema_seal.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_instrumented_eval_baseline.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_isolation_backup_verify.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_isolation_collision_diagnosis.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_isolation_exact_backup.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_local_phase_metrics.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_original_fact_backup_verify.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_original_graph_restore.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_protected_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_protected_identity_collision_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_protected_spot_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_replay_watch.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_requeue_after_fix.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_retrieval_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_schema_metadata_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_secondary_green_canary.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_temporal_candidate_census.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/e2e_temporal_diagnostic_eval.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/mixed_content_book_smoke.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/rebatch_phase_a_g10.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/rebatch_phase_a_g9.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/rebatch_phase_a_gate.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/rebatch_v2_g4_diagnosis.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/relex_canary_ingest.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/relex_canary_legacy_gate_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/relex_canary_retrieval_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/relex_only_two_doc_smoke.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/render_t93_owner_sample.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/run_gate_measurement.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/runpod_custom_image_runtime_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/runpod_e2e_burst_operator.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/runpod_green_deploy_operator.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/runpod_green_health_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/runpod_job_status_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/step3_docker_gate_verification.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/t9_3_sentence_hybrid_v3_measure.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/temporal_smoke_probe.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "tmp/verify_runpod_e2e_staging.py"
+    },
+    {
+      "markers": [
+        "if __name__ == \"__main__\""
+      ],
+      "path": "validate_training_data.py"
+    }
+  ],
+  "extensions": {
+    ".conf": 1,
+    ".css": 2,
+    ".csv": 8,
+    ".docx": 1,
+    ".err": 1,
+    ".example": 1,
+    ".gz": 28,
+    ".html": 2,
+    ".in": 1,
+    ".js": 1,
+    ".json": 3258,
+    ".jsonl": 106,
+    ".lock": 1,
+    ".locked": 1,
+    ".log": 9,
+    ".luau": 1,
+    ".mcp": 1,
+    ".md": 606,
+    ".mjs": 5,
+    ".mmd": 2,
+    ".patch": 1,
+    ".pid": 5,
+    ".pkl": 1,
+    ".png": 4,
+    ".ps1": 7,
+    ".py": 1199,
+    ".sh": 25,
+    ".sha256": 2,
+    ".sig": 3,
+    ".ts": 62,
+    ".tsx": 54,
+    ".txt": 17,
+    ".whl": 1,
+    ".xml": 20,
+    ".yaml": 59,
+    ".yml": 14,
+    "[none]": 32
+  },
+  "git": {
+    "branch": "extraction/deterministic-recall-ladder",
+    "revision": "86149227db703c097aad586e4a18018185e9f742",
+    "status": "## extraction/deterministic-recall-ladder\n M .env.example\n D CONTINUATION_HANDOFF.json\n D CONTINUATION_HANDOFF.md\n M COORDINATION.md\n D PROGRESS.md\n M README.md\n M backend/.dockerignore\n M backend/config.py\n M backend/main.py\n M backend/models/claim_record.py\n M backend/models/contracts.py\n M backend/models/extraction_artifact.py\n M backend/models/schemas.py\n M backend/polymath_mcp/app_guide.py\n M backend/polymath_mcp/tools.py\n M backend/requirements.mcp.txt\n M backend/requirements.txt\n M backend/routers/chat.py\n M backend/routers/ingestion.py\n M backend/routers/settings.py\n M backend/scripts/audit_claim_assessment_ugo.py\n M backend/scripts/audit_claim_compiler_ugo.py\n D backend/scripts/benchmark_runpod_flash_extraction.py\n M backend/scripts/benchmark_semantic_extraction_remote.py\n M backend/scripts/polymath_failed_chunk_backfill.py\n M backend/scripts/polymath_graph_replay_backlog.py\n M backend/scripts/promote_backfilled_relations.py\n M backend/scripts/relex_generate.py\n M backend/scripts/rpre_measure.py\n M backend/scripts/run_heldout_eval.py\n M backend/services/chat_orchestrator.py\n M backend/services/control_plane/coverage_bridge.py\n M backend/services/control_plane/desired_state.py\n M backend/services/control_plane/extraction_organs.py\n M backend/services/extraction/dep_path_extractor.py\n M backend/services/extraction/entity_quality.py\n M backend/services/extraction/frame_extractor.py\n M backend/services/extraction/relex_gate.py\n M backend/services/extraction/spacy_relation_adapter.py\n D backend/services/extraction_validation.py\n M backend/services/ghost_b.py\n D backend/services/ghost_b_local.py\n M backend/services/ghost_b_schemas.py\n M backend/services/graph/neo4j_writer.py\n M backend/services/ingestion/batches.py\n M backend/services/ingestion/docling_adapter.py\n M backend/services/ingestion/document_pipeline_jobs.py\n M backend/services/ingestion/document_summaries.py\n M backend/services/ingestion/enrich.py\n M backend/services/ingestion/enrichment_gate.py\n M backend/services/ingestion/extraction_artifacts.py\n M backend/services/ingestion/extraction_contract.py\n M backend/services/ingestion/extraction_jobs.py\n D backend/services/ingestion/facet_tagger.py\n M backend/services/ingestion/graph_backfill.py\n M backend/services/ingestion/graph_promotion_jobs.py\n M backend/services/ingestion/organ_repair_jobs.py\n M backend/services/ingestion/promote.py\n M backend/services/ingestion/readiness.py\n M backend/services/ingestion/resource_planner.py\n M backend/services/ingestion/section_classifier.py\n M backend/services/ingestion/semantic_observations.py\n M backend/services/ingestion/summary_jobs.py\n M backend/services/ingestion/tier_chunker.py\n M backend/services/ingestion/verify.py\n M backend/services/ingestion/worker.py\n M backend/services/ingestion_service.py\n M backend/services/query_model_resolver.py\n M backend/services/reranker.py\n M backend/services/retrieval_readiness.py\n M backend/services/retriever/__init__.py\n M backend/services/retriever/fact_retrieval.py\n M backend/services/retriever/funnel_a.py\n M backend/services/retriever/funnel_b.py\n M backend/services/retriever/graph_decoration.py\n M backend/services/retriever/planned_fusion.py\n M backend/services/retriever/ranking_policy.py\n M backend/services/runpod_flash_extraction.py\n M backend/services/settings.py\n M backend/services/storage/mongo_reader.py\n M backend/services/storage/mongo_writer.py\n M backend/services/storage/qdrant_writer.py\n M backend/tests/conftest.py\n M backend/tests/test_claim_compiler.py\n M backend/tests/test_docling_adapter.py\n D backend/tests/test_docling_ordered_tables.py\n M backend/tests/test_extraction_artifact.py\n M backend/tests/test_extraction_contract.py\n M backend/tests/test_extraction_jobs.py\n M backend/tests/test_extraction_organ_contract.py\n D backend/tests/test_extraction_validation.py\n M backend/tests/test_facet_schema.py\n M backend/tests/test_frame_extractor.py\n D backend/tests/test_ghost_b_local_runtime_guard.py\n D backend/tests/test_ghost_b_local_sidecar_retry.py\n M backend/tests/test_ghost_b_staging.py\n M backend/tests/test_graph_promotion_jobs.py\n M backend/tests/test_hybrid_lexical_retrieval.py\n M backend/tests/test_ingest_verify_graph_indexes.py\n M backend/tests/test_neo4j_writer_deadlock_retry.py\n M backend/tests/test_neo4j_writer_facts.py\n M backend/tests/test_organ_repair_lane.py\n M backend/tests/test_polymath_mcp_ingest_tools.py\n M backend/tests/test_polymath_mcp_query_tools.py\n M backend/tests/test_qdrant_writer.py\n D backend/tests/test_relation_engine_switch_honesty.py\n M backend/tests/test_resource_planner.py\n M backend/tests/test_retrieval_ranking_policy.py\n M backend/tests/test_retrieval_readiness.py\n M backend/tests/test_runpod_local_extraction.py\n M backend/tests/test_section_classifier.py\n M backend/tests/test_storage_lifecycle.py\n M backend/tests/test_summary_jobs.py\n M backend/tests/test_suppression_counter_coverage.py\n M backend/tests/test_tier0_document_routing.py\n M backend/tests/test_tier0_ingestion.py\n M backend/tests/test_tier_chunker.py\n M backend/tests/test_universal_schema.py\n M backend/tests/test_worker_phases.py\n M config/ontology.yaml\n M docker-compose.apple-mlx.yml\n M docker-compose.daily.yml\n M docker-compose.offline-ingest.yml\n M docker-compose.override.example.yml\n M docker-compose.yml\n D docling_svc/.dockerignore\n D docling_svc/Dockerfile\n D docling_svc/main.py\n D docling_svc/requirements.txt\n M docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md\n M frontend/src/App.tsx\n M frontend/src/components/chat/ChatInput.tsx\n M frontend/src/components/chat/MessageBubble.tsx\n M frontend/src/components/corpus/CorpusDetail.tsx\n M frontend/src/components/corpus/CorpusManager.tsx\n M frontend/src/components/settings/InfrastructureTab.tsx\n M frontend/src/components/settings/IngestionSettingsTab.tsx\n M frontend/src/lib/api.ts\n M frontend/src/types/corpus.ts\n M frontend/src/types/settings.ts\n M graphify-out/.graphify_analysis.json\n M graphify-out/.graphify_labels.json\n M graphify-out/.graphify_labels.json.sig\n M graphify-out/.graphify_semantic_marker\n M graphify-out/GRAPH_REPORT.md\n M graphify-out/graph.json\n M graphify-out/manifest.json\n M litellm/config.yaml\n M local_ghost_b/requirements.txt\n D scripts/apple_ml_services/docling_svc/main.py\n D scripts/apple_ml_services/ghost_b_extract_svc/main.py\n M scripts/apple_ml_services/requirements.txt\n M scripts/apple_ml_services/start.sh\n M scripts/benchmark_glirel_claim_compiler_c2.py\n M scripts/install_apple_mlx_runtime.sh\n M scripts/mcp_e2e_smoke.py\n M scripts/smoke_apple_mlx.sh\n M scripts/verify_apple_mlx_runtime.py\n M scripts/verify_hermes_mcp.py\n?? .qoder/\n?? CONTINUITY/ALIAS_IDENTITY_AUTHORITATIVE_STATE_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_BASELINE_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_DIRECTIVE_v1.xml\n?? CONTINUITY/ALIAS_PIPELINE_PHASE3_CLOSEOUT_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_PHASE4_CLOSEOUT_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_PHASE5_CLOSEOUT_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_PHASE6_CLOSEOUT_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_PHASE7_CLOSEOUT_20260804.md\n?? CONTINUITY/ALIAS_PIPELINE_PHASE8_CLOSEOUT_20260804.md\n?? CONTINUITY/BOOK_INGESTION_CONTROL_PLANE_AUDIT_20260803.md\n?? CONTINUITY/BOOK_INGESTION_GAP_MATRIX_20260803.yaml\n?? CONTINUITY/BOOK_INGESTION_P4_ROUTE_READINESS_20260727.md\n?? CONTINUITY/BOOK_INGESTION_P5_CANARY_REPORT_20260803.md\n?? CONTINUITY/BOOK_PIPELINE_REPAIR_BASELINE_20260803.md\n?? CONTINUITY/COMPLEX_QUERY_CANDIDATE_ADOPTION_CLOSEOUT_20260805.md\n?? CONTINUITY/COMPLEX_QUERY_COVERAGE_REGRESSIONS_20260805.md\n?? CONTINUITY/COMPLEX_QUERY_DARK_QUALITY_CLOSEOUT_20260805.md\n?? CONTINUITY/COMPLEX_QUERY_EXPANDED_DARK_CANARY_20260805.md\n?? CONTINUITY/COMPLEX_QUERY_MULTIHOP_E2E_CLOSEOUT_20260805.md\n?? CONTINUITY/COMPLEX_QUERY_MULTIHOP_IMPLEMENTATION_20260804.md\n?? CONTINUITY/COMPLEX_QUERY_PRODUCTION_GAP_GRAPHIFY_20260805.md\n?? CONTINUITY/COMPLEX_QUERY_SUBQUERY_BASELINE_20260804.md\n?? CONTINUITY/CROSS_DOMAIN_RETRIEVAL_BASELINE_20260804.md\n?? CONTINUITY/CROSS_DOMAIN_RETRIEVAL_CLOSEOUT_20260804.md\n?? CONTINUITY/CROSS_DOMAIN_RETRIEVAL_IMPLEMENTATION_20260804.md\n?? CONTINUITY/EXTRACTION_FREEZE_MANIFEST_20260802.md\n?? CONTINUITY/EXTRACTION_FREEZE_UNCOMMITTED.patch\n?? CONTINUITY/GRAPH_AUTHORITY_REPAIR_CLOSEOUT_20260804.md\n?? CONTINUITY/GRAPH_AUTHORITY_REPAIR_DIRECTIVE_20260804.md\n?? CONTINUITY/GRAPH_PROJECTION_CONTROL_PLANE_CLOSEOUT_20260804.md\n?? CONTINUITY/GRAPH_PROJECTION_CONTROL_PLANE_SLICE_20260804.md\n?? CONTINUITY/GRAPH_SEMANTIC_E2E_CLOSEOUT_20260805.md\n?? CONTINUITY/INGESTION_CONTROL_PLANE_20260805.md\n?? CONTINUITY/KNOWLEDGE_BUNDLE_RECOVERY_PROGRESS_20260804.md\n?? CONTINUITY/KNOWLEDGE_PIPELINE_LINEAGE_MAP_20260804.md\n?? CONTINUITY/MPS_BATCH_QUALIFICATION_20260805.md\n?? CONTINUITY/NEO4J_PROMOTION_PERFORMANCE_CLOSEOUT_20260805.md\n?? CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md\n?? CONTINUITY/PHASE5_DEDUP_READINESS_CLOSEOUT_20260805.md\n?? CONTINUITY/PHASE_TRANSITION_EXTRACTION_CORE_V1.md\n?? CONTINUITY/PIPELINED_INGESTION_CLOSEOUT_20260805.md\n?? CONTINUITY/PRECISION_GATE_RELEX_2026-07-31.md\n?? CONTINUITY/PREQ9_16GB_MEMORY_ARCHITECTURE_BASELINE.md\n?? CONTINUITY/Q8_EVIDENCE_COLLECTION_CLOSEOUT.md\n?? CONTINUITY/Q9_BATCH_RESUME_CLOSEOUT_20260805.md\n?? CONTINUITY/Q9_FINAL_AUTHORITY_MANIFEST_20260805.md\n?? CONTINUITY/Q9_IMPLEMENTATION_DIRECTIVE_v1.xml\n?? CONTINUITY/Q9_STEP10_BASELINE_CLOSEOUT_20260804.md\n?? CONTINUITY/Q9_STEP18_OWNER_RULING_20260804.md\n?? CONTINUITY/Q9_STEP7_HANDOFF_20260804.md\n?? CONTINUITY/Q9_STEP9_MEMORY_CLOSEOUT_20260804.md\n?? CONTINUITY/Q9_STEPS_10_17_CLOSEOUT_20260804.md\n?? CONTINUITY/Q9_STEPS_7_8_CLOSEOUT_20260804.md\n?? CONTINUITY/QDRANT_PAYLOAD_INDEX_AUDIT_20260803.md\n?? CONTINUITY/QUERY_ARCHITECTURE_CONFLICT_MATRIX.md\n?? CONTINUITY/QUERY_CONTROL_PLANE_REPO_AUDIT.md\n?? CONTINUITY/QUERY_CURRENT_CALL_GRAPH.mmd\n?? CONTINUITY/QUERY_EXISTING_CAPABILITY_MATRIX.yaml\n?? CONTINUITY/QUERY_INTEGRATION_SEAMS.md\n?? CONTINUITY/QUERY_MINIMAL_IMPLEMENTATION_PLAN.md\n?? CONTINUITY/QUERY_PERFORMANCE_BENCHMARK_PLAN.md\n?? CONTINUITY/RECALL_CEILING_CORRECTIONS_2026-07-31.md\n?? CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md\n?? CONTINUITY/TEMPORAL_CONTRACT_V1.md\n?? CONTINUITY/spacy-mcp-fix-20260725.md\n?? GRAPHIFY_GLINER2_CPU_AGENT/\n?? POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/\n?? backend/evals/cross_corpus_probe.jsonl\n?? backend/evals/spacy_relation_asserted_gold_v1.json\n?? backend/evals/spacy_relation_gate_v1.json\n?? backend/evals/stress_test_20.jsonl\n?? backend/models/alias_identity.py\n?? backend/models/alias_schema_projection.py\n?? backend/models/candidate_adoption.py\n?? backend/models/complex_query.py\n?? backend/models/dark_canary.py\n?? backend/models/evidence_item.py\n?? backend/models/graph_projection_ir.py\n?? backend/models/graphify_contracts.py\n?? backend/models/knowledge_artifact_bundle.py\n?? backend/models/query_ir.py\n?? backend/models/release_stamp.py\n?? backend/models/release_state.py\n?? backend/models/summary_information_record.py\n?? backend/models/temporal_contract.py\n?? backend/models/vocabulary_resolution.py\n?? backend/registries/release_pins.v1.json\n?? backend/registries/temporal_policy_registry.v1.json\n?? backend/routers/control_plane.py\n?? backend/scripts/_probe_cq_retrieve.py\n?? backend/scripts/adjudicate_d_e_candidates.py\n?? backend/scripts/assess_speed_bench_test.py\n?? backend/scripts/audit_graphify_stress_frozen.py\n?? backend/scripts/backfill_q8_evidence_collection.py\n?? backend/scripts/benchmark_book_ingestion_pressure.py\n?? backend/scripts/canary_graph_release_gate_probe.py\n?? backend/scripts/compare_ablation_runs.py\n?? backend/scripts/gate_diagnostic.py\n?? backend/scripts/graph_projection_control_plane_close.py\n?? backend/scripts/graphify_e2e_client.py\n?? backend/scripts/label_structural_shadow_projections.py\n?? backend/scripts/mark_permanent_integration_fixture.py\n?? backend/scripts/materialize_gsem_fixture_retrieval.py\n?? backend/scripts/mine_dependency_patterns.py\n?? backend/scripts/p1b_precision_audit.py\n?? backend/scripts/predicate_confusion_matrix.py\n?? backend/scripts/probe_book_ingestion_pipeline.py\n?? backend/scripts/q9_phase0_snapshot.py\n?? backend/scripts/qualify_relex_batching.py\n?? backend/scripts/regen_relex_benchmark.py\n?? backend/scripts/regen_relex_benchmark_batched.py\n?? backend/scripts/report_graphify_s04.py\n?? backend/scripts/rerun_candidate_synthesis.py\n?? backend/scripts/run_candidate_adoption_suite.py\n?? backend/scripts/run_complex_query_dark_canary.py\n?? backend/scripts/run_complex_query_fixture_e2e.py\n?? backend/scripts/run_complex_query_generation_probes.py\n?? backend/scripts/run_complex_query_validation_delta.py\n?? backend/scripts/run_deterministic_summary_materialization.py\n?? backend/scripts/run_expanded_dark_canary.py\n?? backend/scripts/run_gold_entity_syntax_ceiling.py\n?? backend/scripts/run_graph_semantic_e2e_phase2_plus.py\n?? backend/scripts/run_graph_semantic_e2e_phase7_10.py\n?? backend/scripts/run_graphify_argument_adapter.py\n?? backend/scripts/run_graphify_assertion_assembler.py\n?? backend/scripts/run_graphify_census.py\n?? backend/scripts/run_graphify_completion.py\n?? backend/scripts/run_graphify_fixture_e2e.py\n?? backend/scripts/run_graphify_openie.py\n?? backend/scripts/run_graphify_predicate_compiler.py\n?? backend/scripts/run_graphify_proposition_reducer.py\n?? backend/scripts/run_graphify_reducer.py\n?? backend/scripts/run_graphify_relations.py\n?? backend/scripts/run_graphify_stress_answer_key.py\n?? backend/scripts/run_openie_relation_kill_switch.py\n?? backend/scripts/run_q8_parity_harness.py\n?? backend/scripts/run_q9_quality_use_suite.py\n?? backend/scripts/run_relation_eligibility.py\n?? backend/scripts/run_relex_fixture_baseline.py\n?? backend/scripts/shadow_a_graph_release_gate_probe.py\n?? backend/scripts/shadow_b_graph_release_gate_probe.py\n?? backend/scripts/shadow_mode_corroboration.py\n?? backend/scripts/unified_shadow_pipeline.py\n?? backend/scripts/verify_gliner2_cpu_provider.py\n?? backend/services/control_plane/__init__.py\n?? backend/services/control_plane/certificate.py\n?? backend/services/control_plane/ledger.py\n?? backend/services/control_plane/release_registry.py\n?? backend/services/extraction/__init__.py\n?? backend/services/extraction/ablation.py\n?? backend/services/extraction/appos_enrichment.py\n?? backend/services/extraction/canonical.py\n?? backend/services/extraction/corroboration_gate.py\n?? backend/services/extraction/credit_patterns.py\n?? backend/services/extraction/gliner2_cpu_provider.py\n?? backend/services/extraction/graphify_argument_adapter.py\n?? backend/services/extraction/graphify_assertion_assembler.py\n?? backend/services/extraction/graphify_census.py\n?? backend/services/extraction/graphify_completion.py\n?? backend/services/extraction/graphify_normalization.py\n?? backend/services/extraction/graphify_openie.py\n?? backend/services/extraction/graphify_pipeline.py\n?? backend/services/extraction/graphify_predicate_compiler.py\n?? backend/services/extraction/graphify_proposition_reducer.py\n?? backend/services/extraction/graphify_provider_registry.py\n?? backend/services/extraction/graphify_reducer.py\n?? backend/services/extraction/graphify_relations.py\n?? backend/services/extraction/graphify_survey.py\n?? backend/services/extraction/mention_normalizer.py\n?? backend/services/extraction/relation_evidence.py\n?? backend/services/extraction/relex_adapter.py\n?? backend/services/extraction/syntax_lane.py\n?? backend/services/extraction_wire.py\n?? backend/services/graph/assertion_projector.py\n?? backend/services/graph/projection_jobs.py\n?? backend/services/graph/projection_runner.py\n?? backend/services/ingestion/alias_candidates.py\n?? backend/services/ingestion/alias_corpus_clustering.py\n?? backend/services/ingestion/alias_document_clustering.py\n?? backend/services/ingestion/alias_gate.py\n?? backend/services/ingestion/alias_parent_aggregation.py\n?? backend/services/ingestion/alias_retrieval_shadow.py\n?? backend/services/ingestion/alias_schema_projection.py\n?? backend/services/ingestion/alias_schema_retrieval.py\n?? backend/services/ingestion/deterministic_summary.py\n?? backend/services/ingestion/fixture_knowledge_pipeline.py\n?? backend/services/ingestion/knowledge_bundle.py\n?? backend/services/ingestion/parse_policy.py\n?? backend/services/ingestion/relex_local.py\n?? backend/services/ingestion/route_readiness.py\n?? backend/services/ingestion/summary_from_bundle.py\n?? backend/services/retriever/complex_query_candidate_adoption.py\n?? backend/services/retriever/complex_query_candidate_synthesis.py\n?? backend/services/retriever/complex_query_dark_canary.py\n?? backend/services/retriever/complex_query_executor.py\n?? backend/services/retriever/complex_query_fusion.py\n?? backend/services/retriever/complex_query_runtime.py\n?? backend/services/retriever/complex_query_templates.py\n?? backend/services/retriever/complex_query_traversal.py\n?? backend/services/retriever/complex_query_wave1.py\n?? backend/services/retriever/context_packet.py\n?? backend/services/retriever/cross_domain_rrf.py\n?? backend/services/retriever/curation.py\n?? backend/services/retriever/graph_authority.py\n?? backend/services/retriever/protected_anchors.py\n?? backend/services/retriever/shadow_read.py\n?? backend/tests/extraction/\n?? backend/tests/fixtures/canary_book/\n?? backend/tests/test_alias_apposition_phase3.py\n?? backend/tests/test_alias_candidates_phase2.py\n?? backend/tests/test_alias_corpus_clustering_phase6.py\n?? backend/tests/test_alias_document_clustering_phase5.py\n?? backend/tests/test_alias_gate_phase4.py\n?? backend/tests/test_alias_identity_contracts.py\n?? backend/tests/test_alias_retrieval_shadow_phase8.py\n?? backend/tests/test_alias_schema_retrieval_phase7.py\n?? backend/tests/test_answer_provider_failure_contract.py\n?? backend/tests/test_batch_summary_cost_gate.py\n?? backend/tests/test_candidate_adoption_augmenter.py\n?? backend/tests/test_complex_query_contracts.py\n?? backend/tests/test_complex_query_dark_canary.py\n?? backend/tests/test_complex_query_templates.py\n?? backend/tests/test_complex_query_traversal.py\n?? backend/tests/test_control_plane_v2.py\n?? backend/tests/test_cross_domain_rrf_weights.py\n?? backend/tests/test_deterministic_document_profile.py\n?? backend/tests/test_deterministic_parent_summary.py\n?? backend/tests/test_deterministic_summary_tree.py\n?? backend/tests/test_evidence_item_contract.py\n?? backend/tests/test_explains_links.py\n?? backend/tests/test_graph_authority_block.py\n?? backend/tests/test_graph_authority_separation.py\n?? backend/tests/test_graph_projection_jobs.py\n?? backend/tests/test_graph_promotion_release_gate.py\n?? backend/tests/test_graphify_only_runtime_invariant.py\n?? backend/tests/test_knowledge_artifact_bundle.py\n?? backend/tests/test_legacy_script_release_gate.py\n?? backend/tests/test_manual_repair_release_gate.py\n?? backend/tests/test_neo4j_write_via_projection_cp.py\n?? backend/tests/test_neo4j_writer_explains.py\n?? backend/tests/test_openie_relation_kill_switch.py\n?? backend/tests/test_pass_overlap_claims.py\n?? backend/tests/test_permanent_integration_fixture.py\n?? backend/tests/test_protected_anchors.py\n?? backend/tests/test_q8_evidence_dual_write.py\n?? backend/tests/test_q8_shadow_read.py\n?? backend/tests/test_q9_parse_policy.py\n?? backend/tests/test_query_ir_contract.py\n?? backend/tests/test_release_registry_loader.py\n?? backend/tests/test_release_stamp_step3.py\n?? backend/tests/test_release_state_contract.py\n?? backend/tests/test_relex_fixture_baseline.py\n?? backend/tests/test_relex_local_microbatch.py\n?? backend/tests/test_retrieval_curation_v4.py\n?? backend/tests/test_route_readiness_certificate.py\n?? backend/tests/test_summary_provider_not_required.py\n?? backend/tests/test_summary_readiness_baseline.py\n?? backend/tests/test_temporal_contract.py\n?? backend/tests/test_temporal_policy_registry.py\n?? backend/tests/test_vocabulary_bundle_contract.py\n?? backend/tests/test_worker_summary_control_plane.py\n?? config/canonical/\n?? config/predicate_synonyms.yaml\n?? config/relation_acceptance.yaml\n?? config/supported_dep_patterns.yaml\n?? frontend/src/components/chat/ResearchCard.tsx\n?? graphify-out.pre-book-pipeline-repair/\n?? graphify-out.stale-20260725/\n?? graphify-out/.graphify_root\n?? graphify-out/2026-08-03/\n?? graphify-out/2026-08-04/\n?? scripts/alias_pipeline/\n?? scripts/apple_ml_services/relex_extract_svc/\n?? scripts/cross_domain/\n?? scripts/graph/\n?? scripts/q9/\n?? tmp/cp_v2_failed_baseline.txt\n?? tmp/cp_v2_failed_current.txt\n?? tmp/mixed_content_book_fixture.md\n?? tmp/mixed_content_book_smoke.py\n?? tmp/p4_evidence_capture.py\n?? tmp/probe_facts.py\n?? tmp/qdrant_audit_live.err\n?? tmp/qdrant_audit_live.json\n?? tmp/qdrant_payload_index_audit_probe.py\n?? tmp/relex_canary_ingest.py\n?? tmp/relex_canary_legacy_gate_probe.py\n?? tmp/relex_canary_retrieval_probe.py\n?? tmp/relex_only_two_doc_smoke.py\n?? tmp/relex_smoke_fixtures/\n?? tmp/run_gate_measurement.py\n?? tmp/step3_docker_gate_verification.py\n?? tmp/temporal_smoke_probe.py\n?? tmp/temporal_smoke_retrieval.json"
+  },
+  "implementation_markers": {
+    "NotImplementedError": 3,
+    "PLACEHOLDER": 19
+  },
+  "instructions_and_adrs": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTINUITY/local_ingestion_phase_a/README.md",
+    "GRAPHIFY_GLINER2_CPU_AGENT/AGENTS.md",
+    "GRAPHIFY_GLINER2_CPU_AGENT/README.md",
+    "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/README.md",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/README.md",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/self_tests/README.md",
+    "README.md",
+    "docs/baselines/final_acceptance_v1_20260718/README.md",
+    "docs/baselines/gpu_arbiter_q_window_v3/README.md",
+    "local_ghost_b/heads/glirel_ghost_b_v1/README.md",
+    "runpod_flash_embedder/README.md",
+    "runpod_flash_extractor/README.md",
+    "scripts/apple_ml_services/slm_enrich_mlx/README.md",
+    "scripts/apple_ml_services/windows_tasks/README.md"
+  ],
+  "manifests": [
+    "docker-compose.yml",
+    "frontend/package.json"
+  ],
+  "marker_counts_by_scope": {
+    "docs": {
+      "TODO": 1
+    },
+    "other": {
+      "NotImplementedError": 44,
+      "PLACEHOLDER": 14,
+      "TODO": 6
+    },
+    "source": {
+      "NotImplementedError": 3,
+      "PLACEHOLDER": 19
+    },
+    "tests": {
+      "NotImplementedError": 3
+    }
+  },
+  "plan": {
+    "content_hash": "sha256:cce63acd5dd7da9216a6e94161d1c03fcb156e72042f5ccf95c5a973683e15bb",
+    "path": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/PROMPT_TO_AGENT.md"
+  },
+  "repository": "/Users/king/polymath_v3.3",
+  "schema_files": [
+    ".qoder/repowiki/en/content/Backend Services/Data Models & Schemas.md",
+    ".qoder/repowiki/en/content/Data Models and Schemas/Data Models and Schemas.md",
+    ".qoder/repowiki/en/content/Data Models and Schemas/MongoDB Schemas.md",
+    ".qoder/repowiki/en/content/Data Models and Schemas/Qdrant Vector Schemas.md",
+    "CONTINUITY/SCHEMA_METADATA_MAP.md",
+    "GRAPHIFY_GLINER2_CPU_AGENT/schemas/benchmark_result.schema.json",
+    "GRAPHIFY_GLINER2_CPU_AGENT/schemas/final_status.schema.json",
+    "GRAPHIFY_GLINER2_CPU_AGENT/schemas/stage_receipt.schema.json",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/schemas/assertion.schema.json",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/schemas/document_entity.schema.json",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/schemas/raw_mention.schema.json",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/schemas/surface_relation.schema.json",
+    "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/schemas/workflow_state.schema.json",
+    "backend/models/_schemas_legacy.py",
+    "backend/models/alias_schema_projection.py",
+    "backend/models/schemas.py",
+    "backend/services/ghost_b_schemas.py",
+    "backend/services/graph/schema.py",
+    "backend/services/ingestion/alias_schema_projection.py",
+    "backend/services/ingestion/alias_schema_retrieval.py",
+    "backend/services/ingestion/schema_lens.py",
+    "backend/services/schema_control.py",
+    "backend/services/storage/schema_validators.py",
+    "backend/tests/test_alias_schema_retrieval_phase7.py",
+    "backend/tests/test_facet_schema.py",
+    "backend/tests/test_json_schema_mode.py",
+    "backend/tests/test_migrate_universal_schema.py",
+    "backend/tests/test_neo4j_schema.py",
+    "backend/tests/test_schema_control.py",
+    "backend/tests/test_schema_lens.py",
+    "backend/tests/test_schema_validators.py",
+    "backend/tests/test_universal_schema.py",
+    "docs/FINAL_SCHEMA_METADATA_ARCHITECTURE_2026-07-13.md",
+    "docs/LOCAL_EXTRACTION_THREE_SCHEMA_DESIGN_2026-07-14.md",
+    "local_ghost_b/SCHEMA.md",
+    "scripts/bench_local_draft_schema_pipeline.py",
+    "scripts/cross_domain/inventory_schema_vectors.py",
+    "tmp/e2e_identity_schema_seal.py",
+    "tmp/e2e_schema_metadata_census.py"
+  ],
+  "test_files": [
+    "backend/tests/__init__.py",
+    "backend/tests/conftest.py",
+    "backend/tests/extraction/__init__.py",
+    "backend/tests/extraction/fixtures/conjunction_adversarial.yaml",
+    "backend/tests/extraction/fixtures/credit_pattern_adjudicated.yaml",
+    "backend/tests/extraction/fixtures/open_relation_adjudicated.yaml",
+    "backend/tests/extraction/fixtures/verb_prep_adjudicated.yaml",
+    "backend/tests/extraction/test_ablation_profiles.py",
+    "backend/tests/extraction/test_canonical_contract.py",
+    "backend/tests/extraction/test_conjunction_adversarial.py",
+    "backend/tests/extraction/test_corroboration_gate.py",
+    "backend/tests/extraction/test_credit_pattern_fixtures.py",
+    "backend/tests/extraction/test_credit_patterns.py",
+    "backend/tests/extraction/test_gliner2_cpu_provider.py",
+    "backend/tests/extraction/test_graphify_argument_adapter.py",
+    "backend/tests/extraction/test_graphify_assertion_assembler.py",
+    "backend/tests/extraction/test_graphify_census.py",
+    "backend/tests/extraction/test_graphify_completion.py",
+    "backend/tests/extraction/test_graphify_contracts_offsets_survey.py",
+    "backend/tests/extraction/test_graphify_entrypoint.py",
+    "backend/tests/extraction/test_graphify_openie.py",
+    "backend/tests/extraction/test_graphify_pipeline.py",
+    "backend/tests/extraction/test_graphify_predicate_compiler.py",
+    "backend/tests/extraction/test_graphify_proposition_reducer.py",
+    "backend/tests/extraction/test_graphify_reducer.py",
+    "backend/tests/extraction/test_graphify_relations.py",
+    "backend/tests/extraction/test_open_relation_fixtures.py",
+    "backend/tests/extraction/test_relation_eligibility_artifact.py",
+    "backend/tests/extraction/test_relex_adapter.py",
+    "backend/tests/extraction/test_verb_prep_fixtures.py",
+    "backend/tests/fixtures/canary_book/aldermoor-observatory-field-notes.docx",
+    "backend/tests/fixtures/canary_book/benesh-1975.md",
+    "backend/tests/fixtures/canary_book/mixed-python-book-fixture.md",
+    "backend/tests/fixtures/canary_book/this-tiktok-shop-setup-took-a-dying-brand-from-4k-to-1m-in-6-months-yt-qjmlnrxqzc0.md",
+    "backend/tests/fixtures/code_textbook.md",
+    "backend/tests/fixtures/sample.luau",
+    "backend/tests/fixtures/sample.py",
+    "backend/tests/graph/__init__.py",
+    "backend/tests/graph/test_domain_emergence.py",
+    "backend/tests/graph/test_gap_profile.py",
+    "backend/tests/graph/test_gap_synthesis_mode.py",
+    "backend/tests/graph/test_graph_synthesis_grounding.py",
+    "backend/tests/graph/test_metrics_cache_compaction.py",
+    "backend/tests/graph/test_metrics_detectors.py",
+    "backend/tests/graph/test_orchestrator_payload.py",
+    "backend/tests/test_adjustable_semaphore.py",
+    "backend/tests/test_agentic_retriever.py",
+    "backend/tests/test_agentic_retriever_modes.py",
+    "backend/tests/test_alias_apposition_phase3.py",
+    "backend/tests/test_alias_candidates_phase2.py",
+    "backend/tests/test_alias_corpus_clustering_phase6.py",
+    "backend/tests/test_alias_document_clustering_phase5.py",
+    "backend/tests/test_alias_gate_phase4.py",
+    "backend/tests/test_alias_identity_contracts.py",
+    "backend/tests/test_alias_retrieval_shadow_phase8.py",
+    "backend/tests/test_alias_schema_retrieval_phase7.py",
+    "backend/tests/test_anchor_detect.py",
+    "backend/tests/test_answer_provider_failure_contract.py",
+    "backend/tests/test_answerability_corpus_scope_v2.py",
+    "backend/tests/test_answerability_corpus_scope_v3.py",
+    "backend/tests/test_answerability_gate_loosening.py",
+    "backend/tests/test_answerability_honesty.py",
+    "backend/tests/test_answerability_text_fallback.py",
+    "backend/tests/test_artifact_envelope.py",
+    "backend/tests/test_assembly.py",
+    "backend/tests/test_atomic_claim_anchors.py",
+    "backend/tests/test_batch_canary.py",
+    "backend/tests/test_batch_summary_cost_gate.py",
+    "backend/tests/test_bibliographic_backfill_e2e.py",
+    "backend/tests/test_bibliographic_capture.py",
+    "backend/tests/test_candidate_adoption_augmenter.py",
+    "backend/tests/test_candidate_collapse_phase1_e2e.py",
+    "backend/tests/test_canonical_heldout_negative_eval.py",
+    "backend/tests/test_canonical_refusal_contract.py",
+    "backend/tests/test_canonical_spacy_dependency.py",
+    "backend/tests/test_chat_attachments.py",
+    "backend/tests/test_chat_attachments_production.py",
+    "backend/tests/test_chat_cost_meter.py",
+    "backend/tests/test_chat_latency_guards.py",
+    "backend/tests/test_chat_orchestrator_coverage.py",
+    "backend/tests/test_chat_orchestrator_web_limits.py",
+    "backend/tests/test_chat_query_retrieval_e2e.py",
+    "backend/tests/test_chat_trace_events.py",
+    "backend/tests/test_chunker_routers.py",
+    "backend/tests/test_claim_anchor_micro_ab.py",
+    "backend/tests/test_claim_assessment.py",
+    "backend/tests/test_claim_compiler.py",
+    "backend/tests/test_claim_compiler_ugo_audit.py",
+    "backend/tests/test_code_graph_augmenter.py",
+    "backend/tests/test_code_graph_synthesis.py",
+    "backend/tests/test_code_lane_skills.py",
+    "backend/tests/test_code_splitter.py",
+    "backend/tests/test_complex_query_contracts.py",
+    "backend/tests/test_complex_query_dark_canary.py",
+    "backend/tests/test_complex_query_templates.py",
+    "backend/tests/test_complex_query_traversal.py",
+    "backend/tests/test_connection_pooling.py",
+    "backend/tests/test_context_manager_prompt.py",
+    "backend/tests/test_contracts.py",
+    "backend/tests/test_control_plane_v2.py",
+    "backend/tests/test_corpus_commander_invariants.py",
+    "backend/tests/test_corpus_floor_calibration.py",
+    "backend/tests/test_corpus_ids_pr1.py",
+    "backend/tests/test_corpus_lexicon.py",
+    "backend/tests/test_corpus_qualified_identity.py",
+    "backend/tests/test_corpus_readiness.py",
+    "backend/tests/test_corpus_repair.py",
+    "backend/tests/test_corpus_scope_context.py",
+    "backend/tests/test_cross_corpus_hash_dedupe.py",
+    "backend/tests/test_cross_domain.py",
+    "backend/tests/test_cross_domain_rrf_weights.py",
+    "backend/tests/test_dep_path_extractor.py",
+    "backend/tests/test_deterministic_document_profile.py",
+    "backend/tests/test_deterministic_parent_summary.py",
+    "backend/tests/test_deterministic_summary_tree.py",
+    "backend/tests/test_doc_artifact.py",
+    "backend/tests/test_doc_concentration_observability_e2e.py",
+    "backend/tests/test_docling_adapter.py",
+    "backend/tests/test_document_anchor_retriever.py",
+    "backend/tests/test_document_pipeline_jobs.py",
+    "backend/tests/test_document_semantic_profile.py",
+    "backend/tests/test_document_summaries.py",
+    "backend/tests/test_e2e_heldout_negative_v2.py",
+    "backend/tests/test_embed_modes.py",
+    "backend/tests/test_embedder_eval_stability.py",
+    "backend/tests/test_embedder_priority_gate.py",
+    "backend/tests/test_embedder_warmup.py",
+    "backend/tests/test_embedding_instruction_ab.py",
+    "backend/tests/test_enrichment_gate.py",
+    "backend/tests/test_entity_glosses_complete.py",
+    "backend/tests/test_entity_quality_gate.py",
+    "backend/tests/test_entity_squash_shadow.py",
+    "backend/tests/test_evidence_allocation.py",
+    "backend/tests/test_evidence_item_contract.py",
+    "backend/tests/test_evidence_packet_metadata.py",
+    "backend/tests/test_evidence_plan.py",
+    "backend/tests/test_evidence_plan_survey_filler.py",
+    "backend/tests/test_explains_links.py",
+    "backend/tests/test_extraction_artifact.py",
+    "backend/tests/test_extraction_contract.py",
+    "backend/tests/test_extraction_coverage_checkpoint.py",
+    "backend/tests/test_extraction_jobs.py",
+    "backend/tests/test_extraction_microbatch.py",
+    "backend/tests/test_extraction_organ_contract.py",
+    "backend/tests/test_extraction_parity_burst.py",
+    "backend/tests/test_extraction_provider_cards.py",
+    "backend/tests/test_extraction_vocabulary_v2.py",
+    "backend/tests/test_facet_decontamination.py",
+    "backend/tests/test_facet_final_selector.py",
+    "backend/tests/test_facet_schema.py",
+    "backend/tests/test_fact_retrieval.py",
+    "backend/tests/test_failure_reconciliation.py",
+    "backend/tests/test_final_acceptance_v1_runner.py",
+    "backend/tests/test_four_lane_tier0_router.py",
+    "backend/tests/test_frame_extractor.py",
+    "backend/tests/test_frame_motif.py",
+    "backend/tests/test_frozen_mutable_split.py",
+    "backend/tests/test_funnel_a_fair_mode.py",
+    "backend/tests/test_gap_analysis_repairs.py",
+    "backend/tests/test_gerg_query_ranked_edges_phase3_e2e.py",
+    "backend/tests/test_ghost_a_summary_fallback.py",
+    "backend/tests/test_ghost_b_provider_resilience.py",
+    "backend/tests/test_ghost_b_routing_policy.py",
+    "backend/tests/test_ghost_b_staging.py",
+    "backend/tests/test_gliner_mentions.py",
+    "backend/tests/test_glirel_claim_compiler_c2_benchmark.py",
+    "backend/tests/test_graph_authority_block.py",
+    "backend/tests/test_graph_authority_separation.py",
+    "backend/tests/test_graph_backfill_metadata_script.py",
+    "backend/tests/test_graph_batch_safety.py",
+    "backend/tests/test_graph_cache_warmup.py",
+    "backend/tests/test_graph_citation_noise_fix_e2e.py",
+    "backend/tests/test_graph_decoration_metrics_aware.py",
+    "backend/tests/test_graph_hop_pruning_validation.py",
+    "backend/tests/test_graph_metrics_selfheal_e2e.py",
+    "backend/tests/test_graph_orchestrator_fallback.py",
+    "backend/tests/test_graph_payload.py",
+    "backend/tests/test_graph_projection_jobs.py",
+    "backend/tests/test_graph_promotion_jobs.py",
+    "backend/tests/test_graph_promotion_release_gate.py",
+    "backend/tests/test_graph_query_hybrid.py",
+    "backend/tests/test_graph_query_phase2.py",
+    "backend/tests/test_graph_query_phase3.py",
+    "backend/tests/test_graph_replay_backlog.py",
+    "backend/tests/test_graph_rerank.py",
+    "backend/tests/test_graph_rerank_metrics_aware.py",
+    "backend/tests/test_graph_semantic_coverage_trace.py",
+    "backend/tests/test_graph_viewer_pr2.py",
+    "backend/tests/test_graphify_only_runtime_invariant.py",
+    "backend/tests/test_grounded_planner.py",
+    "backend/tests/test_hash_taxonomy_golden.py",
+    "backend/tests/test_health_service.py",
+    "backend/tests/test_hybrid_lexical_retrieval.py",
+    "backend/tests/test_hydration_mode.py",
+    "backend/tests/test_ideation_grounding.py",
+    "backend/tests/test_idempotency_audit.py",
+    "backend/tests/test_identifier_recipes_golden.py",
+    "backend/tests/test_ingest_batches.py",
+    "backend/tests/test_ingest_deferred_summary.py",
+    "backend/tests/test_ingest_slot_ordering.py",
+    "backend/tests/test_ingest_verify_graph_indexes.py",
+    "backend/tests/test_ingestion_model_ref_models.py",
+    "backend/tests/test_ingestion_router_readiness_refresh.py",
+    "backend/tests/test_ingestion_service_backpressure.py",
+    "backend/tests/test_ingestion_service_corpus_readiness_response.py",
+    "backend/tests/test_ingestion_service_idempotency.py",
+    "backend/tests/test_ingestion_status.py",
+    "backend/tests/test_ingestion_summary_settings.py",
+    "backend/tests/test_job_control.py",
+    "backend/tests/test_job_leases.py",
+    "backend/tests/test_json_schema_mode.py",
+    "backend/tests/test_knowledge_artifact_bundle.py",
+    "backend/tests/test_legacy_adapters.py",
+    "backend/tests/test_legacy_script_release_gate.py",
+    "backend/tests/test_lens_no_entity_type_bias.py",
+    "backend/tests/test_lexical_fusion_normalization_phase2_e2e.py",
+    "backend/tests/test_librarian_card_builder.py",
+    "backend/tests/test_librarian_decomposer.py",
+    "backend/tests/test_librarian_execution.py",
+    "backend/tests/test_librarian_planner_shadow.py",
+    "backend/tests/test_librarian_query_plan.py",
+    "backend/tests/test_llm_lane_pool.py",
+    "backend/tests/test_llm_provider_extra_params.py",
+    "backend/tests/test_local_extraction.py",
+    "backend/tests/test_local_extraction_ugo_audit.py",
+    "backend/tests/test_m2_metadata.py",
+    "backend/tests/test_manual_repair_release_gate.py",
+    "backend/tests/test_materialize_semantic_digest_claim_inputs.py",
+    "backend/tests/test_mcp_api_keys.py",
+    "backend/tests/test_mcp_ingest_slot_gate.py",
+    "backend/tests/test_metadata_rerank.py",
+    "backend/tests/test_migrate_universal_schema.py",
+    "backend/tests/test_mission_control_pr3.py",
+    "backend/tests/test_modal_deployer.py",
+    "backend/tests/test_mode_a_bonus_expansion.py",
+    "backend/tests/test_model_lifecycle.py",
+    "backend/tests/test_models_curated_catalog.py",
+    "backend/tests/test_mongo_reader_counts.py",
+    "backend/tests/test_mongo_writer_boundaries.py",
+    "backend/tests/test_multistage_synthesis.py",
+    "backend/tests/test_neo4j_schema.py",
+    "backend/tests/test_neo4j_write_via_projection_cp.py",
+    "backend/tests/test_neo4j_writer_deadlock_retry.py",
+    "backend/tests/test_neo4j_writer_explains.py",
+    "backend/tests/test_neo4j_writer_facts.py",
+    "backend/tests/test_object_kind_extraction.py",
+    "backend/tests/test_object_kind_prompt_steering.py",
+    "backend/tests/test_openie_relation_kill_switch.py",
+    "backend/tests/test_organ_repair_lane.py",
+    "backend/tests/test_paid_cost_reservation.py",
+    "backend/tests/test_parent_summary_contract.py",
+    "backend/tests/test_partial_failure_safety.py",
+    "backend/tests/test_pass_overlap_claims.py",
+    "backend/tests/test_permanent_integration_fixture.py",
+    "backend/tests/test_phase1_streaming_native_tools.py",
+    "backend/tests/test_phase1_web_toggle_routing.py",
+    "backend/tests/test_planned_fusion.py",
+    "backend/tests/test_planned_retrieval.py",
+    "backend/tests/test_planner_vocab_selection.py",
+    "backend/tests/test_polymath_mcp_ingest_tools.py",
+    "backend/tests/test_polymath_mcp_query_tools.py",
+    "backend/tests/test_prefilter.py",
+    "backend/tests/test_private_vllm_capacity.py",
+    "backend/tests/test_projection_manifest.py",
+    "backend/tests/test_projection_outbox.py",
+    "backend/tests/test_promote.py",
+    "backend/tests/test_proposition_chunking.py",
+    "backend/tests/test_protected_anchors.py",
+    "backend/tests/test_provider_canary_cache.py",
+    "backend/tests/test_provider_lane_health.py",
+    "backend/tests/test_provider_preset_migration.py",
+    "backend/tests/test_pt10_bundle.py",
+    "backend/tests/test_pt8_idempotency.py",
+    "backend/tests/test_q8_evidence_dual_write.py",
+    "backend/tests/test_q8_shadow_read.py",
+    "backend/tests/test_q9_parse_policy.py",
+    "backend/tests/test_qdrant_writer.py",
+    "backend/tests/test_query_embedding_batch.py",
+    "backend/tests/test_query_guided_excerpt.py",
+    "backend/tests/test_query_ir_contract.py",
+    "backend/tests/test_query_model_fallback.py",
+    "backend/tests/test_query_model_pool.py",
+    "backend/tests/test_query_plan_trace_contract.py",
+    "backend/tests/test_query_plan_v2.py",
+    "backend/tests/test_query_semantics.py",
+    "backend/tests/test_queue_integrity.py",
+    "backend/tests/test_registry_loader.py",
+    "backend/tests/test_relation_stage_trace.py",
+    "backend/tests/test_relationship_evidence_feature_flag.py",
+    "backend/tests/test_release_registry_loader.py",
+    "backend/tests/test_release_stamp_step3.py",
+    "backend/tests/test_release_state_contract.py",
+    "backend/tests/test_relex_fixture_baseline.py",
+    "backend/tests/test_relex_gate.py",
+    "backend/tests/test_relex_local_microbatch.py",
+    "backend/tests/test_repair_scheduler.py",
+    "backend/tests/test_rerank_text_hydration.py",
+    "backend/tests/test_reranker_bypass.py",
+    "backend/tests/test_research_artifacts.py",
+    "backend/tests/test_research_context.py",
+    "backend/tests/test_research_orchestrator.py",
+    "backend/tests/test_resource_planner.py",
+    "backend/tests/test_retrieval_cache_epoch.py",
+    "backend/tests/test_retrieval_curation_v4.py",
+    "backend/tests/test_retrieval_eval_metrics.py",
+    "backend/tests/test_retrieval_intent_policy.py",
+    "backend/tests/test_retrieval_quality_invariants.py",
+    "backend/tests/test_retrieval_ranking_policy.py",
+    "backend/tests/test_retrieval_readiness.py",
+    "backend/tests/test_retrieval_three_tier_validation.py",
+    "backend/tests/test_retrieval_tier_boundaries.py",
+    "backend/tests/test_retriever_identity_hydration.py",
+    "backend/tests/test_retriever_merge.py",
+    "backend/tests/test_retriever_source_labels.py",
+    "backend/tests/test_retriever_sufficiency_repair.py",
+    "backend/tests/test_roblox_extractor.py",
+    "backend/tests/test_roblox_ontology.py",
+    "backend/tests/test_route_readiness_certificate.py",
+    "backend/tests/test_runpod_embed_mode.py",
+    "backend/tests/test_runpod_flash_extraction.py",
+    "backend/tests/test_runpod_green_lockdown.py",
+    "backend/tests/test_runpod_local_extraction.py",
+    "backend/tests/test_runpod_multi_account.py",
+    "backend/tests/test_runpod_relations_forward_path.py",
+    "backend/tests/test_schema_control.py",
+    "backend/tests/test_schema_lens.py",
+    "backend/tests/test_schema_validators.py",
+    "backend/tests/test_search_mode.py",
+    "backend/tests/test_searchable_text.py",
+    "backend/tests/test_section_classifier.py",
+    "backend/tests/test_section_classifier_citations.py",
+    "backend/tests/test_semantic_digest.py",
+    "backend/tests/test_semantic_digest_claim_inputs.py",
+    "backend/tests/test_semantic_gateway.py",
+    "backend/tests/test_semantic_gateway_mark_atomic_b4.py",
+    "backend/tests/test_semantic_gateway_mark_atomic_preflight.py",
+    "backend/tests/test_semantic_gateway_mark_paid_pass.py",
+    "backend/tests/test_semantic_gateway_mark_prose_phase2.py",
+    "backend/tests/test_semantic_gateway_mark_sentence_hybrid_canary.py",
+    "backend/tests/test_semantic_gateway_mark_sentence_hybrid_preflight.py",
+    "backend/tests/test_semantic_gateway_ugo_canary.py",
+    "backend/tests/test_semantic_observations.py",
+    "backend/tests/test_semantic_parent_eligibility.py",
+    "backend/tests/test_semantic_resolution.py",
+    "backend/tests/test_semantic_validator.py",
+    "backend/tests/test_shelf_engine.py",
+    "backend/tests/test_shelf_reserve_wiring.py",
+    "backend/tests/test_source_identity.py",
+    "backend/tests/test_source_identity_repair.py",
+    "backend/tests/test_source_parse_jobs.py",
+    "backend/tests/test_sparse_encoder.py",
+    "backend/tests/test_stage_identity.py",
+    "backend/tests/test_stage_identity_repair.py",
+    "backend/tests/test_storage_lifecycle.py",
+    "backend/tests/test_stream_retry.py",
+    "backend/tests/test_structured_output_capabilities.py",
+    "backend/tests/test_summary_backfill_scoped.py",
+    "backend/tests/test_summary_cost_control.py",
+    "backend/tests/test_summary_jobs.py",
+    "backend/tests/test_summary_provider_not_required.py",
+    "backend/tests/test_summary_readiness_baseline.py",
+    "backend/tests/test_summary_semantics.py",
+    "backend/tests/test_summary_semantics_latent.py",
+    "backend/tests/test_summary_semantics_temporal.py",
+    "backend/tests/test_summary_tree.py",
+    "backend/tests/test_summary_tree_llm.py",
+    "backend/tests/test_summary_tree_metadata_backfill.py",
+    "backend/tests/test_summary_tree_navigator.py",
+    "backend/tests/test_suppression_counter_coverage.py",
+    "backend/tests/test_symbols_called_backfill.py",
+    "backend/tests/test_synthesis_concrete_output.py",
+    "backend/tests/test_synthesis_route_override.py",
+    "backend/tests/test_table_pipeline.py",
+    "backend/tests/test_temporal_canonical_window.py",
+    "backend/tests/test_temporal_capture_contract.py",
+    "backend/tests/test_temporal_contract.py",
+    "backend/tests/test_temporal_policy_registry.py",
+    "backend/tests/test_temporal_query_routing.py",
+    "backend/tests/test_thinking_deepseek.py",
+    "backend/tests/test_thinking_effort_wiring.py",
+    "backend/tests/test_thinking_glm.py",
+    "backend/tests/test_thinking_mistral.py",
+    "backend/tests/test_thinking_ollama.py",
+    "backend/tests/test_tier0_bridge_diagnostic_runner.py",
+    "backend/tests/test_tier0_document_routing.py",
+    "backend/tests/test_tier0_ingestion.py",
+    "backend/tests/test_tier3_tool_capability_probe.py",
+    "backend/tests/test_tier_chunker.py",
+    "backend/tests/test_tree_concepts.py",
+    "backend/tests/test_two_lane_anchoring.py",
+    "backend/tests/test_two_lane_canonical_window.py",
+    "backend/tests/test_two_lane_zero_provider_diagnosis.py",
+    "backend/tests/test_universal_schema.py",
+    "backend/tests/test_validation_error_handler.py",
+    "backend/tests/test_verify_summary_expectation.py",
+    "backend/tests/test_vocabulary_bundle_contract.py",
+    "backend/tests/test_vocabulary_cache.py",
+    "backend/tests/test_vocabulary_resolver.py",
+    "backend/tests/test_waterfall.py",
+    "backend/tests/test_waterfall_pressure_diagnostic.py",
+    "backend/tests/test_web_freshness.py",
+    "backend/tests/test_web_query_builder.py",
+    "backend/tests/test_web_query_enrichment.py",
+    "backend/tests/test_web_toggle_mandatory_e2e.py",
+    "backend/tests/test_worker_phases.py",
+    "backend/tests/test_worker_summary_control_plane.py",
+    "frontend/tests/e2e/api_keys.spec.ts",
+    "frontend/tests/e2e/autoresearch-ingest.spec.ts",
+    "frontend/tests/e2e/autoresearch-ui-query.spec.ts",
+    "frontend/tests/e2e/conversation_bug.spec.ts",
+    "frontend/tests/e2e/corpus_audit.spec.ts",
+    "frontend/tests/e2e/dropdown_audit.spec.ts",
+    "frontend/tests/e2e/duplicates-panel.spec.ts",
+    "frontend/tests/e2e/facts-counter.spec.ts",
+    "frontend/tests/e2e/ingestion-walkthrough.spec.ts",
+    "frontend/tests/e2e/library-panel.spec.ts",
+    "frontend/tests/e2e/live-animation.spec.ts",
+    "frontend/tests/e2e/live-trace-tabs.spec.ts",
+    "frontend/tests/e2e/modal-key-location.spec.ts",
+    "frontend/tests/e2e/modal-runtime-ui.spec.ts",
+    "frontend/tests/e2e/modal_deploy_panel.spec.ts",
+    "frontend/tests/e2e/modal_e2e.spec.ts",
+    "frontend/tests/e2e/model-pool-tab.spec.ts",
+    "frontend/tests/e2e/models_tab.spec.ts",
+    "frontend/tests/e2e/phase_1_flow.spec.ts",
+    "frontend/tests/e2e/rag_pipeline.spec.ts",
+    "frontend/tests/e2e/reasoning-trace.spec.ts",
+    "frontend/tests/e2e/retrieval-agent-hyde.spec.ts",
+    "frontend/tests/e2e/settings_toggle.spec.ts",
+    "frontend/tests/e2e/stale-state-and-images.spec.ts",
+    "frontend/tests/e2e/tabs-compare.spec.ts",
+    "frontend/tests/e2e/three-tabs-audit.spec.ts",
+    "frontend/tests/e2e/ui_audit.spec.ts",
+    "frontend/tests/unit/book-meta.test.ts",
+    "runpod_flash_embedder/test_app.py",
+    "runpod_flash_extractor/test_app.py",
+    "runpod_flash_extractor/test_custom_image_handler.py",
+    "scripts/apple_ml_services/test_start_ghost_b_guard.sh"
+  ]
+}

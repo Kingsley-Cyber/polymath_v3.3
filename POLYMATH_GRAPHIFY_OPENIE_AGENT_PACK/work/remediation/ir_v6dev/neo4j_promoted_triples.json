@@ -1,0 +1,114 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "evidence packet",
+    "object_entity_id": "entity:evidence-packet",
+    "predicate": "produces",
+    "subject": "candidate passages",
+    "subject_entity_id": "entity:candidate-passages"
+  },
+  {
+    "evidence_count": 0,
+    "object": "helix 2",
+    "object_entity_id": "entity:helix-2",
+    "predicate": "uses",
+    "subject": "deltagraph",
+    "subject_entity_id": "entity:deltagraph"
+  },
+  {
+    "evidence_count": 0,
+    "object": "orion benchmark",
+    "object_entity_id": "entity:orion-benchmark",
+    "predicate": "uses",
+    "subject": "deltagraph",
+    "subject_entity_id": "entity:deltagraph"
+  },
+  {
+    "evidence_count": 0,
+    "object": "qdrant",
+    "object_entity_id": "entity:qdrant",
+    "predicate": "uses",
+    "subject": "deltagraph 1 3",
+    "subject_entity_id": "entity:deltagraph-1-3"
+  },
+  {
+    "evidence_count": 0,
+    "object": "accepted answers",
+    "object_entity_id": "entity:accepted-answers",
+    "predicate": "supports",
+    "subject": "evidence packets",
+    "subject_entity_id": "entity:evidence-packets"
+  },
+  {
+    "evidence_count": 0,
+    "object": "argus",
+    "object_entity_id": "entity:argus",
+    "predicate": "depends_on",
+    "subject": "northwind evaluation group",
+    "subject_entity_id": "entity:northwind-evaluation-group"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raven",
+    "object_entity_id": "entity:raven",
+    "predicate": "supports",
+    "subject": "northwind evaluation group",
+    "subject_entity_id": "entity:northwind-evaluation-group"
+  },
+  {
+    "evidence_count": 0,
+    "object": "evidence packet",
+    "object_entity_id": "entity:evidence-packet",
+    "predicate": "produces",
+    "subject": "qdrant",
+    "subject_entity_id": "entity:qdrant"
+  },
+  {
+    "evidence_count": 0,
+    "object": "argus",
+    "object_entity_id": "entity:argus",
+    "predicate": "depends_on",
+    "subject": "raven",
+    "subject_entity_id": "entity:raven"
+  },
+  {
+    "evidence_count": 0,
+    "object": "evidence packet",
+    "object_entity_id": "entity:evidence-packet",
+    "predicate": "produces",
+    "subject": "raven",
+    "subject_entity_id": "entity:raven"
+  },
+  {
+    "evidence_count": 0,
+    "object": "orion",
+    "object_entity_id": "entity:orion",
+    "predicate": "uses",
+    "subject": "redwood ai lab",
+    "subject_entity_id": "entity:redwood-ai-lab"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raven",
+    "object_entity_id": "entity:raven",
+    "predicate": "supports",
+    "subject": "semantic cache",
+    "subject_entity_id": "entity:semantic-cache"
+  },
+  {
+    "evidence_count": 0,
+    "object": "citation recall",
+    "object_entity_id": "entity:citation-recall",
+    "predicate": "defines",
+    "subject": "solano",
+    "subject_entity_id": "entity:solano"
+  },
+  {
+    "evidence_count": 0,
+    "object": "governing source statement",
+    "object_entity_id": "entity:governing-source-statement",
+    "predicate": "part_of",
+    "subject": "whose cited passages",
+    "subject_entity_id": "entity:whose-cited-passages"
+  }
+]

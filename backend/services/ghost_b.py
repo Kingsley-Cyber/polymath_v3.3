@@ -273,7 +273,8 @@ UNIVERSAL_RELATION_GLOSSES: dict[str, str] = {
     "affiliated_with": "X loosely tied to Y not member",
     "synonym_of":      "X same entity as Y",
     "instance_of":     "X is a Y subclass or kind",
-    "uses":            "X consumes or invokes Y",
+    "uses":            "X invokes or operates through Y",
+    "consumes":        "X consumes Y as an input",
     "runs_on":         "X executes on Y",
     "trained_on":      "X learns from Y",
     "references":      "X cites Y",
@@ -468,7 +469,7 @@ RELATION_ALIAS_MAP: dict[str, tuple[str, bool]] = {
     "uses": ("uses", False),
     "using": ("uses", False),
     "utilizes": ("uses", False),
-    "consumes": ("uses", False),
+    "consumes": ("consumes", False),
     "used_by": ("uses", True),
     "used_for": ("uses", False),
     "reads": ("uses", False),
@@ -2075,6 +2076,17 @@ class ExtractionResult:
     # relation.
     evidence_drop_count: int = 0
     fact_drop_count: int = 0
+
+    # R-pre (2026-07-30) — FULL per-chunk suppression/qualifier counter map.
+    # The four *_drop_count fields above are the only counters that ever
+    # reached durable storage; every suppression rule in the deterministic
+    # relation lane (including all three P2 structural guards) incremented a
+    # named counter that was then garbage-collected at the emit boundary.
+    # Keys come from dep_path_extractor.ALL_COUNTER_KEYS — zero-initialized, so
+    # "guard never fired" stays distinguishable from "guard not wired".
+    # Empty dict = extraction predates R-pre, NOT "nothing was suppressed".
+    extraction_counters: dict[str, int] = field(default_factory=dict)
+
     schema_lens_id: str | None = None
     model: str = ""
     provider: str = ""
@@ -2692,6 +2704,15 @@ def _repair_relation_from_evidence(
     counters: dict[str, int],
 ) -> RelationItem:
     if relation.object_kind != "entity":
+        return relation
+    if (
+        relation.validation_status
+        and "accepted" in relation.validation_status
+        and relation.source_predicate == relation.predicate
+    ):
+        # Compiler-authoritative relation (Graphify deterministic compiler):
+        # the compiled canonical predicate is never re-guessed from evidence.
+        # The model proposes, the compiler interprets — promotion projects.
         return relation
     evidence = f"{relation.evidence_phrase} {relation.relation_cue}".lower()
     if not evidence.strip():

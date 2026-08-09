@@ -1,0 +1,33 @@
+{
+  "fixture": "07_acronym_coreference.md",
+  "purpose": "Acronym and short-form identity: an acronym defined once must unify with its full name even when the name contains lowercase connectors ('and', 'of'); a titled person's short form (Dr. Osei) must unify with the full name. One node per identity; edges attach regardless of which form the sentence used.",
+  "declared_aliases": [
+    {"canonical": "Berth Allocation and Utilization Engine", "aliases": ["BAUE"]},
+    {"canonical": "Cargo Manifest Reconciliation Service", "aliases": ["CMRS"]},
+    {"canonical": "Dr. Nadia Osei", "aliases": ["Dr. Osei"]}
+  ],
+  "items": [
+    {"id": "AC01", "check": "positive", "evidence": "The BAUE consumes the Tide Forecast Feed.",
+     "expect": {"type": "canonical", "subject": "Berth Allocation and Utilization Engine", "predicate": "consumes", "object": "Tide Forecast Feed", "status": "ASSERTED_TRUE"},
+     "must_not": {"entities": ["Utilization Engine (as a standalone node distinct from the full name)"], "notes": "the acronym-definition regex must span lowercase connectors; a truncated alias like 'Utilization Engine' is the DCU failure class"}},
+    {"id": "AC02", "check": "positive", "evidence": "The BAUE produces the Daily Berth Ledger.",
+     "expect": {"type": "canonical", "subject": "Berth Allocation and Utilization Engine", "predicate": "produces", "object": "Daily Berth Ledger", "status": "ASSERTED_TRUE"}},
+    {"id": "AC03", "check": "positive", "evidence": "The CMRS depends on the Registry of Vessel Identities.",
+     "expect": {"type": "canonical", "subject": "Cargo Manifest Reconciliation Service", "predicate": "depends_on", "object": "Registry of Vessel Identities", "status": "ASSERTED_TRUE"}},
+    {"id": "AC04", "check": "positive", "evidence": "Tidewatch Systems owns the CMRS.",
+     "expect": {"type": "canonical", "subject": "Tidewatch Systems", "predicate": "owns", "object": "Cargo Manifest Reconciliation Service", "status": "ASSERTED_TRUE"}},
+    {"id": "AC05", "check": "positive", "evidence": "Dr. Osei owns the Berth Fairness Charter.",
+     "expect": {"type": "canonical", "subject": "Dr. Nadia Osei", "predicate": "owns", "object": "Berth Fairness Charter", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "graph must hold ONE person node; 'dr osei' and 'dr nadia osei' as two nodes is the failure"}},
+    {"id": "AC06", "check": "positive", "evidence": "The Quay Analytics Group supports Dr. Nadia Osei with two reviewers.",
+     "expect": {"type": "canonical", "subject": "Quay Analytics Group", "predicate": "supports", "object": "Dr. Nadia Osei", "status": "ASSERTED_TRUE"},
+     "must_not": {"entities": ["two reviewers"]}},
+    {"id": "AC07", "check": "positive", "evidence": "Dr. Nadia Osei leads the Quay Analytics Group.",
+     "expect": {"type": "open", "subject": "Dr. Nadia Osei", "surface_predicate": "leads", "object": "Quay Analytics Group", "any_of": ["related_to"], "status": "ASSERTED_TRUE"}}
+  ],
+  "negative_entities": ["two reviewers", "arrival windows", "incoming manifests"],
+  "invariants": [
+    "one node per identity: {BAUE, Berth Allocation and Utilization Engine} -> 1 node; {CMRS, ...Service} -> 1 node; {Dr. Osei, Dr. Nadia Osei} -> 1 node",
+    "no truncated-alias node whose name is a capitalized suffix of a defined full name"
+  ]
+}

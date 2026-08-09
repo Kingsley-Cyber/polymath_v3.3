@@ -1,0 +1,15 @@
+# Domain pack: software systems / architecture prose.
+version: "1.0"
+cues: [api, service, database, queue, pipeline, deployment, container, endpoint,
+       schema, latency, gateway, worker, cache, authentication, microservice]
+entity_labels:
+  Service_Component: {description: a named running software service or component, core: software, facet: service}
+  Data_Store: {description: a named database, index, or persistent store, core: software, facet: data_store}
+  Data_Artifact: {description: a named payload, record set, or stored data object, core: artifact, facet: data_artifact}
+  Interface_Contract: {description: a named API, protocol, or schema contract, core: standard, facet: interface}
+native_predicates:
+  writes to: {canonical: produces, status: broader}
+  reads from: {canonical: consumes, status: broader}
+  deployed on: {canonical: runs_on, status: exact}
+  routes to: {canonical: uses, status: broader}
+  authenticates against: {canonical: depends_on, status: broader}

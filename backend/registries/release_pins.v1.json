@@ -1,0 +1,16 @@
+{
+  "schema_version": "release_pins.v1",
+  "registry": "release_pins",
+  "authority": "owner-issued only; the executor may propose an entry with status 'proposed' but never activates a release",
+  "changes_require_new_version": true,
+  "source": "CONTINUITY/TEMPORAL_CONTRACT_V1.md; CONTINUITY/QUERY_MINIMAL_IMPLEMENTATION_PLAN.md control-plane design",
+  "policy_note": "Active release registry for canonical graph-write authority. Exactly one entry may carry status 'active'. Each entry's entry_hash is sha256 over the canonical JSON serialization of the entry WITHOUT the entry_hash field itself. The loader fails closed on any ambiguity; a fail-closed resolution is equivalent to no active release, and deny-by-default graph_write_allowed then refuses every canonical graph write. ReleaseStamp and TemporalEnvelope payloads are descriptive identity and can never be consumed as write authority.",
+  "entry_contract": {
+    "entry_id": "release:<release-id>",
+    "status": "proposed | active | superseded | revoked",
+    "entry_hash": "sha256:<canonical-entry-hash-without-entry_hash>",
+    "issued_at": "ISO-8601 UTC",
+    "release_pin": "complete models.release_state.ReleasePin payload (extra fields forbidden)"
+  },
+  "entries": []
+}

@@ -41,6 +41,10 @@ class ChunkKind:
     CODE = "code"
     TABLE = "table"
     LINKS = "links"
+    # Mixed-content book lane — program output / console transcripts that
+    # accompany a code example, and figure/table/listing caption lines.
+    OUTPUT = "output"
+    CAPTION = "caption"
 
 
 ALL_KINDS: tuple[str, ...] = (
@@ -54,22 +58,36 @@ ALL_KINDS: tuple[str, ...] = (
     ChunkKind.CODE,
     ChunkKind.TABLE,
     ChunkKind.LINKS,
+    ChunkKind.OUTPUT,
+    ChunkKind.CAPTION,
 )
 
 # Kinds the default retrieval filter excludes. CODE is first-class
 # retrievable content (programming-textbook listings, source files), and TABLE
-# is first-class structured evidence. Both are kept alongside BODY. The
+# is first-class structured evidence. Both are kept alongside BODY. OUTPUT
+# (console transcripts) and CAPTION (figure/table captions) are likewise
+# first-class mixed-content evidence: debugging queries must reach the output,
+# and figure captions carry the explanation that gives a figure meaning. The
 # retriever also keeps any chunk where
 # `chunk_kind` is missing entirely (legacy data).
-_RETRIEVABLE: tuple[str, ...] = (ChunkKind.BODY, ChunkKind.CODE, ChunkKind.TABLE)
+_RETRIEVABLE: tuple[str, ...] = (
+    ChunkKind.BODY,
+    ChunkKind.CODE,
+    ChunkKind.TABLE,
+    ChunkKind.OUTPUT,
+    ChunkKind.CAPTION,
+)
 NOISY_KINDS: tuple[str, ...] = tuple(k for k in ALL_KINDS if k not in _RETRIEVABLE)
 
 # Kinds for which Ghost B extraction is skipped at ingest. CODE joins the
 # noisy kinds here even though it's retrievable — Ghost B's universal
 # schema hallucinates Method/Artifact entities on raw code fragments.
+# OUTPUT joins for the same reason: raw console transcripts are not prose.
 # Deterministic AST extraction will replace Ghost B for code chunks in a
 # later phase.
-GHOST_B_SKIP_KINDS: frozenset[str] = frozenset(list(NOISY_KINDS) + [ChunkKind.CODE])
+GHOST_B_SKIP_KINDS: frozenset[str] = frozenset(
+    list(NOISY_KINDS) + [ChunkKind.CODE, ChunkKind.OUTPUT]
+)
 
 # Parent-summary generation is narrower than "retrievable": body prose and
 # tables benefit from parent summaries, while code remains child-level evidence

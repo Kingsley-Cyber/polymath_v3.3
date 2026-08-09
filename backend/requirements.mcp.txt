@@ -5,9 +5,17 @@
 # anyio<4). MCP doesn't need FastAPI — the streamable-HTTP server uses
 # Starlette directly. Document parsers, slowapi, transformers, etc. are
 # also excluded (not in any MCP code path).
+#
+# NOTE (2026-07-25): spaCy was added below. The original "slim" claim above
+# predates the runpod_wire_contract=local_extraction_v1 default, which routes
+# MCP-side ingestion through runpod_local_extraction._load_nlp(). That code
+# runs build_spacy_observation_bundle locally on RunPod output, so MCP needs
+# the same spaCy + en_core_web_sm pin as the backend and the RunPod image.
 
 # === MCP SDK ===
-mcp>=1.2.0
+# Pin <2.0: mcp 2.0.0 removed mcp.server.fastmcp (2026-08-03 float broke the
+# server import; polymath_mcp/server.py builds on FastMCP).
+mcp>=1.2.0,<2.0
 uvicorn[standard]>=0.27.0
 starlette>=0.36.0
 
@@ -37,6 +45,16 @@ bcrypt<4.0
 
 # === Token counting (services.context_manager imports tiktoken at module level) ===
 tiktoken==0.5.2
+
+# === spaCy — required by services.runpod_local_extraction._load_nlp() which
+#     runs build_spacy_observation_bundle locally on RunPod output for the
+#     local_extraction_v1 wire contract. Every active polymath corpus uses
+#     this contract by default, so MCP must run the same spaCy pipeline the
+#     backend does. Pin matches backend/requirements.txt and
+#     runpod_flash_extractor/requirements.custom-image.in (B7 lock).
+#     See CONTINUITY/spacy-mcp-fix-20260725.md for full diagnosis. ===
+spacy==3.8.14
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
 
 # === Discourse / graph analytics (services.discourse pulls networkx) ===
 networkx==3.2.1

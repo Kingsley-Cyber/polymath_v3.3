@@ -1,0 +1,56 @@
+{
+  "counts": {
+    "gold_positive": 66,
+    "matched_positive": 53,
+    "neo4j_promoted_all_predicates": 74,
+    "neo4j_promoted_in_gold_ontology": 72,
+    "neo4j_promoted_out_of_gold_ontology": 2,
+    "unmatched_gold": 13,
+    "unmatched_promoted": 19
+  },
+  "failure_taxonomy_counts": {
+    "ARGUMENT_ALIGNMENT": 0,
+    "ATTRIBUTION": 0,
+    "CONDITIONAL_SCOPE": 0,
+    "DIRECTION": 0,
+    "ENTITY_TYPE": 3,
+    "GATE_POLICY": 2,
+    "MISSING_PAIR": 6,
+    "MODALITY": 0,
+    "POLARITY": 0,
+    "PREDICATE_MAPPING": 2
+  },
+  "freeze_id": "technical-book-66-v1",
+  "match_class_counts": {
+    "DECLARED_ALIAS": 0,
+    "DECLARED_SUBSUMPTION": 0,
+    "EXACT": 0,
+    "NORMALIZED_VARIANT": 53,
+    "NO_MATCH": 13
+  },
+  "matching_policy_sha256": "9de099dbec4053be29fd0113b55759c4d186b68783b9cc68098b4ea04298b393",
+  "matching_policy_version": "technical-book-66-matching-v2",
+  "metrics": {
+    "f1": 0.7681159420289856,
+    "precision": 0.7361111111111112,
+    "recall": 0.803030303030303
+  },
+  "namespace": "technical_book_stress_v1",
+  "out_of_ontology_promoted_predicates": {
+    "stores": 2
+  },
+  "prohibited_matchers_used": [],
+  "recall_checkpoints": {
+    "correct_canonical_assertion_promoted": 53,
+    "correct_surface_proposition_generated": 54,
+    "endpoint_pair_generated": 57,
+    "gold_total": 66,
+    "recall": {
+      "correct_canonical_assertion_promoted": 0.803030303030303,
+      "correct_surface_proposition_generated": 0.8181818181818182,
+      "endpoint_pair_generated": 0.8636363636363636
+    }
+  },
+  "scorer_version": "stress-answer-key-scorer-v3-ontology-scoped-taxonomy",
+  "status": "passed"
+}

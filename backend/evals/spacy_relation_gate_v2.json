@@ -1,0 +1,61 @@
+{
+  "schema_version": "polymath.spacy_relation_gate.v2",
+  "preregistered_at_utc": "2026-07-30T00:00:00Z",
+  "authority": {
+    "owner_decision": "PENDING — preregistered BEFORE the first scoring run of the frame-licensed pairing model",
+    "change_policy": "immutable_after_first_decisive_inference; changes require a new version and a new pre-run hash"
+  },
+  "why_v2_exists": {
+    "v1_defect": "spacy_relation_gate_v1 reports P=1.000 on 15 hand-picked clean-prose relations. Hand-judged on live corpus text the same extractor measured 0.10-0.15. v1 does not generalize and actively misled every plan built on it, including the recall ladder that this program started as.",
+    "v1_status": "RETAINED, FROZEN, and rerun every change as a regression canary. v1 is not deleted — it is demoted from instrument to canary.",
+    "n20_defect": "The 20-edge spot-checks that drove the pairing rebuild are directionally sound but cannot certify a threshold. At n=20 the 95% Wilson interval around 0.80 is approximately [0.56, 0.94]. A 357,846-chunk backfill cannot be authorized by an interval that wide."
+  },
+  "purpose": "Decide whether the frame-licensed pairing model emits asserted graph edges at high enough PRECISION to authorize durable writes. Precision is the binding constraint: yield is deliberately low (~0.07 relations/chunk) because the graph is empty, so a missed relation costs nothing recoverable while a wrong edge is permanent damage.",
+  "decision_base": {
+    "unit": "one EMITTED relation, judged against its own evidence sentence",
+    "population": "relations emitted by the frame model with is_graph_edge=True — i.e. exactly the set that would be written by a backfill",
+    "judgement": {
+      "CORRECT": "the evidence sentence asserts this subject/predicate/object with this direction",
+      "WRONG": "it does not — includes reversed direction, wrong argument bound, predicate not supported, or formatting artifact",
+      "BORDERLINE": "defensible either way; counted as WRONG for scoring (conservative), reported separately"
+    },
+    "why_precision_only": "This gate measures precision, NOT recall. Recall requires hand-authored gold (every true relation per chunk), which is a separate and much larger labeling effort. It is deliberately deferred: recall is not currently the binding constraint and building it now would delay the decision that is."
+  },
+  "sampling": {
+    "source_sample": "backend/scripts/rpre_export_sample.py, deterministic stride over chunk_id, 5 live corpora",
+    "strata": ["book", "paper", "asr"],
+    "min_per_stratum": 40,
+    "min_total": 120,
+    "selection": "deterministic stride over the emitted-relation list ordered by (chunk_id, subject, predicate, object); no RNG, so the sample is reproducible from the same corpus state",
+    "frame_type_coverage_required": ["active_transitive", "possessive", "prep_object"],
+    "min_distinct_predicates": 8
+  },
+  "pass_gate": {
+    "precision_floor": 0.80,
+    "measured_on": "point estimate over all judged relations",
+    "ci_requirement": {
+      "method": "Wilson score interval, 95%",
+      "rule": "the LOWER BOUND must be >= 0.70",
+      "rationale": "A point estimate at 0.80 with a lower bound of 0.56 does not justify writing 357,846 chunks. Requiring the lower bound to clear 0.70 forces the sample to be large enough that the decision is not an artifact of sample size."
+    },
+    "per_stratum_rule": "no stratum may fall below 0.65; a stratum that does is EXCLUDED from backfill rather than dragging the whole corpus down or being hidden inside a favorable average",
+    "verdict_if_failed": "backfill stays GATED; residual error taxonomy is written and the next fix targets the largest class"
+  },
+  "anti_gaming_rules": [
+    "Thresholds and method are fixed in this file BEFORE any scoring run. Committed prior to sampling.",
+    "BORDERLINE counts as WRONG. Ambiguity never inflates the score.",
+    "Every judged item is persisted with its evidence and a one-line reason, so the owner can audit or overturn any call.",
+    "A stratum below floor is excluded and reported, never averaged away.",
+    "The judge is the same agent that wrote the extractor. This is a REAL conflict of interest and is recorded as a known limitation: the per-item worksheet exists so the owner can re-judge independently."
+  ],
+  "known_limitations": [
+    "Single judge, who is also the author of the code under test.",
+    "Precision only; recall unmeasured by design.",
+    "Evidence sentences are truncated to 500 chars at the adapter boundary, so a few items are judged on partial context. Those are marked BORDERLINE.",
+    "The corpus sample is drawn from 5 corpora that were all extracted by the RunPod lane; entity spans therefore come from that tagger's vocabulary."
+  ],
+  "artifacts": {
+    "worksheet": "docs/baselines/GATE_V2_JUDGEMENTS_2026-07-30.jsonl",
+    "result": "docs/baselines/GATE_V2_RESULT_2026-07-30.json"
+  }
+}

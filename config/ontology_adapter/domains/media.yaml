@@ -1,0 +1,14 @@
+# Domain pack: film / video / media production and analysis writing.
+version: "1.0"
+cues: [video, camera, scene, frame, shot, audio, footage, editing, timeline,
+       motion, animation, render, cinematic, choreography, performance]
+entity_labels:
+  Media_Segment: {description: a named scene, shot, sequence, or clip within media, core: artifact, facet: media_segment}
+  Production_Technique: {description: a named filming, editing, or performance technique, core: method, facet: technique}
+  Media_Signal: {description: a named extracted signal or track from media such as motion or audio data, core: artifact, facet: media_signal}
+  Creative_Work: {description: a named film, video, show, or media production, core: document, facet: creative_work}
+native_predicates:
+  depicts: {canonical: null, status: OPEN}
+  synchronized with: {canonical: related_to, status: broader}
+  rendered from: {canonical: derived_from, status: exact}
+  compiled into: {canonical: null, status: OPEN}

@@ -1,0 +1,12 @@
+# Domain pack: general scientific/technical research writing.
+version: "1.0"
+cues: [hypothesis, experiment, measurement, baseline, evaluation, methodology,
+       results, analysis, protocol, sample, observation, calibration]
+entity_labels:
+  Research_Method: {description: a named experimental or analytical method, core: method, facet: research_method}
+  Measured_Quantity: {description: a named measured or derived quantity, core: concept, facet: quantity}
+  Research_Artifact: {description: a named produced research object such as a corpus or benchmark, core: artifact, facet: research_artifact}
+native_predicates:
+  correlates with: {canonical: related_to, status: broader}
+  predicts: {canonical: null, status: OPEN}
+  validated by: {canonical: null, status: OPEN}

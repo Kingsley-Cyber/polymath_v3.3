@@ -1,0 +1,74 @@
+{
+  "answer_key": "/Users/king/Downloads/sealed_qualification_v2/answer_key/gold_triples.json",
+  "artifact_digest": "157757e56fdbe4f1219247b5b75766c10f3c87944f617140eae64db1e65c5055",
+  "corpus_id": "8d45525c-b57e-50f6-8a4f-0698a9b22fd8",
+  "counts": {
+    "gold_positive": 26,
+    "matched_positive": 0,
+    "missing_positive": 26,
+    "neo4j_promoted_positive": 11,
+    "qualified_gold": 1,
+    "qualified_leaked_to_positive": 0,
+    "qualified_retained": 0,
+    "unmatched_promoted": 11
+  },
+  "document_id": "dd5e615a593dca8288d31fc4407ced0119e3a7c4316835e95e569102513c96f3",
+  "elapsed_seconds": 178.81063670798903,
+  "gates": {
+    "positive_count_58_to_72": false,
+    "positive_recall_at_least_0_80": false,
+    "projection_idempotent": true,
+    "qualified_positive_leakage_zero": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 11,
+      "assertion_support": 11,
+      "mentions": 55,
+      "nodes": 25,
+      "relations": 11
+    },
+    "digest": "c41035c28a7bcc79737358a17c7eaf9ecbd7a0683d889e08868b9c00efd5e437",
+    "repeat_digest": "c41035c28a7bcc79737358a17c7eaf9ecbd7a0683d889e08868b9c00efd5e437"
+  },
+  "matched_ids": [],
+  "metrics": {
+    "f1": 0.0,
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "missing_ids": [
+    "T001",
+    "T002",
+    "T003",
+    "T004",
+    "T005",
+    "T006",
+    "T007",
+    "T008",
+    "T009",
+    "T010",
+    "T011",
+    "T012",
+    "T013",
+    "T014",
+    "T015",
+    "T016",
+    "T017",
+    "T018",
+    "T019",
+    "T020",
+    "T021",
+    "T022",
+    "T023",
+    "T024",
+    "T025",
+    "T026"
+  ],
+  "mongo_database": "graphify_e2e_sealed_v2_dev_cycle2_0248e014",
+  "namespace": "sealed_v2_dev_cycle2",
+  "qualified_leaks": [],
+  "qualified_retained_ids": [],
+  "source": "/Users/king/Downloads/sealed_qualification_v2/source/document.md",
+  "status": "failed"
+}

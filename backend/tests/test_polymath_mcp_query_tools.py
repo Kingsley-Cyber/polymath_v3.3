@@ -309,11 +309,24 @@ async def test_mcp_graph_discover_forwards_multi_corpus_modes(monkeypatch, syste
         )
 
     import services.graph.orchestrator as graph_orchestrator
+    import services.ingestion.route_readiness as route_readiness
+    from models.release_state import ReadinessDecision
+
+    async def allowed_decision(db, corpus_id, route, **_kwargs):
+        return ReadinessDecision(
+            corpus_id=corpus_id,
+            route=route,
+            allowed=True,
+            mode="full",
+            required_artifacts=("graph_projection", "release_pin_match"),
+        )
 
     monkeypatch.setattr(mcp_tools, "_scope_corpus_ids", AsyncMock(return_value=["c1", "c2"]))
     monkeypatch.setattr(mcp_tools.ingestion_service, "_qdrant", object())
     monkeypatch.setattr(mcp_tools.ingestion_service, "_db", object())
     monkeypatch.setattr(graph_orchestrator, "discover", fake_discover)
+    # §4.2 gate: graph reads proceed only when the route decision allows.
+    monkeypatch.setattr(route_readiness, "decide_corpus_route", allowed_decision)
 
     result = await mcp_tools.polymath_graph_query(
         query="compare user modeling and knowledge graphs",
@@ -330,6 +343,51 @@ async def test_mcp_graph_discover_forwards_multi_corpus_modes(monkeypatch, syste
     assert captured["synthesis_mode"] == "nuance"
     assert captured["validate_synthesis"] is True
     assert captured["agentic"] is True
+    readiness = result["readiness_decisions"]
+    assert readiness["c1"]["allowed"] is True
+    assert readiness["c2"]["allowed"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_graph_discover_blocked_without_route_readiness(monkeypatch, system_user):
+    """§4.2: a corpus that is vector/hierarchical ready but graph_not_ready
+    must be refused on the graph route with the exact missing conditions —
+    never a silent Neo4j query."""
+
+    called: dict = {}
+
+    async def fake_discover(**kwargs):
+        called["invoked"] = True
+        raise AssertionError("discover must not run when graph_read is blocked")
+
+    import services.graph.orchestrator as graph_orchestrator
+    import services.ingestion.route_readiness as route_readiness
+    from models.release_state import ReadinessDecision
+
+    async def blocked_decision(db, corpus_id, route, **_kwargs):
+        return ReadinessDecision(
+            corpus_id=corpus_id,
+            route=route,
+            allowed=False,
+            mode="partial",
+            required_artifacts=("graph_projection", "release_pin_match"),
+            missing_artifacts=("release_pin_match",),
+            reasons=("missing:release_pin_match",),
+        )
+
+    monkeypatch.setattr(mcp_tools, "_scope_corpus_ids", AsyncMock(return_value=["c1"]))
+    monkeypatch.setattr(mcp_tools.ingestion_service, "_qdrant", object())
+    monkeypatch.setattr(mcp_tools.ingestion_service, "_db", object())
+    monkeypatch.setattr(graph_orchestrator, "discover", fake_discover)
+    monkeypatch.setattr(route_readiness, "decide_corpus_route", blocked_decision)
+
+    result = await mcp_tools.polymath_graph_query(query="graph question", corpus_ids=["c1"])
+
+    assert result["status"] == "graph_not_ready"
+    assert "invoked" not in called
+    decision = result["readiness_decisions"]["c1"]
+    assert decision["allowed"] is False
+    assert decision["missing_artifacts"] == ["release_pin_match"]
 
 
 def test_query_tools_in_registry():

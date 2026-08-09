@@ -1,0 +1,23 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/e2e_metrics.json"
+  ],
+  "finished_at": "2026-08-07T03:05:32.697764+00:00",
+  "inputs_hash": "191669839e97f95e7ca444243a97a4a6dfe04f5eeff621372f3cd47609d2fdb3",
+  "metrics": {
+    "passed_gates": 15,
+    "total_gates": 15
+  },
+  "outputs_hash": "bad069a64c7060c854c934c634fd56231ce251dacbacd713c486efe65bbe34be",
+  "stage": "RUN_TWO_DOCUMENT_E2E",
+  "started_at": "2026-08-07T03:05:32.696635+00:00",
+  "status": "PASSED",
+  "tests": [
+    "canonical two-document ingest",
+    "isolated graph delete and rebuild",
+    "quality fixture",
+    "throughput fixture"
+  ],
+  "warnings": []
+}

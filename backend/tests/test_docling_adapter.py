@@ -1,10 +1,8 @@
 """
-Phase 7.6 — docling adapter smoke tests.
+q9 deterministic parse adapter smoke tests.
 
-These hit the running docling sidecar over HTTP (DOCLING_URL env var). Run
-inside the backend container after `docker compose up -d docling backend`:
-
-    docker compose exec backend pytest backend/tests/test_docling_adapter.py -v
+Every supported format parses locally with zero AI models, zero OCR, and
+zero external parser runtimes. The Docling sidecar was removed in q9.
 
 Each test exercises one classifier path:
   • Markdown with native H1/H2          → tier_a, has_structure=True
@@ -16,13 +14,8 @@ Each test exercises one classifier path:
 from __future__ import annotations
 
 import io
-import os
 
 import pytest
-
-# Skip the whole module when DOCLING_URL is unset and the sidecar isn't
-# reachable — keeps CI happy outside of docker compose.
-DOCLING_URL = os.getenv("DOCLING_URL", "http://docling:8500")
 
 
 @pytest.fixture(scope="module")
@@ -36,15 +29,30 @@ def test_parser_strategy_keeps_md_txt_and_query_runtime_off_docling(adapter):
     assert adapter.parser_strategy("notes.txt", "text/plain") == "local_text"
     assert adapter.parser_strategy("products.csv", "text/csv") == "local_csv"
     assert adapter.parser_strategy("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") == "local_spreadsheet"
-    assert adapter.parser_strategy("book.pdf", "application/pdf") == "pdf_layout_then_local_fallback"
+    assert adapter.parser_strategy("book.pdf", "application/pdf") == "pdf_inspector_then_font_layout"
     assert adapter.parser_strategy("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") == "local_docx"
     assert adapter.parser_strategy("book.epub", "application/octet-stream") == "local_epub"
-    assert adapter.docling_sidecar_needed("notes.md", "text/markdown") is False
-    assert adapter.docling_sidecar_needed("notes.txt", "text/plain") is False
-    assert adapter.docling_sidecar_needed("products.csv", "text/csv") is False
-    assert adapter.docling_sidecar_needed("inventory.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") is False
-    assert adapter.docling_sidecar_needed("plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document") is False
-    assert adapter.docling_sidecar_needed("book.epub", "application/octet-stream") is False
+
+
+def test_docling_sidecar_runtime_is_removed(adapter):
+    """q9 invariant: docling_runtime_paths == 0.
+
+    The adapter must expose no sidecar client, no OCR toggle, and no
+    httpx-based parser round trip.
+    """
+    for removed in (
+        "_parse_with_docling_sidecar",
+        "unload_docling_sidecar",
+        "_sidecar_disabled",
+        "_docling_required_error",
+        "docling_sidecar_needed",
+        "DOCLING_URL",
+        "DOCLING_SIDECAR_POLICY",
+        "httpx",
+    ):
+        assert not hasattr(adapter, removed), (
+            f"q9 contract: docling runtime symbol {removed!r} must be removed"
+        )
 
 
 def test_navigation_only_markdown_has_no_retrievable_content(adapter):
@@ -80,10 +88,6 @@ async def test_epub_upload_parses_locally_in_spine_order(adapter, monkeypatch):
     pytest.importorskip("ebooklib")
     from ebooklib import epub
 
-    async def fail_post(*_args, **_kwargs):
-        raise AssertionError("Docling sidecar should not be called for EPUB")
-
-    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
     book = epub.EpubBook()
     book.set_identifier("test-book")
     book.set_title("Consumer Behavior")
@@ -118,12 +122,7 @@ async def test_epub_upload_parses_locally_in_spine_order(adapter, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_markdown_does_not_touch_docling_sidecar(adapter, monkeypatch):
-    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
-        raise AssertionError("Docling sidecar should not be called for markdown")
-
-    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
-
+async def test_markdown_parses_locally_without_any_runtime(adapter):
     result = await adapter.parse_document(
         raw_bytes=b"# Local\n\n| A | B |\n| --- | --- |\n| x | y |\n",
         filename="local.md",
@@ -136,10 +135,14 @@ async def test_markdown_does_not_touch_docling_sidecar(adapter, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_docling_policy_off_fails_only_for_sidecar_formats(adapter, monkeypatch):
-    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "off")
+async def test_undecodable_upload_is_rejected_terminally(adapter):
+    """q9 contract: a file with no deterministic parser is rejected.
 
-    with pytest.raises(RuntimeError, match="needs the Docling sidecar"):
+    There is no sidecar to fall back to, so an undecodable DOCX-named
+    upload must fail fast with a terminal RuntimeError rather than being
+    routed to any OCR or model-based parser.
+    """
+    with pytest.raises(RuntimeError, match="no deterministic parser"):
         await adapter.parse_document(
             raw_bytes=b"fake docx",
             filename="plan.docx",
@@ -163,7 +166,9 @@ async def test_digital_pdf_with_headings_uses_structural_fallback(adapter, monke
         )
 
     monkeypatch.setattr(format_router, "route", fake_route)
-    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "off")
+    # q9 contract: the font-layout fallback only runs when the pinned
+    # pdf-inspector engine is unavailable.
+    monkeypatch.setattr(adapter, "_parse_pdf_with_inspector", lambda *_a, **_k: None)
     monkeypatch.setattr(
         adapter,
         "_pdf_font_lines",
@@ -191,7 +196,7 @@ async def test_digital_pdf_with_headings_uses_structural_fallback(adapter, monke
     assert result.source_tier.value == "tier_a"
     assert result.has_structure is True
     assert result.parser_fallback_count == 1
-    assert result.parser_fallback_reason == "docling_sidecar_disabled"
+    assert result.parser_fallback_reason == "pdf_inspector_unavailable"
     assert {section.text for section in result.sections if section.element_type == "section_heading"} >= {
         "Field Notes on Durable Systems",
         "Chapter 1: Structural Parsing",
@@ -204,11 +209,16 @@ async def test_digital_pdf_with_headings_uses_structural_fallback(adapter, monke
     )
     adapter.finalize_source_meta(result, "book.pdf")
     assert result.routing_trace["parser_fallback_count"] == 1
-    assert result.routing_trace["parser_fallback_reason"] == "docling_sidecar_disabled"
+    assert result.routing_trace["parser_fallback_reason"] == "pdf_inspector_unavailable"
 
 
 @pytest.mark.asyncio
-async def test_digital_pdf_prefers_no_ocr_sidecar_layout(adapter, monkeypatch):
+async def test_digital_pdf_prefers_deterministic_inspector_over_fallbacks(adapter, monkeypatch):
+    """q9 contract: the pinned pdf-inspector owns text-PDF parsing.
+
+    The local font-layout fallback must not run while the inspector is
+    available. (The Docling sidecar no longer exists.)
+    """
     from services.ingestion import format_router
 
     text = " ".join(["digital pdf body text"] * 30)
@@ -221,7 +231,7 @@ async def test_digital_pdf_prefers_no_ocr_sidecar_layout(adapter, monkeypatch):
             pages=[text],
         )
 
-    async def fake_sidecar(raw_bytes, filename, mime, **_kwargs):
+    def fake_inspector(raw_bytes, filename, mime, fast_result):
         assert raw_bytes == b"%PDF fake"
         assert filename == "book.pdf"
         assert mime == "application/pdf"
@@ -238,20 +248,19 @@ async def test_digital_pdf_prefers_no_ocr_sidecar_layout(adapter, monkeypatch):
             source_tier=adapter.SourceTier.tier_a,
             h1_count=1,
             h2_count=1,
-            source_format="PDF",
+            source_format="pdf_inspector",
             filename=filename,
         )
 
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError(
+            "q9 contract: font-layout fallback must not run while "
+            "pdf-inspector is available"
+        )
+
     monkeypatch.setattr(format_router, "route", fake_route)
-    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "auto")
-    monkeypatch.setattr(adapter, "_parse_with_docling_sidecar", fake_sidecar)
-    monkeypatch.setattr(
-        adapter,
-        "_parse_pdf_font_layout",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("available sidecar must win over local fallback")
-        ),
-    )
+    monkeypatch.setattr(adapter, "_parse_pdf_with_inspector", fake_inspector)
+    monkeypatch.setattr(adapter, "_parse_pdf_font_layout", _forbidden)
 
     result = await adapter.parse_document(
         raw_bytes=b"%PDF fake",
@@ -260,7 +269,7 @@ async def test_digital_pdf_prefers_no_ocr_sidecar_layout(adapter, monkeypatch):
         do_ocr=False,
     )
 
-    assert result.source_format == "PDF"
+    assert result.source_format == "pdf_inspector"
     assert result.source_tier.value == "tier_a"
     assert result.parser_fallback_count == 0
 
@@ -315,7 +324,8 @@ async def test_structureless_digital_pdf_remains_tier_c(adapter, monkeypatch):
         )
 
     monkeypatch.setattr(format_router, "route", fake_route)
-    monkeypatch.setattr(adapter, "DOCLING_SIDECAR_POLICY", "off")
+    # Force the font-layout lane by making the inspector unavailable.
+    monkeypatch.setattr(adapter, "_parse_pdf_with_inspector", lambda *_a, **_k: None)
     monkeypatch.setattr(
         adapter,
         "_pdf_font_lines",
@@ -564,12 +574,7 @@ async def test_docx_with_headings_classifies_with_structure(adapter):
 
 
 @pytest.mark.asyncio
-async def test_csv_upload_parses_as_local_table_without_docling(adapter, monkeypatch):
-    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
-        raise AssertionError("Docling sidecar should not be called for CSV")
-
-    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
-
+async def test_csv_upload_parses_as_local_table(adapter):
     raw = (
         "Product,Price,Category\n"
         "Hat,19.99,Apparel\n"
@@ -594,14 +599,9 @@ async def test_csv_upload_parses_as_local_table_without_docling(adapter, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_xlsx_upload_parses_as_local_table_without_docling(adapter, monkeypatch):
+async def test_xlsx_upload_parses_as_local_table(adapter):
     pytest.importorskip("openpyxl")
     from openpyxl import Workbook
-
-    async def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
-        raise AssertionError("Docling sidecar should not be called for XLSX")
-
-    monkeypatch.setattr(adapter.httpx.AsyncClient, "post", fail_post, raising=False)
 
     workbook = Workbook()
     sheet = workbook.active

@@ -1,0 +1,1072 @@
+# E — Verb-preposition fixture corpus
+#
+# Tests each p2_verb_prep resolver rule separately via the frame extractor.
+# Rules: work+for→works_for, serve+in→member_of, base+in→located_in,
+#        member+of→member_of, part+of→part_of
+#
+# Required measurements per rule:
+#   eligible positive count, correct pair recovery, correct canonical predicate,
+#   hard-negative rejection, new candidate count, review count,
+#   false-positive count, latency delta
+#
+# Causal assertion: E − D → only feature_group=p2_verb_prep records
+#
+# Promotion gate:
+#   10-15 positives per rule
+#   15-20 adversarial negatives per rule (shared across rules)
+#   no false-positive canonical mappings from negatives
+#   no unrelated predicate changes
+
+fixtures:
+- id: vp_wf_pos_001
+  rule: works_for
+  text: Alice works for Microsoft.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 16
+    end: 25
+    text: Microsoft
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Alice
+  expected_object: Microsoft
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_002
+  rule: works_for
+  text: Alice worked for Google.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 17
+    end: 23
+    text: Google
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Alice
+  expected_object: Google
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_003
+  rule: works_for
+  text: Bob works for the United Nations.
+  entities:
+  - start: 0
+    end: 3
+    text: Bob
+    type: Person
+  - start: 18
+    end: 32
+    text: United Nations
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Bob
+  expected_object: United Nations
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_004
+  rule: works_for
+  text: Carol has worked for Apple since 2020.
+  entities:
+  - start: 0
+    end: 5
+    text: Carol
+    type: Person
+  - start: 21
+    end: 26
+    text: Apple
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Carol
+  expected_object: Apple
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_005
+  rule: works_for
+  text: The engineer works for Boeing.
+  entities:
+  - start: 4
+    end: 12
+    text: engineer
+    type: Person
+  - start: 23
+    end: 29
+    text: Boeing
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: engineer
+  expected_object: Boeing
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_006
+  rule: works_for
+  text: My sister worked for the Red Cross.
+  entities:
+  - start: 3
+    end: 9
+    text: sister
+    type: Person
+  - start: 25
+    end: 34
+    text: Red Cross
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: sister
+  expected_object: Red Cross
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_007
+  rule: works_for
+  text: James works for Amazon Web Services.
+  entities:
+  - start: 0
+    end: 5
+    text: James
+    type: Person
+  - start: 16
+    end: 35
+    text: Amazon Web Services
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: James
+  expected_object: Amazon Web Services
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_008
+  rule: works_for
+  text: The researcher works for MIT.
+  entities:
+  - start: 4
+    end: 14
+    text: researcher
+    type: Person
+  - start: 25
+    end: 28
+    text: MIT
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: researcher
+  expected_object: MIT
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_009
+  rule: works_for
+  text: Laura worked for Deloitte Consulting.
+  entities:
+  - start: 0
+    end: 5
+    text: Laura
+    type: Person
+  - start: 17
+    end: 36
+    text: Deloitte Consulting
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Laura
+  expected_object: Deloitte Consulting
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_010
+  rule: works_for
+  text: The consultant works for the World Bank.
+  entities:
+  - start: 4
+    end: 14
+    text: consultant
+    type: Person
+  - start: 29
+    end: 39
+    text: World Bank
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: consultant
+  expected_object: World Bank
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_011
+  rule: works_for
+  text: Tom worked for the CIA.
+  entities:
+  - start: 0
+    end: 3
+    text: Tom
+    type: Person
+  - start: 19
+    end: 22
+    text: CIA
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Tom
+  expected_object: CIA
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_pos_012
+  rule: works_for
+  text: Karen works for NASA.
+  entities:
+  - start: 0
+    end: 5
+    text: Karen
+    type: Person
+  - start: 16
+    end: 20
+    text: NASA
+    type: Organization
+  expected_predicate: works_for
+  expected_subject: Karen
+  expected_object: NASA
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_wf_neg_001
+  rule: works_for
+  text: Alice works with Microsoft.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 17
+    end: 26
+    text: Microsoft
+    type: Organization
+  expected_predicate: null
+  expected_decision: NONE
+  reason: 'wrong preposition: with != for'
+- id: vp_wf_neg_002
+  rule: works_for
+  text: Alice works as an engineer.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 18
+    end: 26
+    text: engineer
+    type: Concept
+  expected_predicate: null
+  expected_decision: NONE
+  reason: 'wrong preposition: as != for'
+- id: vp_wf_neg_003
+  rule: works_for
+  text: Alice worked on Microsoft software.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 16
+    end: 25
+    text: Microsoft
+    type: Organization
+  expected_predicate: null
+  expected_decision: NONE
+  reason: 'wrong preposition: on != for'
+- id: vp_wf_neg_004
+  rule: works_for
+  text: Alice works for a living.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 16
+    end: 23
+    text: living
+    type: Concept
+  expected_predicate: null
+  expected_decision: NONE
+  reason: object type Concept != Organization (T2 type constraint)
+- id: vp_wf_neg_005
+  rule: works_for
+  text: The plan works for everyone.
+  entities:
+  - start: 4
+    end: 8
+    text: plan
+    type: Concept
+  - start: 19
+    end: 27
+    text: everyone
+    type: Person
+  expected_predicate: null
+  expected_decision: NONE
+  reason: abstract subject, not employment
+- id: vp_mo_pos_001
+  rule: member_of
+  text: Alice served in the committee.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 20
+    end: 29
+    text: committee
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Alice
+  expected_object: committee
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_002
+  rule: member_of
+  text: Bob serves in the board of directors.
+  entities:
+  - start: 0
+    end: 3
+    text: Bob
+    type: Person
+  - start: 18
+    end: 23
+    text: board
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Bob
+  expected_object: board
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_003
+  rule: member_of
+  text: Carol served in the advisory panel.
+  entities:
+  - start: 0
+    end: 5
+    text: Carol
+    type: Person
+  - start: 29
+    end: 34
+    text: panel
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Carol
+  expected_object: panel
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_004
+  rule: member_of
+  text: David serves in the national assembly.
+  entities:
+  - start: 0
+    end: 5
+    text: David
+    type: Person
+  - start: 29
+    end: 37
+    text: assembly
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: David
+  expected_object: assembly
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_005
+  rule: member_of
+  text: The senator served in the finance committee.
+  entities:
+  - start: 4
+    end: 11
+    text: senator
+    type: Person
+  - start: 34
+    end: 43
+    text: committee
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: senator
+  expected_object: committee
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_006
+  rule: member_of
+  text: Maria served in the planning commission.
+  entities:
+  - start: 0
+    end: 5
+    text: Maria
+    type: Person
+  - start: 29
+    end: 39
+    text: commission
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Maria
+  expected_object: commission
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_007
+  rule: member_of
+  text: Tom served in the ethics committee.
+  entities:
+  - start: 0
+    end: 3
+    text: Tom
+    type: Person
+  - start: 25
+    end: 34
+    text: committee
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Tom
+  expected_object: committee
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_008
+  rule: member_of
+  text: The delegate serves in the general assembly.
+  entities:
+  - start: 4
+    end: 12
+    text: delegate
+    type: Person
+  - start: 35
+    end: 43
+    text: assembly
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: delegate
+  expected_object: assembly
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_009
+  rule: member_of
+  text: James served in the oversight board.
+  entities:
+  - start: 0
+    end: 5
+    text: James
+    type: Person
+  - start: 30
+    end: 35
+    text: board
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: James
+  expected_object: board
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_010
+  rule: member_of
+  text: Laura serves in the steering group.
+  entities:
+  - start: 0
+    end: 5
+    text: Laura
+    type: Person
+  - start: 29
+    end: 34
+    text: group
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Laura
+  expected_object: group
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_011
+  rule: member_of
+  text: Alice is a member of the committee.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 25
+    end: 34
+    text: committee
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Alice
+  expected_object: committee
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_012
+  rule: member_of
+  text: Bob is a member of the board.
+  entities:
+  - start: 0
+    end: 3
+    text: Bob
+    type: Person
+  - start: 23
+    end: 28
+    text: board
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Bob
+  expected_object: board
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_013
+  rule: member_of
+  text: Carol was a member of the advisory panel.
+  entities:
+  - start: 0
+    end: 5
+    text: Carol
+    type: Person
+  - start: 35
+    end: 40
+    text: panel
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Carol
+  expected_object: panel
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_014
+  rule: member_of
+  text: David is a member of the national assembly.
+  entities:
+  - start: 0
+    end: 5
+    text: David
+    type: Person
+  - start: 34
+    end: 42
+    text: assembly
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: David
+  expected_object: assembly
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_pos_015
+  rule: member_of
+  text: Ruth is a member of the executive council.
+  entities:
+  - start: 0
+    end: 4
+    text: Ruth
+    type: Person
+  - start: 34
+    end: 41
+    text: council
+    type: Organization
+  expected_predicate: member_of
+  expected_subject: Ruth
+  expected_object: council
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_mo_neg_001
+  rule: member_of
+  text: Alice served in France.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 16
+    end: 22
+    text: France
+    type: Location
+  expected_predicate: null
+  expected_decision: NONE
+  reason: 'endpoint type: Location not Organization'
+- id: vp_mo_neg_002
+  rule: member_of
+  text: Alice served the committee.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 17
+    end: 26
+    text: committee
+    type: Organization
+  expected_predicate: null
+  expected_decision: NONE
+  reason: transitive serve != serve in
+- id: vp_mo_neg_003
+  rule: member_of
+  text: The committee served Alice.
+  entities:
+  - start: 4
+    end: 13
+    text: committee
+    type: Organization
+  - start: 21
+    end: 26
+    text: Alice
+    type: Person
+  expected_predicate: null
+  expected_decision: NONE
+  reason: 'reversed: committee served Alice'
+- id: vp_mo_neg_004
+  rule: member_of
+  text: He served in the army for twenty years.
+  entities:
+  - start: 0
+    end: 2
+    text: He
+    type: Person
+  - start: 17
+    end: 21
+    text: army
+    type: Organization
+  expected_predicate: null
+  expected_decision: NONE
+  reason: military service != membership
+- id: vp_mo_neg_005
+  rule: member_of
+  text: The dish was served in a bowl.
+  entities:
+  - start: 4
+    end: 8
+    text: dish
+    type: Product
+  - start: 25
+    end: 29
+    text: bowl
+    type: Artifact
+  expected_predicate: null
+  expected_decision: NONE
+  reason: passive serve != membership
+- id: vp_li_pos_001
+  rule: located_in
+  text: The company is based in Texas.
+  entities:
+  - start: 4
+    end: 11
+    text: company
+    type: Organization
+  - start: 24
+    end: 29
+    text: Texas
+    type: Location
+  expected_predicate: located_in
+  expected_subject: company
+  expected_object: Texas
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_002
+  rule: located_in
+  text: The startup is based in Berlin.
+  entities:
+  - start: 4
+    end: 11
+    text: startup
+    type: Organization
+  - start: 24
+    end: 30
+    text: Berlin
+    type: Location
+  expected_predicate: located_in
+  expected_subject: startup
+  expected_object: Berlin
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_003
+  rule: located_in
+  text: Acme Corp is based in San Francisco.
+  entities:
+  - start: 0
+    end: 9
+    text: Acme Corp
+    type: Organization
+  - start: 22
+    end: 35
+    text: San Francisco
+    type: Location
+  expected_predicate: located_in
+  expected_subject: Acme Corp
+  expected_object: San Francisco
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_004
+  rule: located_in
+  text: The organization is based in Geneva.
+  entities:
+  - start: 4
+    end: 16
+    text: organization
+    type: Organization
+  - start: 29
+    end: 35
+    text: Geneva
+    type: Location
+  expected_predicate: located_in
+  expected_subject: organization
+  expected_object: Geneva
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_005
+  rule: located_in
+  text: The lab is based in Cambridge.
+  entities:
+  - start: 4
+    end: 7
+    text: lab
+    type: Organization
+  - start: 20
+    end: 29
+    text: Cambridge
+    type: Location
+  expected_predicate: located_in
+  expected_subject: lab
+  expected_object: Cambridge
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_006
+  rule: located_in
+  text: The hotel is located in Quebec.
+  entities:
+  - start: 4
+    end: 9
+    text: hotel
+    type: Organization
+  - start: 24
+    end: 30
+    text: Quebec
+    type: Location
+  expected_predicate: located_in
+  expected_subject: hotel
+  expected_object: Quebec
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_007
+  rule: located_in
+  text: The factory is located in Detroit.
+  entities:
+  - start: 4
+    end: 11
+    text: factory
+    type: Organization
+  - start: 26
+    end: 33
+    text: Detroit
+    type: Location
+  expected_predicate: located_in
+  expected_subject: factory
+  expected_object: Detroit
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_008
+  rule: located_in
+  text: The museum is located in Paris.
+  entities:
+  - start: 4
+    end: 10
+    text: museum
+    type: Organization
+  - start: 25
+    end: 30
+    text: Paris
+    type: Location
+  expected_predicate: located_in
+  expected_subject: museum
+  expected_object: Paris
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_009
+  rule: located_in
+  text: The datacenter is located in Virginia.
+  entities:
+  - start: 4
+    end: 14
+    text: datacenter
+    type: Organization
+  - start: 29
+    end: 37
+    text: Virginia
+    type: Location
+  expected_predicate: located_in
+  expected_subject: datacenter
+  expected_object: Virginia
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_pos_010
+  rule: located_in
+  text: The office is located in Seattle.
+  entities:
+  - start: 4
+    end: 10
+    text: office
+    type: Organization
+  - start: 25
+    end: 32
+    text: Seattle
+    type: Location
+  expected_predicate: located_in
+  expected_subject: office
+  expected_object: Seattle
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_li_neg_001
+  rule: located_in
+  text: Alice works in Texas.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 15
+    end: 20
+    text: Texas
+    type: Location
+  expected_predicate: null
+  expected_decision: NONE
+  reason: work in != located in
+- id: vp_li_neg_002
+  rule: located_in
+  text: Alice invested in the hotel.
+  entities:
+  - start: 0
+    end: 5
+    text: Alice
+    type: Person
+  - start: 22
+    end: 27
+    text: hotel
+    type: Organization
+  expected_predicate: null
+  expected_decision: NONE
+  reason: invest in != located in
+- id: vp_li_neg_003
+  rule: located_in
+  text: The company operates in the market.
+  entities:
+  - start: 4
+    end: 11
+    text: company
+    type: Organization
+  - start: 28
+    end: 34
+    text: market
+    type: Concept
+  expected_predicate: null
+  expected_decision: NONE
+  reason: operates in != located in
+- id: vp_li_neg_004
+  rule: located_in
+  text: The teacher believes in discipline.
+  entities:
+  - start: 4
+    end: 11
+    text: teacher
+    type: Person
+  - start: 24
+    end: 34
+    text: discipline
+    type: Concept
+  expected_predicate: null
+  expected_decision: NONE
+  reason: believes in != located in
+- id: vp_li_neg_005
+  rule: located_in
+  text: The child was born in the hospital.
+  entities:
+  - start: 4
+    end: 9
+    text: child
+    type: Person
+  - start: 26
+    end: 34
+    text: hospital
+    type: Location
+  expected_predicate: null
+  expected_decision: NONE
+  reason: born in != based/located in
+- id: vp_po_pos_001
+  rule: part_of
+  text: The imprint is part of Penguin Random House.
+  entities:
+  - start: 4
+    end: 11
+    text: imprint
+    type: Organization
+  - start: 23
+    end: 43
+    text: Penguin Random House
+    type: Organization
+  expected_predicate: part_of
+  expected_subject: imprint
+  expected_object: Penguin Random House
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_002
+  rule: part_of
+  text: The division is part of the parent company.
+  entities:
+  - start: 4
+    end: 12
+    text: division
+    type: Organization
+  - start: 35
+    end: 42
+    text: company
+    type: Organization
+  expected_predicate: part_of
+  expected_subject: division
+  expected_object: company
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_003
+  rule: part_of
+  text: The module is part of the core framework.
+  entities:
+  - start: 4
+    end: 10
+    text: module
+    type: Software
+  - start: 31
+    end: 40
+    text: framework
+    type: Software
+  expected_predicate: part_of
+  expected_subject: module
+  expected_object: framework
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_004
+  rule: part_of
+  text: The widget is part of the assembly.
+  entities:
+  - start: 4
+    end: 10
+    text: widget
+    type: Product
+  - start: 26
+    end: 34
+    text: assembly
+    type: Product
+  expected_predicate: part_of
+  expected_subject: widget
+  expected_object: assembly
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_005
+  rule: part_of
+  text: The subsidiary is part of the conglomerate.
+  entities:
+  - start: 4
+    end: 14
+    text: subsidiary
+    type: Organization
+  - start: 30
+    end: 42
+    text: conglomerate
+    type: Organization
+  expected_predicate: part_of
+  expected_subject: subsidiary
+  expected_object: conglomerate
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_006
+  rule: part_of
+  text: The department is part of the university.
+  entities:
+  - start: 4
+    end: 14
+    text: department
+    type: Organization
+  - start: 30
+    end: 40
+    text: university
+    type: Organization
+  expected_predicate: part_of
+  expected_subject: department
+  expected_object: university
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_007
+  rule: part_of
+  text: The component is part of the operating system.
+  entities:
+  - start: 4
+    end: 13
+    text: component
+    type: Software
+  - start: 39
+    end: 45
+    text: system
+    type: Software
+  expected_predicate: part_of
+  expected_subject: component
+  expected_object: system
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_008
+  rule: part_of
+  text: The province is part of the republic.
+  entities:
+  - start: 4
+    end: 12
+    text: province
+    type: Location
+  - start: 28
+    end: 36
+    text: republic
+    type: Location
+  expected_predicate: part_of
+  expected_subject: province
+  expected_object: republic
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_009
+  rule: part_of
+  text: The library is part of the toolkit.
+  entities:
+  - start: 4
+    end: 11
+    text: library
+    type: Software
+  - start: 27
+    end: 34
+    text: toolkit
+    type: Software
+  expected_predicate: part_of
+  expected_subject: library
+  expected_object: toolkit
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_pos_010
+  rule: part_of
+  text: The engine is part of the platform.
+  entities:
+  - start: 4
+    end: 10
+    text: engine
+    type: Software
+  - start: 26
+    end: 34
+    text: platform
+    type: Software
+  expected_predicate: part_of
+  expected_subject: engine
+  expected_object: platform
+  expected_decision: ACCEPT_CANONICAL
+- id: vp_po_neg_001
+  rule: part_of
+  text: The author took part in the event.
+  entities:
+  - start: 4
+    end: 10
+    text: author
+    type: Person
+  - start: 28
+    end: 33
+    text: event
+    type: Event
+  expected_predicate: null
+  expected_decision: NONE
+  reason: take part in = participate, light verb
+- id: vp_po_neg_002
+  rule: part_of
+  text: The system plays a part in detection.
+  entities:
+  - start: 4
+    end: 10
+    text: system
+    type: Software
+  - start: 27
+    end: 36
+    text: detection
+    type: Concept
+  expected_predicate: null
+  expected_decision: NONE
+  reason: play a part = contribute, light verb
+- id: vp_po_neg_003
+  rule: part_of
+  text: The actor played the part of Hamlet.
+  entities:
+  - start: 4
+    end: 9
+    text: actor
+    type: Person
+  - start: 29
+    end: 35
+    text: Hamlet
+    type: Concept
+  expected_predicate: null
+  expected_decision: NONE
+  reason: play a role != meronymy
+- id: vp_po_neg_004
+  rule: part_of
+  text: The student took part in the competition.
+  entities:
+  - start: 4
+    end: 11
+    text: student
+    type: Person
+  - start: 29
+    end: 40
+    text: competition
+    type: Event
+  expected_predicate: null
+  expected_decision: NONE
+  reason: take part in = participate
+- id: vp_po_neg_005
+  rule: part_of
+  text: The manager departed from the company.
+  entities:
+  - start: 4
+    end: 11
+    text: manager
+    type: Person
+  - start: 30
+    end: 37
+    text: company
+    type: Organization
+  expected_predicate: null
+  expected_decision: NONE
+  reason: depart from != part of

@@ -210,63 +210,9 @@ export const MODAL_GPU_TIERS: {
   { tier: "H100", label: "H100 (80 GB)", priceHint: "~$4.56/hr", pricePerHour: 4.56, notes: "Fastest; reserve for giant models" },
 ];
 
-// One Ghost B extraction sidecar the user can toggle on/off. The worker
-// health-probes ENABLED endpoints per document (list order = preference) and
-// dispatches to whichever are live — power a GPU box off and work simply
-// flows to the next enabled endpoint (e.g. the always-on local sidecar).
-export interface ExtractionEndpoint {
-  label: string;
-  url: string;
-  enabled: boolean;
-}
-
+// Graphify CPU is the sole production extractor. Off is vectors-only.
 export interface ExtractionSettings {
-  engine?:
-    | "local"
-    | "cloud"
-    | "runpod_flash"
-    | "legacy_local"
-    | "local_then_cloud"
-    | "dual"
-    | "local_then_enrich"
-    | "off";
-  endpoints: ExtractionEndpoint[];
-}
-
-// Deploy-readiness report from GET /api/settings/extraction/validate —
-// every configured endpoint probed from the BACKEND's network position
-// (what the ingestion worker actually sees), with per-check results.
-export interface ExtractionValidationChecks {
-  reachable: boolean;
-  healthy?: boolean;
-  warm?: boolean;
-  model_loaded?: boolean;
-  gpu_active?: boolean | null;
-  version_match?: boolean | null;
-}
-
-export interface ExtractionValidationEndpoint {
-  label: string;
-  url: string;
-  enabled: boolean;
-  checks: ExtractionValidationChecks;
-  info: {
-    backend?: string;
-    device?: string;
-    model?: string;
-    pipeline_version?: string | null;
-    providers?: string[];
-  };
-  state: "ready" | "warning" | "fail";
-  detail: string;
-}
-
-export interface ExtractionValidationReport {
-  endpoints: ExtractionValidationEndpoint[];
-  backend_pipeline_version: string | null;
-  enabled_total: number;
-  enabled_ready: number;
-  deploy_ready: boolean;
+  engine?: "graphify_cpu" | "off";
 }
 
 export interface GlobalIngestionSummarySettings {
@@ -304,16 +250,6 @@ export interface RunpodFlashExtractionSettings {
   budget_cap_usd: number;
   estimated_gpu_rate_per_second_usd: number;
   cost_overhead_multiplier: number;
-}
-
-export interface RunpodFlashTestResult {
-  ok: boolean;
-  result_count: number;
-  failure_count: number;
-  entity_count: number;
-  relation_count: number;
-  metrics: Record<string, unknown>;
-  errors: string[];
 }
 
 export interface GlobalIngestionSettings {

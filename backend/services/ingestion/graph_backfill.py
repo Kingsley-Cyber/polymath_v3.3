@@ -7,9 +7,7 @@ holes later by retrying only the failed chunks and patching Neo4j incrementally.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import uuid
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any
@@ -26,20 +24,10 @@ from services.ghost_b import (
     ExtractionTask,
     FactItem,
     RelationItem,
-    SchemaContext,
-    extract_entities as cloud_extract_entities,
     summarize_extraction_batch,
-)
-from services.ghost_b_local import extract_entities as local_extract_entities
-from services.ingestion.extraction_contract import resolve_extraction_contract
-from services.ingestion.provider_lane_health import (
-    adapt_extraction_pool_concurrency,
-    filter_extraction_pool_by_provider_health,
-    load_recent_provider_lane_health,
 )
 from services.graph.neo4j_writer import write_document_graph
 from services.ingestion.section_classifier import ChunkKind, should_skip_ghost_b
-from services.secrets import decrypt as _decrypt_api_key
 from services.storage import mongo_reader, mongo_writer
 
 logger = logging.getLogger(__name__)
@@ -47,149 +35,6 @@ logger = logging.getLogger(__name__)
 
 _PARTIAL_PREFIX = "Ghost B graph extraction partial:"
 _BACKFILL_PREFIX = "Ghost B backfill"
-
-
-def _safe_settings() -> Any | None:
-    """Load settings lazily so repair modules remain importable in isolation."""
-
-    try:
-        from config import get_settings
-
-        return get_settings()
-    except Exception as exc:  # noqa: BLE001 - missing secrets should not break repair imports/tests
-        logger.debug("graph_backfill: settings unavailable, using local defaults: %s", exc)
-        return None
-
-
-def _pool_entry_uses_managed_vllm(entry: dict[str, Any] | Any) -> bool:
-    from services.extraction_provider_cards import extraction_lane_uses_private_vllm
-
-    return extraction_lane_uses_private_vllm(entry)
-
-
-def _build_ghost_pool(refs: list[Any] | None) -> list[dict[str, Any]]:
-    """Normalize/decrypt model profile refs for Ghost B without importing worker."""
-
-    if not refs:
-        return []
-    out: list[dict[str, Any]] = []
-    for ref in refs:
-        data = ref.model_dump() if hasattr(ref, "model_dump") else dict(ref or {})
-        for secret_field in ("api_key", "lifecycle_api_key"):
-            ct = data.get(secret_field)
-            if ct:
-                pt = _decrypt_api_key(ct)
-                data[secret_field] = pt if pt is not None else ct
-        extra_params = data.get("extra_params") or {}
-        if not isinstance(extra_params, dict):
-            extra_params = {}
-        managed_vllm = _pool_entry_uses_managed_vllm(data)
-        if managed_vllm and not bool(extra_params.get("disable_lifecycle_auto_stop")):
-            extra_params.setdefault("lifecycle_idle_shutdown_seconds", 600)
-            lifecycle_auto_stop = True
-        else:
-            lifecycle_auto_stop = bool(data.get("lifecycle_auto_stop"))
-        out.append(
-            {
-                "provider_preset": data.get("provider_preset") or "",
-                "model": data.get("model"),
-                "base_url": data.get("base_url") or None,
-                "api_key": data.get("api_key") or None,
-                "max_concurrent": int(data.get("max_concurrent") or 1) or 1,
-                "lifecycle_base_url": data.get("lifecycle_base_url") or None,
-                "lifecycle_api_key": data.get("lifecycle_api_key") or None,
-                "lifecycle_auto_start": bool(data.get("lifecycle_auto_start")),
-                "lifecycle_auto_stop": lifecycle_auto_stop,
-                "lifecycle_up_path": data.get("lifecycle_up_path") or "/up",
-                "lifecycle_status_path": data.get("lifecycle_status_path") or "/status",
-                "lifecycle_down_path": data.get("lifecycle_down_path") or "/down",
-                "lifecycle_ready_timeout_seconds": int(
-                    data.get("lifecycle_ready_timeout_seconds") or 360
-                ),
-                "extra_params": extra_params,
-            }
-        )
-    return out
-
-
-def _build_ghost_b_error_event_sink(
-    db: AsyncIOMotorDatabase,
-    *,
-    run_id: str,
-) -> Any | None:
-    settings = _safe_settings()
-    if settings is not None and not getattr(settings, "EXTRACTION_ERROR_AUDIT_ENABLED", True):
-        return None
-
-    max_failed = max(
-        0,
-        int(
-            getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_FAILED_ATTEMPTS_PER_DOC", 25)
-            if settings is not None
-            else 25
-        ),
-    )
-    max_success = max(
-        0,
-        int(
-            getattr(settings, "EXTRACTION_ERROR_AUDIT_MAX_SUCCESS_ATTEMPTS_PER_DOC", 2)
-            if settings is not None
-            else 2
-        ),
-    )
-    counts = {
-        "ghost_b_attempt_failed": 0,
-        "ghost_b_attempt_rate_limited": 0,
-        "ghost_b_attempt_succeeded": 0,
-        "ghost_b_attempt_succeeded_with_validation_rejections": 0,
-        "ghost_b_failure_budget_tripped": 0,
-    }
-    lock = asyncio.Lock()
-
-    async def _sink(event: dict[str, Any]) -> None:
-        from services.ingestion.provider_call_telemetry import record_ghost_b_event
-
-        try:
-            await record_ghost_b_event(db, event)
-        except Exception as exc:
-            logger.warning("ghost_b provider metric write failed: %s", exc)
-        name = str(event.get("event") or "")
-        async with lock:
-            if name == "ghost_b_attempt_failed":
-                if counts[name] >= max_failed:
-                    return
-                counts[name] += 1
-                sample_index = counts[name]
-            elif name == "ghost_b_attempt_rate_limited":
-                if counts[name] >= max_failed:
-                    return
-                counts[name] += 1
-                sample_index = counts[name]
-            elif name == "ghost_b_attempt_succeeded":
-                if counts[name] >= max_success:
-                    return
-                counts[name] += 1
-                sample_index = counts[name]
-            elif name == "ghost_b_attempt_succeeded_with_validation_rejections":
-                if counts[name] >= max_success:
-                    return
-                counts[name] += 1
-                sample_index = counts[name]
-            elif name == "ghost_b_failure_budget_tripped":
-                counts[name] += 1
-                sample_index = counts[name]
-            else:
-                return
-        doc = dict(event)
-        doc["run_id"] = doc.get("run_id") or run_id
-        doc["sample_index"] = sample_index
-        doc["created_at"] = datetime.utcnow()
-        try:
-            await db["ghost_b_error_events"].insert_one(doc)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("phase=ghost_b_error_audit_write_failed error=%s", exc)
-
-    return _sink
 
 
 def _ghost_b_partial_warning(
@@ -390,34 +235,45 @@ async def _write_graph_results(
     chunk_parent_ids: dict[str, str] | None = None,
     parent_count: int | None = None,
 ) -> None:
-    await write_document_graph(
-        driver=neo4j_driver,
-        doc_id=doc_id,
-        corpus_id=corpus_id,
-        extraction_results=extraction_results,
-        user_id=user_id,
-        file_id=doc.get("file_id"),
-        all_chunk_ids=all_chunk_ids,
-        filename=doc.get("filename"),
-        parent_count=parent_count if parent_count is not None else _graph_parent_count(doc),
-        schema_lens_id=_schema_lens_id(doc, metrics),
-        ghost_b_success_rate=(
-            float(metrics["success_rate"])
-            if metrics.get("success_rate") is not None
-            else None
-        ),
-        ghost_b_extracted=(
-            int(metrics["extracted_chunks"])
-            if metrics.get("extracted_chunks") is not None
-            else None
-        ),
-        ghost_b_total=(
-            int(metrics["requested_chunks"])
-            if metrics.get("requested_chunks") is not None
-            else None
-        ),
+    from services.graph.projection_runner import project_document_via_control_plane
+
+    await project_document_via_control_plane(
         db=db,
-        chunk_parent_ids=chunk_parent_ids,
+        neo4j_driver=neo4j_driver,
+        corpus_id=corpus_id,
+        doc_id=doc_id,
+        write_fn=write_document_graph,
+        write_kwargs={
+            "driver": neo4j_driver,
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "extraction_results": extraction_results,
+            "user_id": user_id,
+            "file_id": doc.get("file_id"),
+            "all_chunk_ids": all_chunk_ids,
+            "filename": doc.get("filename"),
+            "parent_count": (
+                parent_count if parent_count is not None else _graph_parent_count(doc)
+            ),
+            "schema_lens_id": _schema_lens_id(doc, metrics),
+            "ghost_b_success_rate": (
+                float(metrics["success_rate"])
+                if metrics.get("success_rate") is not None
+                else None
+            ),
+            "ghost_b_extracted": (
+                int(metrics["extracted_chunks"])
+                if metrics.get("extracted_chunks") is not None
+                else None
+            ),
+            "ghost_b_total": (
+                int(metrics["requested_chunks"])
+                if metrics.get("requested_chunks") is not None
+                else None
+            ),
+            "db": db,
+            "chunk_parent_ids": chunk_parent_ids,
+        },
     )
 
 
@@ -476,101 +332,9 @@ async def _run_ghost_b_backfill(
     tasks: list[ExtractionTask],
     config: IngestionConfig,
 ) -> ExtractionBatchReport:
-    schema_ctx = SchemaContext(
-        entity_schema=config.entity_schema,
-        relation_schema=config.relation_schema,
-        strict=config.schema_strict,
-    )
-    endpoint_urls: list[str] = []
-    global_engine = "local"
-    try:
-        from services import ghost_b_local as _gbl
-        from services.settings import settings_service
-
-        ext = await settings_service.get_system_extraction()
-        global_engine = str(getattr(ext, "engine", "local") or "local")
-        endpoint_urls = [
-            e.url.strip().rstrip("/")
-            for e in (ext.endpoints or [])
-            if e.enabled and e.url and e.url.strip()
-        ]
-        _gbl.RUNTIME_ENDPOINT_URLS = endpoint_urls or None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("graph_backfill: extraction endpoint settings unavailable: %s", exc)
-
-    cloud_pool_refs = (
-        config.summary_models
-        if getattr(config, "models_linked", True)
-        else config.extraction_models
-    )
-    contract = resolve_extraction_contract(
-        corpus_engine=getattr(config, "extraction_engine", None),
-        global_engine=global_engine,
-        models_linked=getattr(config, "models_linked", True),
-        summary_model_count=len(config.summary_models or []),
-        extraction_model_count=len(config.extraction_models or []),
-        enabled_endpoint_urls=endpoint_urls,
-        provider_pool_entries=cloud_pool_refs,
-    )
-    for warning in contract.warnings:
-        logger.warning("graph_backfill contract corpus=%s: %s", corpus_id[:8], warning)
-    if contract.errors:
-        raise RuntimeError(
-            "extraction contract violation — " + "; ".join(contract.errors)
-        )
-
-    pool = _build_ghost_pool(cloud_pool_refs)
-    if pool:
-        try:
-            provider_health = await load_recent_provider_lane_health(
-                db,
-                corpus_id=corpus_id,
-            )
-            filtered_pool, skipped_lanes = filter_extraction_pool_by_provider_health(
-                pool,
-                provider_health,
-            )
-            if skipped_lanes:
-                logger.warning(
-                    "graph_backfill provider health skipped extraction lanes corpus=%s lanes=%s",
-                    corpus_id[:8],
-                    skipped_lanes,
-                )
-                pool = filtered_pool
-            pool, concurrency_adjustments = adapt_extraction_pool_concurrency(
-                pool,
-                provider_health,
-            )
-            if concurrency_adjustments:
-                logger.info(
-                    "graph_backfill provider concurrency adapted corpus=%s adjustments=%s",
-                    corpus_id[:8],
-                    concurrency_adjustments,
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("graph_backfill provider health check failed: %s", exc)
-
-    async def _schema_resolver(kind: str, query_vec: list[float], top_k: int) -> list[str]:
-        from services.storage.qdrant_writer import retrieve_schema_for_chunk
-
-        return await retrieve_schema_for_chunk(qdrant_client, corpus_id, kind, query_vec, top_k)
-
-    ghost_b_run_id = f"backfill-{uuid.uuid4()}"
-    extract_kwargs = dict(
-        schema=schema_ctx,
-        chunk_vectors=None,
-        schema_resolver=_schema_resolver,
-        pool=pool,
-        model=None,
-        return_report=True,
-        audit_event_sink=_build_ghost_b_error_event_sink(
-            db,
-            run_id=ghost_b_run_id,
-        ),
-        audit_run_id=ghost_b_run_id,
-    )
-    if contract.engine == "off":
-        report = ExtractionBatchReport(
+    engine = str(getattr(config, "extraction_engine", "graphify_cpu") or "graphify_cpu")
+    if engine == "off":
+        return ExtractionBatchReport(
             results=[],
             failures=[],
             metrics={
@@ -581,51 +345,22 @@ async def _run_ghost_b_backfill(
                 "skipped": True,
             },
         )
-    elif contract.engine in {"local", "cloud"}:
-        report = await cloud_extract_entities(tasks, **extract_kwargs)
-    elif contract.engine == "runpod_flash":
-        from services.runpod_flash_extraction import extract_entities as runpod_extract_entities
+    if engine != "graphify_cpu":
+        raise RuntimeError(f"unsupported extraction engine: {engine}")
+    if not tasks:
+        return ExtractionBatchReport(results=[], failures=[], metrics={"engine": engine})
 
-        report = await runpod_extract_entities(tasks, **extract_kwargs)
-    elif contract.engine == "legacy_local":
-        report = await local_extract_entities(tasks, **extract_kwargs)
-    elif contract.engine == "dual":
-        local_part = tasks[0::2]
-        cloud_part = tasks[1::2]
-        import asyncio
+    from services.extraction.graphify_pipeline import run_graphify_pipeline
 
-        rep_local, rep_cloud = await asyncio.gather(
-            local_extract_entities(local_part, **extract_kwargs),
-            cloud_extract_entities(cloud_part, **extract_kwargs),
-        )
-        if isinstance(rep_local, ExtractionBatchReport) and isinstance(
-            rep_cloud, ExtractionBatchReport
-        ):
-            report = ExtractionBatchReport(
-                results=list(rep_local.results) + list(rep_cloud.results),
-                failures=list(rep_local.failures) + list(rep_cloud.failures),
-                metrics={
-                    "engine": "dual",
-                    "local": rep_local.metrics,
-                    "cloud": rep_cloud.metrics,
-                },
-            )
-        else:
-            report = list(rep_local) + list(rep_cloud)
-    elif contract.engine == "local_then_cloud":
-        try:
-            report = await local_extract_entities(tasks, **extract_kwargs)
-        except Exception:
-            if contract.pool_size == 0:
-                raise
-            report = await cloud_extract_entities(tasks, **extract_kwargs)
-    elif contract.engine == "local_then_enrich":
-        report = await local_extract_entities(tasks, **extract_kwargs)
-    else:
-        raise RuntimeError(f"unknown extraction engine {contract.engine!r}")
-    if not isinstance(report, ExtractionBatchReport):
-        raise RuntimeError("Ghost B did not return a batch report")
-    return report
+    output = await run_graphify_pipeline(
+        db=db,
+        corpus_id=corpus_id,
+        doc_id=tasks[0].doc_id,
+        text="\n\n".join(task.text for task in tasks),
+        children=tasks,
+        source_uri="graph_backfill",
+    )
+    return output.report
 
 
 async def backfill_failed_graph_chunks(
@@ -703,7 +438,7 @@ async def backfill_failed_graph_chunks(
     # fast path that skips Ghost B entirely and just runs the writer on those
     # existing results. Graph-promotion jobs call this helper with
     # ``allow_extraction=False`` so promotion can flush known-good artifacts
-    # without waking RTX/cloud extraction for failed chunks.
+    # without rerunning Graphify extraction for failed chunks.
     if needs_neo4j_flush and (not failures or not allow_extraction):
         staged_results = _rehydrate_ghost_b_staging(staged_raw)
         if not staged_results:
@@ -994,22 +729,37 @@ async def backfill_failed_graph_chunks(
         )
 
         parent_by_chunk = await _chunk_parent_map(db, corpus_id=corpus_id, doc_id=doc_id)
-        await write_document_graph(
-            driver=neo4j_driver,
-            doc_id=doc_id,
-            corpus_id=corpus_id,
-            extraction_results=graph_results_to_write,
-            user_id=user_id,
-            file_id=doc.get("file_id"),
-            all_chunk_ids=all_chunk_ids,
-            filename=doc.get("filename"),
-            parent_count=parent_count,
-            schema_lens_id=schema_lens_id if isinstance(schema_lens_id, str) else None,
-            ghost_b_success_rate=float(success_rate) if success_rate is not None else None,
-            ghost_b_extracted=int(extracted) if extracted is not None else None,
-            ghost_b_total=int(total) if total is not None else None,
+        from services.graph.projection_runner import project_document_via_control_plane
+
+        await project_document_via_control_plane(
             db=db,
-            chunk_parent_ids=parent_by_chunk,
+            neo4j_driver=neo4j_driver,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            write_fn=write_document_graph,
+            write_kwargs={
+                "driver": neo4j_driver,
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "extraction_results": graph_results_to_write,
+                "user_id": user_id,
+                "file_id": doc.get("file_id"),
+                "all_chunk_ids": all_chunk_ids,
+                "filename": doc.get("filename"),
+                "parent_count": parent_count,
+                "schema_lens_id": (
+                    schema_lens_id if isinstance(schema_lens_id, str) else None
+                ),
+                "ghost_b_success_rate": (
+                    float(success_rate) if success_rate is not None else None
+                ),
+                "ghost_b_extracted": (
+                    int(extracted) if extracted is not None else None
+                ),
+                "ghost_b_total": int(total) if total is not None else None,
+                "db": db,
+                "chunk_parent_ids": parent_by_chunk,
+            },
         )
 
     warnings = _clean_graph_warnings((doc.get("write_state") or {}).get("warnings") or [])

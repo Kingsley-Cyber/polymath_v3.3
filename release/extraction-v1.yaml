@@ -1,0 +1,75 @@
+# Immutable extraction release manifest — extraction-v1 (O7)
+# DRAFT until the operations block flips to PASS and the tag is cut.
+# Any future change is extraction-v1.0.1 (compatible fix) or extraction-v2.
+
+release:
+  extraction_release: extraction-v1
+  status: DRAFT_PENDING_SOAK
+
+source:
+  git_commit: 82b37ff9aa975e42be28c31887801630eb5f47dc
+  branch: graphify/remediation-freeze-v2
+
+semantic_encoder:
+  model: knowledgator/gliner-relex-large-v1.0
+  revision: 4aedc9226a5ac9e2f6b5ea3e91c1ee577c88a290
+  weights_sha256: 7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a
+  sidecar_release: relex-large-mps-sidecar-v1
+  sidecar_contract: relex-infer-v1
+  device: mps
+  supervision: launchd com.polymath.relex-sidecar (KeepAlive)
+  passes_per_window: 1
+
+thresholds:
+  entity: 0.30
+  relation: 0.30
+  pinned_by: grid sweep {0.25,0.30,0.40}^2 — Pareto pin, never retuned
+
+adapter:
+  compiler: universal-adapter-compiler-v1
+  packs: 7  # 4 domains + 3 genres, Matrix B vocabulary v1 FROZEN
+  schema_hash: 740479cb769ede68
+
+assertion_context:
+  registry_sha: ab6ad4d2889347ca   # config/assertion_context.yaml
+  epistemic_governors_sha: 0c0f19e6f69daf46  # config/epistemic_governors.yaml
+  mechanisms: [epistemic_governor_chain, catenative_chain, prospective_periphrastic,
+               prospective_complement_projection, inverted_conditional, interrogative_scope,
+               adjectival_epistemic, directive_scope, negative_adverb]
+
+entity_guards:
+  - junk_entity_surface (pronoun/function-word/discourse/timestamp, all-tokens rule)
+  - closed_class_pos_endpoint_veto (+PRON, discourse-resolution exempt)
+  - counted_noun_phrase
+  - metadata_key_surface
+
+acceptance_policy:
+  relex_semantic: same-canonical corroboration only (v3)
+  novel_model_knowledge: REVIEW/OPEN, never FACT
+  disposition: uncertainty -> qualified/OPEN/silence, never invented canonical fact
+
+runtime:
+  env:
+    GRAPHIFY_ENTITY_PROVIDER: relex
+    GRAPHIFY_RELEX_RELATIONS: "1"
+    GRAPHIFY_ADAPTER_COMPILER: "1"
+  worker: docker ingest-worker (restart: unless-stopped), fail-closed on sidecar loss
+  recovery: lease reclaim + failed_recoverable backoff + artifact-adoption reconciliation
+  conservation: child vectors + by-design omission receipts == active chunks (3b identity)
+
+qualification:
+  semantic:
+    suite: 617 extraction tests green
+    burned_battery: book 60/66, sealed 44/51, families 8-PASS, leakage 0
+    packets: v1 hard-gate TRUE, v2 hard-gate PASS, six historical leaks dead
+    residuals: audit/RESIDUAL_ERROR_LEDGER.md, UNKNOWN = 0
+    status: SEMANTIC_OPTIMIZATION_CLOSED
+  held_out_generalization: SUPERSEDED_BY_PRODUCTION_GATE
+  operations:
+    o1_sidecar_lifecycle: PASSED
+    o2_crash_recovery: PASSED  # kill points A/B/C/D/E-qdrant/E-neo4j drilled
+    o3_idempotency: PASSED     # 3x same corpus, zero drift, hashes identical
+    o4_q8_conservation: PASSED # 239 + 2 BY_DESIGN receipts = 241
+    o5_soak: PENDING           # 39-doc mixed corpus draining
+    o6_pair_volume: PENDING    # baseline 48 ents / 56 rels per window, gates <1s
+    o7_manifest: THIS FILE

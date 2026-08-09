@@ -103,8 +103,7 @@ export interface IngestionConfig {
   // GHOST A — Summary Model Pool (round-robin dispatch)
   summary_models: ModelProfileRef[];
 
-  // GHOST B — Extraction Model Pool (round-robin dispatch)
-  // Used when provider-card extraction is enabled and models_linked === false.
+  // Retained for stored-config read compatibility. Graphify ignores this pool.
   extraction_models: ModelProfileRef[];
   entity_confidence_threshold: number;
 
@@ -115,12 +114,7 @@ export interface IngestionConfig {
   models_linked: boolean;
 
   /**
-   * Per-corpus extraction contract. Modern production extraction uses
-   * provider-card LLM chips. "local" means a local/private OpenAI-compatible
-   * provider endpoint such as RTX/vLLM. "cloud" means external provider API.
-   * "legacy_local" is the deprecated GLiNER/GLiREL sidecar path. "inherit" =
-   * legacy fallback to global Settings; the lifespan migration stamps existing
-   * corpora explicit. Resolved truthfully by GET /api/corpora/{id}/extraction-contract.
+   * Graphify CPU is the sole production extractor. Off is vectors-only.
    */
   extraction_engine?: ExtractionEngine;
 
@@ -147,14 +141,8 @@ export interface IngestionConfig {
 }
 
 export type IngestionPreset = "fast" | "balanced" | "deep" | "custom";
-// mac_queryable_first/mac_safe are displayed as "Mac optimized": one active
-// local document and retrieval-first sweeps. runpod_burst keeps the full
-// summary/extraction pipeline active while remote extraction scales out.
-export type IngestProfileName =
-  | "mac_safe"
-  | "mac_queryable_first"
-  | "rtx_assisted"
-  | "runpod_burst";
+// Both names preserve the same local retrieval-first scheduling contract.
+export type IngestProfileName = "mac_safe" | "mac_queryable_first";
 
 /** Open-time preset inference — used by the corpus create/edit forms to
  * decide which radio option to pre-select. If the stored preset disagrees
@@ -274,10 +262,7 @@ export const DEFAULT_INGESTION_CONFIG: IngestionConfig = {
   extraction_models: [],
   entity_confidence_threshold: 0.5,
   models_linked: false,
-  // New corpora are EXPLICIT about the extraction workflow — never "inherit".
-  // Modern extraction is provider-card LLM based; the UI scaffolds a private
-  // RTX/vLLM chip for create flows. "legacy_local" is the deprecated sidecar.
-  extraction_engine: "local",
+  extraction_engine: "graphify_cpu",
   // entity_schema / relation_schema / schema_strict intentionally omitted —
   // backend fills them from the universal schema on POST.
   use_neo4j: true,
@@ -806,98 +791,17 @@ export interface CorpusDeleteResponse {
   message: string;
 }
 
-/**
- * Per-corpus extraction workflow. Two-toggle mental model: local on →
- * "local", cloud on → "cloud", both → "dual", neither → "off"; "inherit"
- * is the legacy global-Settings fallback (stamped away by migration).
- */
-export type ExtractionEngine =
-  | "inherit"
-  | "off"
-  | "local"
-  | "cloud"
-  | "runpod_flash"
-  | "legacy_local"
-  | "dual"
-  | "local_then_cloud"
-  | "local_then_enrich";
+export type ExtractionEngine = "graphify_cpu" | "off";
 
 /** GET /api/corpora/{id}/extraction-contract — the resolved truth. */
 export interface ExtractionContractResponse {
-  engine: Exclude<ExtractionEngine, "inherit">;
+  engine: ExtractionEngine;
   source: "corpus" | "global" | "default";
   models_linked: boolean;
-  pool_source: "extraction_models" | "summary_models" | "none";
-  routing_policy?: "work_stealing" | "balanced" | "primary_fallback" | null;
-  lane_capacities?: Array<{
-    lane: number;
-    provider?: string | null;
-    model?: string | null;
-    max_concurrent?: number | null;
-    concurrency_policy?: "static_lane_cap" | "adaptive_vram_85" | string;
-    local_private?: boolean;
-  }>;
-  pool: Array<{
-    provider_preset?: string | null;
-    model: string;
-    base_url?: string | null;
-    max_concurrent?: number | null;
-    lifecycle_base_url?: string | null;
-    lifecycle_auto_start?: boolean | null;
-    lifecycle_auto_stop?: boolean | null;
-    provider_card?: {
-      provider: string;
-      model: string;
-      endpoint: string;
-      auth_mode: string;
-      schema_mode: "json_schema" | "json_object" | "json_object_prompt" | "jsonl";
-      json_repair_mode:
-        | "provider_native"
-        | "balanced_object_repair"
-        | "jsonl_repair_resume"
-        | "deterministic_compiler";
-      semantic_verifier_mode: "strict" | "strict_with_direction_repair";
-      concurrency_policy: "static_lane_cap" | "adaptive_vram_85";
-      failure_backfill_policy: "retry_then_stage" | "stage_failures";
-      supports_json_schema: boolean;
-      supports_json_object: boolean;
-      disable_thinking: boolean;
-      local_private: boolean;
-      managed_vllm: boolean;
-      lifecycle_base_url: string;
-      promotion_gate: string[];
-      notes: string[];
-    } | null;
-    lifecycle_status?: {
-      ok: boolean;
-      ready: boolean;
-      gpu_vram_total_gb?: number | null;
-      gpu_vram_used_gb?: number | null;
-      gpu_vram_free_gb?: number | null;
-      recommended_concurrency?: number | null;
-      running_requests?: number;
-      waiting_requests?: number;
-      source?: string;
-      error?: string | null;
-    } | null;
-  }>;
-  runpod_flash?: {
-    enabled: boolean;
-    configured: boolean;
-    endpoint_id: string | null;
-    endpoint_name: string;
-    model_id: string;
-    request_batch_size: number;
-    request_concurrency: number;
-    max_workers: number;
-  } | null;
-  endpoints: Array<{
-    label?: string | null;
-    url: string;
-    enabled: boolean;
-    /** null = not probed (engine does not use local sidecars) */
-    alive: boolean | null;
-  }>;
+  pool_source: "none";
+  routing_policy?: null;
+  lane_capacities?: [];
+  pool: [];
   errors: string[];
   warnings: string[];
 }

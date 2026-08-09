@@ -1,0 +1,21 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/graph_rebuild.json"
+  ],
+  "finished_at": "2026-08-07T03:05:32.796043+00:00",
+  "inputs_hash": "be2d9a3ef4753ae2f7c9d524118b339a6c7c97c271dc4d87ae9342421aeb3bcc",
+  "metrics": {
+    "graph_digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "outputs_hash": "5f6487fee2ce2c7ebe8ba74676cd9bead1bd2ef24672a6d4cffdf0ec740cb96b",
+  "stage": "REBUILD_GRAPH_FROM_CANONICAL_ARTIFACTS",
+  "started_at": "2026-08-07T03:05:32.795220+00:00",
+  "status": "PASSED",
+  "tests": [
+    "delete isolated projection",
+    "rebuild from Mongo artifacts",
+    "compare graph digest and counts"
+  ],
+  "warnings": []
+}

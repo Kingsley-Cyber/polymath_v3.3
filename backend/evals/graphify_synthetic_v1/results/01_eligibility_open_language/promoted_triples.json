@@ -1,0 +1,32 @@
+[
+  {
+    "subject": "pinion api",
+    "predicate": "consumes",
+    "object": "incoming events"
+  },
+  {
+    "subject": "pinion api",
+    "predicate": "consumes",
+    "object": "larkspur queue"
+  },
+  {
+    "subject": "pinion api",
+    "predicate": "uses",
+    "object": "sable index"
+  },
+  {
+    "subject": "priya anand",
+    "predicate": "works_for",
+    "object": "quartzline analytics"
+  },
+  {
+    "subject": "tobias venn",
+    "predicate": "member_of",
+    "object": "telemetry group"
+  },
+  {
+    "subject": "vaultstone",
+    "predicate": "defines",
+    "object": "cold storage service"
+  }
+]

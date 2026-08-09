@@ -1,0 +1,24 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/predicate_candidates.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/predicate_compiler_report.json"
+  ],
+  "finished_at": "2026-08-07T00:02:12.573513+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "MAPPED": 32,
+    "REVIEW": 206,
+    "STORE_UNMAPPED_SURFACE_RELATION": 72,
+    "candidates": 310,
+    "forced_related_to_fallbacks": 0
+  },
+  "outputs_hash": "",
+  "stage": "WIRE_PREDICATE_COMPILER",
+  "started_at": "2026-08-07T00:02:12.570739+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_predicate_compiler.py"
+  ],
+  "warnings": []
+}

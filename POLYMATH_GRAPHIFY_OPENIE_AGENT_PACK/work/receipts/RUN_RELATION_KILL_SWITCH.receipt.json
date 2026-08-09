@@ -1,0 +1,24 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/relation_kill_switch.json"
+  ],
+  "finished_at": "2026-08-06T23:38:04.830808+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "combined_directed_triple_precision": 0.9230769230769231,
+    "combined_directed_triple_recall": 0.6666666666666666,
+    "combined_gold_pair_recall": 1.0
+  },
+  "outputs_hash": "",
+  "stage": "RUN_RELATION_KILL_SWITCH",
+  "started_at": "2026-08-06T23:38:04.830135+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/test_openie_relation_kill_switch.py",
+    "triplet-extract tests/test_asserter_chains.py",
+    "triplet-extract tests/test_polarity_drop.py",
+    "triplet-extract tests/test_quotes.py"
+  ],
+  "warnings": []
+}

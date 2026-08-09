@@ -1,0 +1,18 @@
+# Declarative members of grammatical governor classes (freeze-exception
+# 2026-08-08). The CODE owns the generic mechanism — a bounded walk up the
+# embedded-proposition governor chain (ccomp/xcomp/csubj/advcl) collecting
+# assertion context. This registry owns only class MEMBERSHIP.
+#
+# Semantics per class when the governor dominates an embedded proposition:
+#   evidential_assertion / evidential_finding:
+#     governor asserted  -> embedded content is asserted through the finding
+#     governor negated or modal-blocked -> embedded content is a NON-FINDING
+#     (never a positive canonical fact)
+#   negative_implicative:
+#     governor itself entails failure of its complement ("failed to X")
+#     -> embedded content is a NON-FINDING regardless of surface negation
+classes:
+  evidential_assertion: [establish, demonstrate, confirm, prove, verify]
+  evidential_finding: [find, determine, conclude, observe, reveal]
+  negative_implicative: [fail, decline, refuse, neglect]
+  attitude_prospective: [expect, plan, intend, hope, aim, propose]

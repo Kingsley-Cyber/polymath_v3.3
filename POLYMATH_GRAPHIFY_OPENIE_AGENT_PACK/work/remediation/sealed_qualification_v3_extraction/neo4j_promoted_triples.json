@@ -1,0 +1,26 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "final audit language review",
+    "object_entity_id": "entity:final-audit-language-review",
+    "predicate": "owns",
+    "subject": "legal",
+    "subject_entity_id": "entity:legal"
+  },
+  {
+    "evidence_count": 0,
+    "object": "status event",
+    "object_entity_id": "entity:status-event",
+    "predicate": "consumes",
+    "subject": "recommendation service",
+    "subject_entity_id": "entity:recommendation-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "legal",
+    "object_entity_id": "entity:legal",
+    "predicate": "owns",
+    "subject": "wednesday",
+    "subject_entity_id": "entity:wednesday"
+  }
+]

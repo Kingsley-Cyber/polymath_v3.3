@@ -1,0 +1,23 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/relation_eligibility.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/relation_eligibility_report.json"
+  ],
+  "finished_at": "2026-08-06T23:52:15.461999+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "eligible_units": 193,
+    "ineligible_units": 1086,
+    "source_blocks": 1279
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_RELATION_ELIGIBILITY",
+  "started_at": "2026-08-06T23:52:15.457243+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_relation_eligibility_artifact.py",
+    "backend/tests/extraction/test_graphify_relations.py"
+  ],
+  "warnings": []
+}

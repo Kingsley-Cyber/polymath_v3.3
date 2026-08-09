@@ -218,7 +218,11 @@ async def test_plan_ingestion_transcript_defaults_to_deep_summary():
     assert result["duplicate_guard"]["status"] == "clear"
     assert result["corpus_action"]["action"] == "create_corpus"
     assert result["corpus_action"]["args"]["preset"] == "deep"
-    assert "polymath_get_ingest_status until complete" in result["call_sequence"]
+    assert any(
+        step.startswith("polymath_get_ingest_status until readiness.query_ready is true")
+        for step in result["call_sequence"]
+    )
+    assert result["readiness_rule"]
     assert result["verification"]["negative_query"]
 
 
@@ -814,6 +818,12 @@ async def test_get_ingest_status_translates_complete(system_user):
     assert result["chunk_count"] == 42
     assert result["parent_count"] == 5
     assert result["write_state"]["mongo_written"] is True
+    # Control Plane V2 — completion is a certificate-backed proof, never a
+    # write_state translation. With no db attached the proof fails closed.
+    assert result["run_id"] and result["run_id"].startswith("run_")
+    assert result["readiness"]["query_ready"] is False
+    assert result["readiness"]["readiness_source"] == "unavailable"
+    assert "never infer completion" in result["agent_rule"]
 
 
 @pytest.mark.asyncio
@@ -832,6 +842,105 @@ async def test_get_ingest_status_translates_failed(system_user):
         result = await mcp_tools.polymath_get_ingest_status(doc_id="d1")
     assert result["status"] == "failed"
     assert result["error"] == "OOM during embedding"
+
+
+@pytest.mark.asyncio
+async def test_verify_ingestion_uses_document_scoped_receipts(system_user):
+    doc = {
+        "doc_id": "d1",
+        "corpus_id": "c1",
+        "filename": "paper.pdf",
+        "ingest_stage": "fully_enriched",
+        "write_state": {
+            "mongo_written": True,
+            "qdrant_written": True,
+            "summaries_indexed": True,
+            "neo4j_written": True,
+            "verified": True,
+        },
+        "chunk_count": 1,
+        "parent_count": 1,
+        "ingestion_config": {"use_neo4j": True, "chunk_summarization": True},
+    }
+    bundle = {
+        "document": doc,
+        "ghost_rows": [
+            {
+                "chunk_id": "ch1",
+                "status": "ok",
+                "provider": "runpod_local_extraction",
+                "model": "urchade/gliner_medium-v2.1",
+                "schema_mode": "local_extraction.v1",
+                "provider_card": {
+                    "provider": "runpod_flash",
+                    "endpoint": "endpoint-1",
+                    "account": "primary",
+                    "wire_contract": "polymath.runpod_local_extraction.v1",
+                    "transport_mode": "queue_based",
+                },
+            }
+        ],
+        "parent_rows": [
+            {
+                "parent_id": "p1",
+                "summary_provider": "deepseek",
+                "summary_model": "deepseek-v4-flash",
+                "summary_receipt": {"local_compute": False},
+            }
+        ],
+        "provider_metrics": [],
+        "graph_job": {"status": "done", "facts_written": 9},
+    }
+    certificate_proof = {
+        "schema_version": "certificate.v1",
+        "readiness_source": "certificate.v1",
+        "corpus_id": "c1",
+        "doc_id": "d1",
+        "query_ready": True,
+        "certificate_id": "cert_test123",
+        "missing": {},
+        "missing_counts": {},
+        "blocking": [],
+        "recovery": {"jobs_created": 0, "next_retry_at": None},
+        "observation_errors": [],
+    }
+    with (
+        patch.object(
+            mcp_tools.ingestion_service,
+            "get_ingestion_evidence",
+            new=AsyncMock(return_value=bundle),
+        ),
+        patch.object(
+            mcp_tools,
+            "_doc_readiness_payload",
+            new=AsyncMock(return_value=certificate_proof),
+        ),
+    ):
+        result = await mcp_tools.polymath_verify_ingestion(doc_id="d1")
+
+    # query_ready mirrors ONLY the certificate-backed proof (Hermes fix).
+    assert result["query_ready"] is True
+    assert result["readiness"]["certificate_id"] == "cert_test123"
+    route = result["execution"]["extraction"]["routes"][0]
+    assert route["execution_location"] == "remote_runpod_serverless"
+    assert route["transport_mode"] == "queue_based"
+    assert result["execution"]["summaries"]["routes"][0]["execution_location"] == "external_api"
+    assert result["execution"]["embeddings"]["execution_location"] == "unknown"
+    assert result["graph_promotion"]["status"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_verify_ingestion_fails_closed_when_identity_is_missing(system_user):
+    with patch.object(
+        mcp_tools.ingestion_service,
+        "get_ingestion_evidence",
+        new=AsyncMock(return_value=None),
+    ):
+        result = await mcp_tools.polymath_verify_ingestion(doc_id="missing")
+    assert result["status"] == "not_found"
+    assert result["query_ready"] is False
+    assert result["readiness"]["readiness_source"] == "unavailable"
+    assert result["safe_claims"] == []
 
 
 # ─── polymath_delete_document ─────────────────────────────────────────────

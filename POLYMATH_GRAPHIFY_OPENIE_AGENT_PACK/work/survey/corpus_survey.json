@@ -1,0 +1,437 @@
+{
+  "candidate_terms_top": [
+    [
+      "Graphify",
+      342
+    ],
+    [
+      "The",
+      342
+    ],
+    [
+      "Module",
+      320
+    ],
+    [
+      "MongoDB",
+      210
+    ],
+    [
+      "Neo4j",
+      207
+    ],
+    [
+      "Qdrant",
+      177
+    ],
+    [
+      "GLiNER2",
+      175
+    ],
+    [
+      "Predicate",
+      174
+    ],
+    [
+      "Compiler",
+      174
+    ],
+    [
+      "Claim",
+      161
+    ],
+    [
+      "Assembler",
+      161
+    ],
+    [
+      "Pipeline",
+      160
+    ],
+    [
+      "Segment",
+      160
+    ],
+    [
+      "CONFIDENTIAL",
+      160
+    ],
+    [
+      "FOOTER",
+      160
+    ],
+    [
+      "GRAPHIFY",
+      160
+    ],
+    [
+      "OPENIE",
+      160
+    ],
+    [
+      "PACK",
+      160
+    ],
+    [
+      "REPEATED",
+      160
+    ],
+    [
+      "FURNITURE",
+      160
+    ],
+    [
+      "OpenIE",
+      38
+    ],
+    [
+      "System",
+      32
+    ],
+    [
+      "Role",
+      32
+    ],
+    [
+      "References",
+      16
+    ],
+    [
+      "Smith",
+      16
+    ],
+    [
+      "Jones",
+      16
+    ],
+    [
+      "Repeated",
+      16
+    ],
+    [
+      "Python",
+      14
+    ],
+    [
+      "Polymath",
+      4
+    ],
+    [
+      "RAG",
+      4
+    ],
+    [
+      "GitHub",
+      3
+    ],
+    [
+      "Microsoft",
+      3
+    ],
+    [
+      "Fixture",
+      2
+    ],
+    [
+      "Retrieval-Augmented",
+      2
+    ],
+    [
+      "Generation",
+      2
+    ],
+    [
+      "Relex",
+      2
+    ],
+    [
+      "Argument",
+      2
+    ],
+    [
+      "Adapter",
+      2
+    ],
+    [
+      "Linux",
+      2
+    ],
+    [
+      "Paso",
+      2
+    ],
+    [
+      "Throughput",
+      1
+    ],
+    [
+      "Quality",
+      1
+    ],
+    [
+      "HNSW",
+      1
+    ],
+    [
+      "This",
+      1
+    ],
+    [
+      "Software",
+      1
+    ],
+    [
+      "Library",
+      1
+    ],
+    [
+      "Oracle",
+      1
+    ],
+    [
+      "Java",
+      1
+    ],
+    [
+      "Apple",
+      1
+    ],
+    [
+      "DependencyMatcher",
+      1
+    ],
+    [
+      "FrameExtractor",
+      1
+    ],
+    [
+      "Markdown",
+      1
+    ],
+    [
+      "Taylor",
+      1
+    ],
+    [
+      "Francis",
+      1
+    ],
+    [
+      "API",
+      1
+    ],
+    [
+      "JSON",
+      1
+    ],
+    [
+      "Location",
+      1
+    ],
+    [
+      "July",
+      1
+    ]
+  ],
+  "fixture_blocks": 725,
+  "gazetteer_tiers": [
+    "CURATED",
+    "EXPLICIT_DOCUMENT",
+    "SURVEY_DERIVED"
+  ],
+  "generated_at": "2026-08-06T23:38:20.064686+00:00",
+  "heading_inventory": [
+    "# Graphify Throughput Fixture",
+    "## Module 1: Graphify Pipeline Segment",
+    "## Module 2: Graphify Pipeline Segment",
+    "## Module 3: Graphify Pipeline Segment",
+    "## Module 4: Graphify Pipeline Segment",
+    "## Module 5: Graphify Pipeline Segment",
+    "## Module 6: Graphify Pipeline Segment",
+    "## Module 7: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 8: Graphify Pipeline Segment",
+    "## Module 9: Graphify Pipeline Segment",
+    "## Module 10: Graphify Pipeline Segment",
+    "## Module 11: Graphify Pipeline Segment",
+    "## Module 12: Graphify Pipeline Segment",
+    "## Module 13: Graphify Pipeline Segment",
+    "## Module 14: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 15: Graphify Pipeline Segment",
+    "## Module 16: Graphify Pipeline Segment",
+    "## Module 17: Graphify Pipeline Segment",
+    "## Module 18: Graphify Pipeline Segment",
+    "## Module 19: Graphify Pipeline Segment",
+    "## Module 20: Graphify Pipeline Segment",
+    "## Module 21: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 22: Graphify Pipeline Segment",
+    "## Module 23: Graphify Pipeline Segment",
+    "## Module 24: Graphify Pipeline Segment",
+    "## Module 25: Graphify Pipeline Segment",
+    "## Module 26: Graphify Pipeline Segment",
+    "## Module 27: Graphify Pipeline Segment",
+    "## Module 28: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 29: Graphify Pipeline Segment",
+    "## Module 30: Graphify Pipeline Segment",
+    "## Module 31: Graphify Pipeline Segment",
+    "## Module 32: Graphify Pipeline Segment",
+    "## Module 33: Graphify Pipeline Segment",
+    "## Module 34: Graphify Pipeline Segment",
+    "## Module 35: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 36: Graphify Pipeline Segment",
+    "## Module 37: Graphify Pipeline Segment",
+    "## Module 38: Graphify Pipeline Segment",
+    "## Module 39: Graphify Pipeline Segment",
+    "## Module 40: Graphify Pipeline Segment",
+    "## Module 41: Graphify Pipeline Segment",
+    "## Module 42: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 43: Graphify Pipeline Segment",
+    "## Module 44: Graphify Pipeline Segment",
+    "## Module 45: Graphify Pipeline Segment",
+    "## Module 46: Graphify Pipeline Segment",
+    "## Module 47: Graphify Pipeline Segment",
+    "## Module 48: Graphify Pipeline Segment",
+    "## Module 49: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 50: Graphify Pipeline Segment",
+    "## Module 51: Graphify Pipeline Segment",
+    "## Module 52: Graphify Pipeline Segment",
+    "## Module 53: Graphify Pipeline Segment",
+    "## Module 54: Graphify Pipeline Segment",
+    "## Module 55: Graphify Pipeline Segment",
+    "## Module 56: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 57: Graphify Pipeline Segment",
+    "## Module 58: Graphify Pipeline Segment",
+    "## Module 59: Graphify Pipeline Segment",
+    "## Module 60: Graphify Pipeline Segment",
+    "## Module 61: Graphify Pipeline Segment",
+    "## Module 62: Graphify Pipeline Segment",
+    "## Module 63: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 64: Graphify Pipeline Segment",
+    "## Module 65: Graphify Pipeline Segment",
+    "## Module 66: Graphify Pipeline Segment",
+    "## Module 67: Graphify Pipeline Segment",
+    "## Module 68: Graphify Pipeline Segment",
+    "## Module 69: Graphify Pipeline Segment",
+    "## Module 70: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 71: Graphify Pipeline Segment",
+    "## Module 72: Graphify Pipeline Segment",
+    "## Module 73: Graphify Pipeline Segment",
+    "## Module 74: Graphify Pipeline Segment",
+    "## Module 75: Graphify Pipeline Segment",
+    "## Module 76: Graphify Pipeline Segment",
+    "## Module 77: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 78: Graphify Pipeline Segment",
+    "## Module 79: Graphify Pipeline Segment",
+    "## Module 80: Graphify Pipeline Segment",
+    "## Module 81: Graphify Pipeline Segment",
+    "## Module 82: Graphify Pipeline Segment",
+    "## Module 83: Graphify Pipeline Segment",
+    "## Module 84: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 85: Graphify Pipeline Segment",
+    "## Module 86: Graphify Pipeline Segment",
+    "## Module 87: Graphify Pipeline Segment",
+    "## Module 88: Graphify Pipeline Segment",
+    "## Module 89: Graphify Pipeline Segment",
+    "## Module 90: Graphify Pipeline Segment",
+    "## Module 91: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 92: Graphify Pipeline Segment",
+    "## Module 93: Graphify Pipeline Segment",
+    "## Module 94: Graphify Pipeline Segment",
+    "## Module 95: Graphify Pipeline Segment",
+    "## Module 96: Graphify Pipeline Segment",
+    "## Module 97: Graphify Pipeline Segment",
+    "## Module 98: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 99: Graphify Pipeline Segment",
+    "## Module 100: Graphify Pipeline Segment",
+    "## Module 101: Graphify Pipeline Segment",
+    "## Module 102: Graphify Pipeline Segment",
+    "## Module 103: Graphify Pipeline Segment",
+    "## Module 104: Graphify Pipeline Segment",
+    "## Module 105: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 106: Graphify Pipeline Segment",
+    "## Module 107: Graphify Pipeline Segment",
+    "## Module 108: Graphify Pipeline Segment",
+    "## Module 109: Graphify Pipeline Segment",
+    "## Module 110: Graphify Pipeline Segment",
+    "## Module 111: Graphify Pipeline Segment",
+    "## Module 112: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 113: Graphify Pipeline Segment",
+    "## Module 114: Graphify Pipeline Segment",
+    "## Module 115: Graphify Pipeline Segment",
+    "## Module 116: Graphify Pipeline Segment",
+    "## Module 117: Graphify Pipeline Segment",
+    "## Module 118: Graphify Pipeline Segment",
+    "## Module 119: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 120: Graphify Pipeline Segment",
+    "## Module 121: Graphify Pipeline Segment",
+    "## Module 122: Graphify Pipeline Segment",
+    "## Module 123: Graphify Pipeline Segment",
+    "## Module 124: Graphify Pipeline Segment",
+    "## Module 125: Graphify Pipeline Segment",
+    "## Module 126: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 127: Graphify Pipeline Segment",
+    "## Module 128: Graphify Pipeline Segment",
+    "## Module 129: Graphify Pipeline Segment",
+    "## Module 130: Graphify Pipeline Segment",
+    "## Module 131: Graphify Pipeline Segment",
+    "## Module 132: Graphify Pipeline Segment",
+    "## Module 133: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 134: Graphify Pipeline Segment",
+    "## Module 135: Graphify Pipeline Segment",
+    "## Module 136: Graphify Pipeline Segment",
+    "## Module 137: Graphify Pipeline Segment",
+    "## Module 138: Graphify Pipeline Segment",
+    "## Module 139: Graphify Pipeline Segment",
+    "## Module 140: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 141: Graphify Pipeline Segment",
+    "## Module 142: Graphify Pipeline Segment",
+    "## Module 143: Graphify Pipeline Segment",
+    "## Module 144: Graphify Pipeline Segment",
+    "## Module 145: Graphify Pipeline Segment",
+    "## Module 146: Graphify Pipeline Segment",
+    "## Module 147: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 148: Graphify Pipeline Segment",
+    "## Module 149: Graphify Pipeline Segment",
+    "## Module 150: Graphify Pipeline Segment",
+    "## Module 151: Graphify Pipeline Segment",
+    "## Module 152: Graphify Pipeline Segment",
+    "## Module 153: Graphify Pipeline Segment",
+    "## Module 154: Graphify Pipeline Segment",
+    "# code-only block routed away from prose OpenIE",
+    "## Module 155: Graphify Pipeline Segment",
+    "## Module 156: Graphify Pipeline Segment",
+    "## Module 157: Graphify Pipeline Segment",
+    "## Module 158: Graphify Pipeline Segment",
+    "## Module 159: Graphify Pipeline Segment",
+    "## Module 160: Graphify Pipeline Segment",
+    "# Graphify Quality Fixture"
+  ],
+  "note": "Repo agent must run equivalent survey over target corpus before GLiNER2 census.",
+  "repeated_block_hashes": {
+    "59c5159b92b91109": 32,
+    "7a8e5b8cf400ddb3": 22,
+    "8499115e4a06ffe1": 160,
+    "cd1fa8a4179f4cc0": 16,
+    "f144cf7e6da5d316": 12
+  }
+}

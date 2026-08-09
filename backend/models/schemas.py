@@ -130,6 +130,16 @@ class ChatChunk(_legacy.ChatChunk):
     skills_used: list[str] | None = None
     tools_used: list[str] | None = None
     reasoning_cascade_applied: bool | None = None
+    # Owner directive 2026-08-03 — structured answer verdict for terminal
+    # failures after retrieval. A provider failure must never be presented
+    # as missing evidence; error chunks carry e.g.
+    # {"status": "answer_provider_unavailable", "retrieval_succeeded": true,
+    #  "sources": [...]} so clients and evals can distinguish provider
+    # failure from evidence absence.
+    answer_status: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured answer-status payload for terminal failures.",
+    )
 
 
 class ChatMessage(_legacy.ChatMessage):
@@ -250,47 +260,13 @@ class IngestionConfig(BaseModel):
     extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = False
-    # Per-corpus extraction contract. New production extraction uses
-    # provider-card LLM lanes in extraction_models/summary_models. "local" now
-    # means a local/private OpenAI-compatible provider endpoint (RTX/vLLM),
-    # while "legacy_local" is the deprecated GLiNER/GLiREL sidecar path.
-    # "inherit" = legacy fallback to the global Settings engine; the lifespan
-    # migration stamps existing corpora explicit so the resolved workflow is
-    # deterministic per corpus. Resolution + fail-fast validation:
-    # services/ingestion/extraction_contract.py.
+    # Per-corpus extraction contract. Graphify CPU is the only production
+    # extraction provider; "off" is an explicit vectors-only opt-out.
+    # Retired values fail validation and are never aliased or routed.
     extraction_engine: Literal[
-        "inherit",
         "off",
-        "local",
-        "cloud",
-        "runpod_flash",
-        "legacy_local",
-        "dual",
-        "local_then_cloud",
-        "local_then_enrich",
-    ] = Field(default="inherit")
-    runpod_wire_contract: Literal[
-        "legacy_v2_v3",
-        "local_extraction_v1",
-    ] = Field(
-        default="legacy_v2_v3",
-        description=(
-            "Corpus-scoped RunPod wire selector. The default preserves the "
-            "production GLiNER-Relex v2/v3 adapter; local_extraction_v1 is "
-            "reserved for an explicitly pinned endpoint/account on a fresh corpus."
-        ),
-    )
-    runpod_endpoint_id_override: str | None = Field(default=None, max_length=120)
-    runpod_account_name_override: str | None = Field(default=None, max_length=60)
-    runpod_local_extraction_routes: list[RunpodLocalExtractionRoute] = Field(
-        default_factory=list,
-        max_length=64,
-        description=(
-            "Ordered explicit account/endpoint pairs for deterministic "
-            "LocalExtractionV1 burst dispatch. Empty preserves the singular "
-            "endpoint/account override contract."
-        ),
-    )
+        "graphify_cpu",
+    ] = Field(default="graphify_cpu")
 
     # Default to the universal vocab so freshly-instantiated configs match
     # what the lifespan migration patches existing corpora to. Ghost B's
@@ -367,53 +343,14 @@ class IngestionConfig(BaseModel):
                 data.pop(f"{prefix}_{suffix}", None)
         return data
 
-    @model_validator(mode="after")
-    def validate_runpod_wire_contract(self) -> "IngestionConfig":
-        endpoint = (self.runpod_endpoint_id_override or "").strip()
-        account = (self.runpod_account_name_override or "").strip()
-        routes = self.runpod_local_extraction_routes
-        singular_present = (
-            self.runpod_endpoint_id_override is not None
-            or self.runpod_account_name_override is not None
-        )
-        if self.runpod_wire_contract == "local_extraction_v1":
-            if self.extraction_engine != "runpod_flash":
-                raise ValueError(
-                    "local_extraction_v1 requires extraction_engine=runpod_flash"
-                )
-            if routes and singular_present:
-                raise ValueError(
-                    "local_extraction_v1 requires either singular overrides or "
-                    "explicit routes, never both"
-                )
-            if not routes and (not endpoint or not account):
-                raise ValueError(
-                    "local_extraction_v1 requires explicit RunPod endpoint and "
-                    "account overrides"
-                )
-            if routes:
-                if len(routes) < 2:
-                    raise ValueError(
-                        "local_extraction_v1 route lists require at least two routes"
-                    )
-                route_accounts = [row.account_name for row in routes]
-                route_endpoints = [row.endpoint_id for row in routes]
-                if len(set(route_accounts)) != len(route_accounts):
-                    raise ValueError("LocalExtractionV1 route accounts must be unique")
-                if len(set(route_endpoints)) != len(route_endpoints):
-                    raise ValueError("LocalExtractionV1 route endpoints must be unique")
-        elif singular_present or routes:
-            raise ValueError(
-                "RunPod endpoint/account routes require local_extraction_v1"
-            )
-        return self
-
-
 class WriteState(BaseModel):
     """Tracks per-store write completion and non-fatal ingest warnings."""
 
     mongo_written: bool = False
     qdrant_written: bool = False
+    qdrant_written_at: datetime | None = None
+    neo4j_written_at: datetime | None = None
+    verified_at: datetime | None = None
     summaries_indexed: bool = False
     # Writer-intent stamp (2026-07-04): how many summary vectors THIS ingest
     # actually decided to write. The verifier prefers this over re-deriving
@@ -437,6 +374,9 @@ class IngestJobResponse(_legacy.IngestJobResponse):
     legacy WriteState class."""
 
     write_state: WriteState = Field(default_factory=WriteState)
+    # Control Plane V2 — deterministic run-ledger pointer for this document.
+    # Optional so legacy constructors keep working; populated by the routers.
+    run_id: str | None = None
 
 
 class CorpusCreate(_legacy.CorpusCreate):
@@ -625,46 +565,19 @@ class RetrievalSettings(_legacy.RetrievalSettings):
     )
 
 
-class ExtractionEndpoint(BaseModel):
-    """One Ghost B extraction sidecar a user can toggle on/off.
-
-    The worker health-probes ENABLED endpoints per document (preference
-    order = list order) and dispatches slices to the live ones — so a GPU
-    box can be powered off without any config change: work just flows to
-    whatever is on (e.g. the always-on local sidecar)."""
-
-    label: str = Field(default="", max_length=60)
-    url: str = Field(default="", max_length=300)
-    enabled: bool = True
-
-
 class ExtractionSettings(BaseModel):
-    """Where local Ghost B extraction runs. Defaults seed from
-    LOCAL_GHOST_B_EXTRACT_URL so existing deployments see their current
-    wiring in the UI; edits persist in Mongo and apply on the next ingest
-    without a backend restart (same pattern as Modal settings)."""
+    """Global extraction policy with one provider and one explicit opt-out."""
 
     engine: Literal[
         "off",
-        "local",
-        "cloud",
-        "runpod_flash",
-        "legacy_local",
-        "local_then_cloud",
-        "dual",
-        "local_then_enrich",
+        "graphify_cpu",
     ] = Field(
-        default="local",
+        default="graphify_cpu",
         description=(
-            "Which Ghost B engine runs extraction: 'local' = local/private "
-            "provider-card LLM endpoint such as RTX/vLLM; 'cloud' = remote "
-            "provider-card LLM pool; 'legacy_local' = deprecated "
-            "GLiNER/GLiREL sidecars; 'dual' = legacy local plus provider LLM "
-            "pool; 'local_then_cloud' and 'local_then_enrich' are "
-            "transitional legacy-local modes. Use 'off' for vectors-only."
+            "'graphify_cpu' runs the canonical CPU GLiNER2 census and "
+            "parse-once deterministic relation pipeline; 'off' is vectors-only."
         ),
     )
-    endpoints: list[ExtractionEndpoint] = Field(default_factory=list)
 
 
 class RunpodFlashAccount(BaseModel):
@@ -702,12 +615,11 @@ class RunpodFlashAccount(BaseModel):
 
 
 class RunpodFlashExtractionSettings(BaseModel):
-    """Runpod Flash burst lane for joint GLiNER-Relex extraction.
+    """Legacy-named Runpod transport settings retained for embedding jobs.
 
     The API key is deliberately absent. It lives in the encrypted shared-key
-    store under ``api_keys.runpod`` and is resolved only at dispatch time.
-    Flash workers are stateless inference workers: they never receive database
-    credentials and never write MongoDB, Qdrant, or Neo4j directly.
+    store under ``api_keys.runpod``. These settings cannot activate extraction;
+    Graphify CPU is the only production extraction route.
     """
 
     enabled: bool = False
@@ -720,13 +632,13 @@ class RunpodFlashExtractionSettings(BaseModel):
             "'default' account."
         ),
     )
-    endpoint_name: str = Field(default="polymath-gliner-relex", max_length=120)
+    endpoint_name: str = Field(default="polymath-runpod", max_length=120)
     model_id: str = Field(
-        default="knowledgator/gliner-relex-large-v0.5",
+        default="",
         max_length=240,
     )
     model_revision: str = Field(
-        default="9c4171ae1e690fc29b87f33579e50bcd65faf2cc",
+        default="",
         max_length=80,
         description="Pinned Hugging Face revision; empty opts into the repository default.",
     )
@@ -793,7 +705,7 @@ class GlobalIngestionSummarySettings(BaseModel):
     """
 
     enabled: bool = Field(
-        default=False,
+        default=True,
         description="Default value for chunk_summarization on newly created corpora.",
     )
     max_summary_tokens: int = Field(

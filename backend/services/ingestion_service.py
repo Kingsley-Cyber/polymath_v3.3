@@ -68,10 +68,6 @@ FROZEN_CONFIG_FIELDS: frozenset[str] = frozenset(
         "entity_schema",
         "relation_schema",
         "schema_strict",
-        "runpod_wire_contract",
-        "runpod_endpoint_id_override",
-        "runpod_account_name_override",
-        "runpod_local_extraction_routes",
         "docling_ocr_enabled",
         "preset",
     }
@@ -110,6 +106,47 @@ class FrozenFieldError(ValueError):
             f"Corpus has {doc_count} ingested documents. Frozen fields can "
             f"only be changed on an empty corpus. Attempted: {self.fields}."
         )
+
+
+class ExtractionEngineLockedError(ValueError):
+    """Raised by update_corpus when a patch tries to change extraction_engine
+    on a corpus that already holds documents/artifacts (owner directive
+    2026-08-03). Direct engine mutation on a non-empty corpus would mix
+    artifacts produced by different engines under one active identity.
+    Controlled re-extraction must go through a new generation or an explicit,
+    audited, rollback-capable migration workflow. Router maps this to HTTP
+    409 with error=extraction_engine_locked.
+
+    Attributes:
+        current_engine: the engine the corpus is locked to
+        attempted_engine: the engine value the caller sent
+        doc_count: current ingested-document count on the corpus
+    """
+
+    def __init__(
+        self, current_engine: str, attempted_engine: str, doc_count: int
+    ) -> None:
+        self.current_engine = current_engine
+        self.attempted_engine = attempted_engine
+        self.doc_count = doc_count
+        super().__init__(
+            f"Corpus has {doc_count} ingested documents. extraction_engine is "
+            f"locked to {current_engine!r}; attempted {attempted_engine!r}. "
+            "Re-extraction requires a new generation or an audited migration "
+            "workflow."
+        )
+
+
+def _corpus_hidden_from_user_search(doc: dict) -> bool:
+    """True when a corpus is marked as a permanent integration fixture and
+    must be excluded from user-facing corpus lists (owner directive
+    2026-08-03). Fails OPEN: a missing or malformed fixture block never
+    hides a corpus — only an explicit excluded_from_user_search=true does.
+    """
+    fixture = doc.get("fixture") if isinstance(doc, dict) else None
+    if not isinstance(fixture, dict):
+        return False
+    return bool(fixture.get("excluded_from_user_search"))
 
 
 def freeze_snapshot(config: IngestionConfig) -> dict:
@@ -212,7 +249,11 @@ def exact_source_duplicate_query(
         {
             "corpus_id": corpus_id,
             "ingest_stage": {
-                "$nin": ["skipped_duplicate", "skipped_nonsemantic"]
+                "$nin": [
+                    "skipped_duplicate",
+                    "skipped_nonsemantic",
+                    "unsupported_by_policy",
+                ]
             },
             # Exact-source deduplication is a terminal-success shortcut, so it
             # must use the same closure truth as corpus readiness and the
@@ -456,38 +497,22 @@ class IngestionService:
         logger.info("IngestionService: clients closed")
 
     async def migrate_extraction_engine(self, global_engine: str) -> dict:
-        """Lifespan migration — stamp an EXPLICIT extraction_engine on every
-        corpus whose config is missing/'inherit'.
+        """Stamp only missing corpus engines with the single live provider.
 
-        §13 ground-truth correction: the global Settings engine silently
-        governed every corpus (a corpus ran cloud Qwen2.5-7B while its enabled
-        sidecars idled and every screen looked green). Stamping the current
-        global value preserves observed behavior exactly, but makes the
-        contract per-corpus, visible, and deterministic from then on — the
-        global engine remains only as the seed for legacy/unset configs.
-
-        Idempotent: corpora already carrying an explicit engine are untouched.
+        Explicit retired values are deliberately left untouched so operators
+        see a fail-closed validation error instead of an automatic production
+        migration or re-extraction.
         """
         if self._db is None:
             logger.warning("migrate_extraction_engine: DB not connected — skipping")
             return {"scanned": 0, "stamped": 0, "engine": global_engine}
 
-        valid = {
-            "off",
-            "local",
-            "cloud",
-            "runpod_flash",
-            "legacy_local",
-            "dual",
-            "local_then_cloud",
-            "local_then_enrich",
-        }
+        valid = {"off", "graphify_cpu"}
         engine = (global_engine or "").strip().lower()
         if engine not in valid:
-            # Deterministic floor: "local" is now a private/provider LLM lane.
-            # It may fail fast without a provider chip, but it will not silently
-            # run the deprecated GLiNER/GLiREL sidecar.
-            engine = "local"
+            # Deterministic floor: the canonical CPU Graphify engine. It needs
+            # no provider pool and fails closed without another extractor.
+            engine = "graphify_cpu"
 
         scanned = 0
         stamped: list[str] = []
@@ -512,8 +537,8 @@ class IngestionService:
                 .strip()
                 .lower()
             )
-            if current in valid:
-                continue  # already explicit
+            if current:
+                continue  # explicit, including retired values: never auto-alias
             await self._db["corpora"].update_one(
                 {"corpus_id": doc["corpus_id"]},
                 {"$set": {"default_ingestion_config.extraction_engine": engine}},
@@ -826,7 +851,6 @@ class IngestionService:
         on_doc_id: "Any | None" = None,
         on_phase: "Any | None" = None,
         target_stage: str | None = None,
-        extraction_endpoint_urls: list[str] | None = None,
         defer_summaries: bool = False,
         duplicate_policy: str = "skip",
         summary_cost_run_id: str | None = None,
@@ -926,16 +950,54 @@ class IngestionService:
                         error=reason,
                     )
 
+        # Required summaries = deterministic_summary.v1 when no cost authority.
+        # Cost run id + authority open deprecated llm_summary_enrichment.v1 only.
         if ingestion_config.chunk_summarization:
-            if not str(summary_cost_run_id or "").strip():
+            has_cost_run = bool(str(summary_cost_run_id or "").strip())
+            if has_cost_run:
+                parse_authority_usd(summary_cost_authority_usd)
+            elif summary_cost_authority_usd is not None:
                 from services.ingestion.summary_cost_control import (
                     SummaryCostAuthorityRequired,
                 )
 
                 raise SummaryCostAuthorityRequired(
-                    "summary_cost_run_id is required when chunk_summarization is enabled"
+                    "summary_cost_run_id is required when "
+                    "summary_cost_authority_usd is set for enrichment"
                 )
-            parse_authority_usd(summary_cost_authority_usd)
+
+        # Control Plane V2 — every intake path funnels through here, so this
+        # is where each document gets its durable run row. The wrapped
+        # callback fires as soon as the worker resolves the doc_id; the
+        # ledger write is best-effort (the reconciler backfills any miss).
+        upstream_on_doc_id = on_doc_id
+        if self._db is not None and bool(
+            getattr(get_settings(), "CONTROL_PLANE_V2_ENABLED", True)
+        ):
+            db = self._db
+
+            async def _record_run_then_forward(resolved_doc_id: str) -> None:
+                try:
+                    from services.control_plane import ledger as cp_ledger
+
+                    if resolved_doc_id:
+                        await cp_ledger.create_ingestion_run(
+                            db,
+                            corpus_id=corpus_id,
+                            doc_id=str(resolved_doc_id),
+                            user_id=user_id,
+                            source="upload" if source_url is None else "url",
+                            filename=filename,
+                        )
+                except Exception as exc:  # noqa: BLE001 — ledger must not block intake
+                    logger.warning(
+                        "control-plane run row create failed doc=%s: %s",
+                        resolved_doc_id,
+                        exc,
+                    )
+                await _call_ingest_callback(upstream_on_doc_id, resolved_doc_id)
+
+            on_doc_id = _record_run_then_forward
 
         return await run_ingest_job(
             job_id=str(uuid.uuid4()),
@@ -954,7 +1016,6 @@ class IngestionService:
             on_doc_id=on_doc_id,
             on_phase=on_phase,
             target_stage=target_stage,
-            extraction_endpoint_urls=extraction_endpoint_urls,
             defer_summaries=defer_summaries,
             summary_cost_run_id=summary_cost_run_id,
             summary_cost_authority_usd=summary_cost_authority_usd,
@@ -1282,6 +1343,15 @@ class IngestionService:
         from services.storage.mongo_reader import list_corpora
 
         docs = await list_corpora(self._db, user_id=user_id)
+        # Owner directive 2026-08-03 — permanent integration fixtures are
+        # marked with fixture.excluded_from_user_search and must never
+        # appear in user-facing corpus lists. Direct access by corpus_id
+        # (get_corpus, retrieval, eval scripts) is unaffected.
+        docs = [
+            doc
+            for doc in docs
+            if not _corpus_hidden_from_user_search(doc)
+        ]
         await self._refresh_corpus_counts(docs, refresh_readiness=False)
         for doc in docs:
             self._mask_ingestion_keys_in_place(doc.get("default_ingestion_config"))
@@ -1604,6 +1674,108 @@ class IngestionService:
             query["user_id"] = user_id
         return await self._db["documents"].find_one(query)
 
+    async def get_ingestion_evidence(
+        self,
+        doc_id: str,
+        *,
+        corpus_id: str | None = None,
+        user_id: str | None = None,
+    ) -> Optional[dict]:
+        """Return secret-free persisted receipts for one ingestion.
+
+        This is intentionally an identity join on ``corpus_id + doc_id``.
+        Corpus-wide provider counts are never used as proof that a particular
+        document ran on a particular provider or machine.
+        """
+        doc = await self.get_job_status(
+            doc_id,
+            corpus_id=corpus_id,
+            user_id=user_id,
+        )
+        if not doc:
+            return None
+
+        resolved_corpus_id = str(doc.get("corpus_id") or corpus_id or "")
+        identity = {"corpus_id": resolved_corpus_id, "doc_id": doc_id}
+        ghost_rows = await (
+            self._db["ghost_b_extractions"]
+            .find(
+                identity,
+                {
+                    "_id": 0,
+                    "chunk_id": 1,
+                    "status": 1,
+                    "provider": 1,
+                    "model": 1,
+                    "lane": 1,
+                    "schema_mode": 1,
+                    "output_mode": 1,
+                    "provider_card": 1,
+                },
+            )
+            .limit(10_000)
+            .to_list(length=10_000)
+        )
+        parent_rows = await (
+            self._db["parent_chunks"]
+            .find(
+                identity,
+                {
+                    "_id": 0,
+                    "parent_id": 1,
+                    "summary": 1,
+                    "summary_provider": 1,
+                    "summary_model": 1,
+                    "summary_receipt": 1,
+                    "summary_metadata": 1,
+                },
+            )
+            .limit(10_000)
+            .to_list(length=10_000)
+        )
+        provider_metrics = await (
+            self._db["ingest_provider_call_metrics"]
+            .find(
+                identity,
+                {
+                    "_id": 0,
+                    "phase": 1,
+                    "provider_family": 1,
+                    "model": 1,
+                    "local_compute": 1,
+                    "billable_provider": 1,
+                    "accepted_count": 1,
+                    "rejected_count": 1,
+                    "created_at": 1,
+                },
+            )
+            .sort("created_at", -1)
+            .limit(2_000)
+            .to_list(length=2_000)
+        )
+        graph_job = await self._db["graph_promotion_jobs"].find_one(
+            identity,
+            {
+                "_id": 0,
+                "status": 1,
+                "claims_in": 1,
+                "facts_written": 1,
+                "edges_written": 1,
+                "skipped_by_reason": 1,
+                "promote_version": 1,
+                "created_at": 1,
+                "updated_at": 1,
+            },
+            sort=[("updated_at", -1), ("created_at", -1)],
+        )
+        return {
+            "document": doc,
+            "ghost_rows": ghost_rows,
+            "parent_rows": parent_rows,
+            "provider_metrics": provider_metrics,
+            "graph_job": graph_job,
+        }
+
     # Fields that must never change once any document has been ingested.
     # Changing them mid-corpus = silent zero-recall (different vector space).
     _LOCKED_EMBEDDING_FIELDS = frozenset(
@@ -1727,6 +1899,24 @@ class IngestionService:
                 ]
                 if changed_frozen:
                     raise FrozenFieldError(changed_frozen, doc_count)
+
+                # Engine lock (owner directive 2026-08-03): extraction_engine
+                # stays mutable ONLY on empty corpora. A no-op (sending the
+                # same value back) is allowed; any real change on a corpus
+                # with artifacts is rejected so one active corpus identity
+                # never mixes engines. Resolving "inherit" against the stored
+                # value counts as no-op only when the literal matches.
+                if (
+                    "extraction_engine" in new_config
+                    and "extraction_engine" in existing_config
+                    and new_config["extraction_engine"]
+                    != existing_config["extraction_engine"]
+                ):
+                    raise ExtractionEngineLockedError(
+                        existing_config["extraction_engine"],
+                        new_config["extraction_engine"],
+                        doc_count,
+                    )
 
             # Server-side merge (Phase 21). With the router's exclude_unset
             # policy, the caller may send a partial config; Mongo's $set
@@ -2318,9 +2508,49 @@ class IngestionService:
         corpus_id: str,
         doc_id: str,
         user_id: str,
+        release: Any = None,
+        allow_extraction: bool = True,
     ) -> dict:
-        """Retry only failed Ghost B chunks and patch Neo4j incrementally."""
+        """Retry only failed Ghost B chunks and patch Neo4j incrementally.
+
+        Routed through the shared canonical graph-write authorization seam
+        (``authorize_canonical_graph_write``) — the same boundary as the
+        durable promotion runner. A release-policy block is NOT a graph
+        failure: zero Neo4j calls, no write-attempt increments, repair
+        candidate state and retry eligibility preserved, operator identity
+        and gate decision recorded in the response.
+        """
+        from models.release_state import ReleasePin, blocked_no_release_state
         from services.ingestion.graph_backfill import backfill_failed_graph_chunks
+        from services.ingestion.graph_promotion_jobs import (
+            active_release_pin,
+            authorize_canonical_graph_write,
+            release_gate_mode,
+        )
+
+        gate_mode = release_gate_mode()
+        pin = release if isinstance(release, ReleasePin) else active_release_pin()
+        auth = authorize_canonical_graph_write(mode=gate_mode, release_pin=pin)
+        if not auth.allowed:
+            blocked = blocked_no_release_state(pin)
+            logger.info(
+                "manual graph repair blocked by release gate "
+                "corpus=%s doc=%s operator=%s missing=%s",
+                corpus_id,
+                doc_id,
+                user_id,
+                ",".join(blocked["missing_conditions"]),
+            )
+            return {
+                **blocked,
+                "gate_mode": gate_mode,
+                "release_gate": auth.decision,
+                "operator": {
+                    "user_id": user_id,
+                    "corpus_id": corpus_id,
+                    "doc_id": doc_id,
+                },
+            }
 
         result = await backfill_failed_graph_chunks(
             db=self._db,
@@ -2329,7 +2559,13 @@ class IngestionService:
             corpus_id=corpus_id,
             doc_id=doc_id,
             user_id=user_id,
+            allow_extraction=allow_extraction,
         )
+        if gate_mode == "shadow":
+            # Shadow: decision recorded verbatim, execution unchanged.
+            result["release_gate_shadow"] = auth.decision
+            result["release_gate_caller"] = "ingestion_service.backfill_graph_failures"
+            result["release_gate_operator"] = user_id
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
             result["readiness"] = readiness
@@ -2805,15 +3041,23 @@ class IngestionService:
         summary_cost_authority_usd: Any | None = None,
     ) -> dict:
         from services.ingestion.summary_jobs import run_summary_jobs
-        from services.ingestion.summary_cost_control import SummaryCostController
 
-        summary_cost_controller = await SummaryCostController.open(
-            self._db,
-            run_id=summary_cost_run_id,
-            corpus_id=corpus_id,
-            user_id=str(user_id or ""),
-            authority_usd=summary_cost_authority_usd,
-        )
+        # Owner decision: deterministic_summary.v1 is the REQUIRED baseline and
+        # must never touch summary_provider_pool / LiteLLM / cloud providers /
+        # summary_cost_control. Cost authority belongs only to the optional
+        # llm_summary_enrichment.v1 product.
+        deterministic_baseline = not str(summary_cost_run_id or "").strip()
+        summary_cost_controller = None
+        if not deterministic_baseline:
+            from services.ingestion.summary_cost_control import SummaryCostController
+
+            summary_cost_controller = await SummaryCostController.open(
+                self._db,
+                run_id=summary_cost_run_id,
+                corpus_id=corpus_id,
+                user_id=str(user_id or ""),
+                authority_usd=summary_cost_authority_usd,
+            )
 
         pressure_readiness = await self._compute_corpus_readiness_safely(corpus_id)
         paused = await self._backpressure_pause_result(
@@ -2831,7 +3075,15 @@ class IngestionService:
                     "counts": {},
                     "runner_results": {},
                     "jobs": [],
-                    "summary_cost_receipt": await summary_cost_controller.snapshot(),
+                    "summary_cost_receipt": (
+                        await summary_cost_controller.snapshot()
+                        if summary_cost_controller is not None
+                        else {
+                            "product": "deterministic_summary.v1",
+                            "provider_calls": 0,
+                            "authority_required": False,
+                        }
+                    ),
                 }
             )
             return paused
@@ -2846,6 +3098,31 @@ class IngestionService:
         async def _parent_runner(
             *, limit: int, doc_ids: list[str] | None = None
         ) -> dict:
+            if deterministic_baseline:
+                from services.ingestion.deterministic_summary import (
+                    run_deterministic_parent_summaries,
+                )
+
+                result = await run_deterministic_parent_summaries(
+                    self._db,
+                    corpus_id=corpus_id,
+                    limit=limit,
+                    doc_ids=doc_ids,
+                )
+                if summary_indexing_allowed:
+                    try:
+                        result["indexed"] = await self._index_deterministic_parent_summaries(
+                            corpus_id,
+                            cfg=None,
+                            effective_user_id=str(user_id or ""),
+                            batch=min(max(int(limit or 1), 1), 32),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - Mongo summaries stay authoritative
+                        result["index_error"] = f"{type(exc).__name__}: {exc}"[:300]
+                else:
+                    result["index_scope"] = "paused_qdrant_pressure"
+                    result["index_deferred_by_pressure"] = True
+                return result
             result = await self.backfill_parent_summaries(
                 corpus_id,
                 user_id=user_id,
@@ -2870,6 +3147,7 @@ class IngestionService:
                 user_id=user_id,
                 limit=limit,
                 doc_ids=doc_ids,
+                deterministic_only=deterministic_baseline,
                 summary_cost_run_id=summary_cost_run_id,
                 summary_cost_authority_usd=summary_cost_authority_usd,
             )
@@ -2896,8 +3174,105 @@ class IngestionService:
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
             result["readiness"] = readiness
-        result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
+        if summary_cost_controller is not None:
+            result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
+        else:
+            result["summary_cost_receipt"] = {
+                "product": "deterministic_summary.v1",
+                "provider_calls": 0,
+                "authority_required": False,
+            }
         return result
+
+    async def _index_deterministic_parent_summaries(
+        self,
+        corpus_id: str,
+        *,
+        cfg: Any | None = None,
+        effective_user_id: str = "",
+        batch: int = 32,
+    ) -> int:
+        """Embed + upsert deterministic parent-summary points (idempotent).
+
+        Point ids derive from ``corpus:parent:summary`` (UUID5), so re-runs
+        overwrite in place. Qdrant stays a rebuildable projection: Mongo
+        parent_chunks.summary is authoritative.
+        """
+
+        from models.schemas import IngestionConfig
+        from services.embedder import embed_batch
+        from services.ingestion.summary_backfill import summary_index_text
+        from services.storage.qdrant_writer import upsert_summaries
+
+        if cfg is None:
+            corpus = await self._get_corpus_raw(corpus_id)
+            cfg = IngestionConfig(**((corpus or {}).get("default_ingestion_config") or {}))
+        target_kinds = [
+            kind
+            for kind in (cfg.target_qdrant_collections or ["hrag"])
+            if kind in ("naive", "hrag")
+        ] or ["hrag"]
+        cursor = self._db["parent_chunks"].find(
+            {
+                "corpus_id": corpus_id,
+                "schema_version": "deterministic_summary.v1",
+                "summary": {"$exists": True, "$nin": [None, ""]},
+            },
+            {
+                "_id": 0,
+                "parent_id": 1,
+                "doc_id": 1,
+                "corpus_id": 1,
+                "source_tier": 1,
+                "summary": 1,
+                "retrieval_text": 1,
+                "schema_version": 1,
+                "summary_type": 1,
+                "summary_id": 1,
+                "summary_model": 1,
+                "source_hash": 1,
+                "key_terms": 1,
+                "entity_hints": 1,
+                "quality_flags": 1,
+                "source_child_ids": 1,
+                "heading_path": 1,
+                "chunk_kind": 1,
+                "filename": 1,
+            },
+        )
+        indexed = 0
+        buf: list[dict[str, Any]] = []
+
+        async def _flush() -> None:
+            nonlocal indexed
+            if not buf:
+                return
+            vectors = await embed_batch(
+                [summary_index_text(p) for p in buf],
+                mode="local",
+                expected_dim=cfg.embedding_dimension,
+                expected_model_id=cfg.embedding_model_id,
+            )
+            payloads = [
+                {
+                    **p,
+                    "retrieval_text": summary_index_text(p),
+                    "user_id": effective_user_id,
+                    "source_tier": p.get("source_tier") or "parent",
+                }
+                for p in buf
+            ]
+            indexed += await upsert_summaries(
+                self._qdrant, corpus_id, payloads, vectors, target_kinds=target_kinds
+            )
+            buf.clear()
+
+        async for parent in cursor:
+            buf.append(parent)
+            if len(buf) >= batch:
+                await _flush()
+        await _flush()
+        return indexed
 
     async def run_corpus_commander_cycle(
         self,
@@ -2925,9 +3300,10 @@ class IngestionService:
     ) -> dict:
         """Run one owned ingestion commander cycle for a corpus.
 
-        The commander owns planning/reconcile/readiness. Paid summary execution
-        only runs when the caller provides ``summary_cost_authority_usd`` and
-        requests summary slices; vector repair uses existing summary text only.
+        The commander owns planning/reconcile/readiness. Summary execution
+        always runs the deterministic_summary.v1 baseline; the paid
+        llm_summary_enrichment.v1 lane only runs when the caller provides
+        ``summary_cost_authority_usd`` and requests summary slices.
         """
 
         from services.ingestion.corpus_commander import run_corpus_commander_cycle
@@ -2955,11 +3331,12 @@ class IngestionService:
 
         async def _summary_runner(*, limit: int) -> dict:
             if summary_cost_authority_usd is None:
-                return {
-                    "status": "skipped",
-                    "claimed": 0,
-                    "reason": "summary_cost_authority_usd_required",
-                }
+                # Deterministic baseline needs no cost authority.
+                return await self.run_summary_jobs(
+                    corpus_id=corpus_id,
+                    user_id=user_id,
+                    limit=limit,
+                )
             return await self.run_summary_jobs(
                 corpus_id=corpus_id,
                 user_id=user_id,
@@ -3567,6 +3944,7 @@ class IngestionService:
         user_id: str | None = None,
         limit: int = 25,
         doc_ids: list[str] | None = None,
+        deterministic_only: bool = False,
         summary_cost_run_id: str | None = None,
         summary_cost_authority_usd: Any | None = None,
     ) -> dict[str, Any]:
@@ -3581,15 +3959,21 @@ class IngestionService:
             paused.update({"attempted": 0, "built": 0, "skipped": 0, "failed": 0})
             return paused
 
-        from services.ingestion.summary_cost_control import SummaryCostController
+        # Owner decision: the required document-summary lane is
+        # deterministic_summary.v1 and must never open summary_cost_control or
+        # resolve a provider pool. Cost authority belongs only to the optional
+        # llm_summary_enrichment.v1 product.
+        summary_cost_controller = None
+        if not deterministic_only:
+            from services.ingestion.summary_cost_control import SummaryCostController
 
-        summary_cost_controller = await SummaryCostController.open(
-            self._db,
-            run_id=summary_cost_run_id,
-            corpus_id=corpus_id,
-            user_id=str(user_id or ""),
-            authority_usd=summary_cost_authority_usd,
-        )
+            summary_cost_controller = await SummaryCostController.open(
+                self._db,
+                run_id=summary_cost_run_id,
+                corpus_id=corpus_id,
+                user_id=str(user_id or ""),
+                authority_usd=summary_cost_authority_usd,
+            )
         result = await backfill_document_summaries(
             self._db,
             corpus_id=corpus_id,
@@ -3597,13 +3981,22 @@ class IngestionService:
             user_id=user_id,
             limit=limit,
             doc_ids=doc_ids,
+            deterministic_only=deterministic_only,
             summary_cost_controller=summary_cost_controller,
             require_cost_control=summary_cost_controller is not None,
         )
         readiness = await self._materialize_corpus_readiness_safely(corpus_id)
         if readiness is not None:
             result["readiness"] = readiness
-        result["summary_cost_receipt"] = await summary_cost_controller.snapshot()
+        result["summary_cost_receipt"] = (
+            await summary_cost_controller.snapshot()
+            if summary_cost_controller is not None
+            else {
+                "product": "deterministic_summary.v1",
+                "provider_calls": 0,
+                "authority_required": False,
+            }
+        )
         return result
 
     async def audit_corpus_idempotency(

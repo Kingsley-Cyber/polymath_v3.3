@@ -1,0 +1,632 @@
+[
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than territory",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than territory",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than territory",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map than territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map than itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather than territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "map rather territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 266,
+    "evidence_start": 56,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a map rather than the territory itself",
+    "predicate": "should be treated as",
+    "qualifiers": {},
+    "subject": "the hospital s diagnostic knowledge graph"
+  },
+  {
+    "evidence_end": 596,
+    "evidence_start": 449,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "obligation to treat well formed graph as interpretation",
+    "predicate": "structured not for",
+    "qualifiers": {},
+    "subject": "term"
+  },
+  {
+    "evidence_end": 596,
+    "evidence_start": 449,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "complete copy of world",
+    "predicate": "treat not as",
+    "qualifiers": {},
+    "subject": "term structured obligation"
+  },
+  {
+    "evidence_end": 596,
+    "evidence_start": 449,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "interpretation",
+    "predicate": "treat not graph as",
+    "qualifiers": {},
+    "subject": "term structured obligation"
+  },
+  {
+    "evidence_end": 596,
+    "evidence_start": 449,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "complete copy of world",
+    "predicate": "structured not as",
+    "qualifiers": {},
+    "subject": "term"
+  },
+  {
+    "evidence_end": 596,
+    "evidence_start": 449,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "complete copy world",
+    "predicate": "treat not as",
+    "qualifiers": {},
+    "subject": "term structured obligation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as clinician review",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review two quality conflict",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as review two quality conflict",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as review two high sources conflict",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review two high quality sources",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review two high sources conflict",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as review two quality sources conflict",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as review",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "both an uncertainty type and an escalation condition such as clinician review",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review two high quality sources conflict",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "clinician review",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as review two high quality sources",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review two quality sources conflict",
+    "predicate": "carry escalation condition as",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1102,
+    "evidence_start": 937,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "escalation condition such as review two high quality sources conflict",
+    "predicate": "carry",
+    "qualifiers": {},
+    "subject": "every recommendation"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "transparency",
+    "predicate": "can create appearance of",
+    "qualifiers": {},
+    "subject": "a dashboard full of confidence scores"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "appearance of transparency improving",
+    "predicate": "created_by",
+    "qualifiers": {},
+    "subject": "dashboard"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "appearance of transparency",
+    "predicate": "created_by",
+    "qualifiers": {},
+    "subject": "dashboard"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "appearance of transparency improving judgment",
+    "predicate": "created_by",
+    "qualifiers": {},
+    "subject": "dashboard"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the appearance of transparency without improving judgment",
+    "predicate": "created_by",
+    "qualifiers": {},
+    "subject": "a dashboard full of confidence scores"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "transparency",
+    "predicate": "can create appearance of",
+    "qualifiers": {},
+    "subject": "dashboard"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "judgment",
+    "predicate": "improving",
+    "qualifiers": {},
+    "subject": "transparency"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "appearance of transparency",
+    "predicate": "created_by",
+    "qualifiers": {},
+    "subject": "dashboard full of confidence scores"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "judgment",
+    "predicate": "can create without",
+    "qualifiers": {},
+    "subject": "dashboard"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "transparency",
+    "predicate": "can create appearance of",
+    "qualifiers": {},
+    "subject": "dashboard full of confidence scores"
+  },
+  {
+    "evidence_end": 1231,
+    "evidence_start": 1104,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "transparency improving",
+    "predicate": "can create appearance of",
+    "qualifiers": {},
+    "subject": "dashboard"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it",
+    "predicate": "connects",
+    "qualifiers": {},
+    "subject": "source used"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "situated instead",
+    "predicate": "proposed",
+    "qualifiers": {},
+    "subject": "he"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "situated",
+    "predicate": "proposed",
+    "qualifiers": {},
+    "subject": "he"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "it",
+    "predicate": "connects",
+    "qualifiers": {},
+    "subject": "source"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "situated explanation",
+    "predicate": "proposed instead",
+    "qualifiers": {},
+    "subject": "he"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "recommendation",
+    "predicate": "connects to",
+    "qualifiers": {},
+    "subject": "source"
+  },
+  {
+    "evidence_end": 1394,
+    "evidence_start": 1232,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "recommendation",
+    "predicate": "connects to",
+    "qualifiers": {},
+    "subject": "source used"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "revisable decision support",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "board s resolution er 26 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "automation",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "board s resolution 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "revisable decision support",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "board s resolution 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "trustworthy automation",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "board s resolution er 26 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "action",
+    "predicate": "may recommend",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "board s resolution er 26 14 defined trustworthy automation as revisable decision support",
+    "predicate": "may recommend",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "board s resolution 14 defined automation as revisable support",
+    "predicate": "may recommend",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "board s resolution 14 defined automation as revisable decision support",
+    "predicate": "may recommend",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "uncertainty",
+    "predicate": "may recommend under",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the board s final resolution er 26 14 defined trustworthy automation as revisable decision support",
+    "predicate": "may recommend",
+    "qualifiers": {},
+    "subject": "it"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "revisable decision support",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "the board s final resolution er 26 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "trustworthy automation",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "the board s final resolution er 26 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "trustworthy automation",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "board s resolution 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "revisable support",
+    "predicate": "defines",
+    "qualifiers": {},
+    "subject": "board s resolution 14"
+  },
+  {
+    "evidence_end": 2088,
+    "evidence_start": 1855,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "board s resolution 14 defined trustworthy automation as revisable decision support",
+    "predicate": "may recommend",
+    "qualifiers": {},
+    "subject": "it"
+  }
+]

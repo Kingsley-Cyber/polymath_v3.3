@@ -1,0 +1,56 @@
+{
+  "artifacts": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/e2e_proof_final.json"
+  ],
+  "checks": {
+    "ambiguous_surface_cross_sense_merge": false,
+    "cpu_only": true,
+    "entity_reducer_conservation": true,
+    "graph_rebuild_match": true,
+    "parse_once": true,
+    "raw_mention_conservation": true,
+    "relation_decision_conservation": true,
+    "retired_runtime_models_loaded": 0,
+    "single_warm_model": true
+  },
+  "counts": {
+    "assertion_decisions": 480,
+    "completed_mentions": 2817,
+    "document_entities": 79,
+    "ghost_rows": 220,
+    "raw_mentions": 669,
+    "stage_artifacts": 16,
+    "surface_relations": 320,
+    "windows": 21
+  },
+  "errors": [],
+  "fixture": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md",
+  "identity_digest": "9e6d06039ccf7b6f243448245459c5c4ca476e42508c03fe2d20ef2918b26373",
+  "metrics": {
+    "entity": {},
+    "relation": {},
+    "throughput": {
+      "source_bytes": 81822,
+      "source_bytes_per_second": 6827.7619547201475,
+      "windows_per_second": 1.7523771241123793
+    }
+  },
+  "projection_digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f",
+  "provider": "graphify_gliner2_cpu",
+  "release_pins": {
+    "fixture_sha256": "0ddd182724b5ebfd2b0404beccc4436ca7f9de9bc1cb40faf74f4e92ecbb4658",
+    "model_checkpoint_sha256": "845fc4bd93c525b86124c58ab4f56c9eacf8587953086b14c501fab25957c007",
+    "model_id": "fastino/gliner2-base-v1",
+    "model_revision": "f5b2ecedebe4381b088c1cf276f5bf72a52cac54",
+    "pipeline": "graphify-cpu-pipeline-v15",
+    "provider": "graphify-gliner2-cpu-v1",
+    "provider_hash": "980cedfda1250987d592caecc0fb257dfa855db9b187f517839a17b872218ac4"
+  },
+  "run_id": "graphify_e2e_openie_final_v12_d59424ac",
+  "stage_timings": {
+    "entity_census_seconds": 10.73141354098334,
+    "total_seconds": 11.98372183192987
+  },
+  "status": "passed",
+  "warnings": []
+}

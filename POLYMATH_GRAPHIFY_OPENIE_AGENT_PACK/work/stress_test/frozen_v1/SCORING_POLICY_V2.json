@@ -1,0 +1,63 @@
+{
+  "version": "technical-book-66-matching-v2",
+  "prohibited": [
+    "embedding_similarity",
+    "unconstrained_fuzzy_matching",
+    "undeclared_prefix_or_suffix_subsumption"
+  ],
+  "normalized_variant_rules": [
+    "Unicode-aware case folding",
+    "word tokenization",
+    "leading article removal",
+    "possessive marker removal",
+    "final-token singularization for regular plurals"
+  ],
+  "declared_alias_groups": [
+    {
+      "canonical": "Industrial Sensor Telemetry",
+      "aliases": ["telemetry from industrial sensors"]
+    },
+    {
+      "canonical": "Event Envelope",
+      "aliases": ["accepted envelope", "accepted envelopes", "its Event Envelope"]
+    },
+    {
+      "canonical": "Normalization Process",
+      "aliases": ["normalization code"]
+    },
+    {
+      "canonical": "Validated Assertion Batch",
+      "aliases": ["Validated Assertion Batches"]
+    },
+    {
+      "canonical": "Projection Job Coordination",
+      "aliases": ["leases for projection jobs", "transient coordination"]
+    },
+    {
+      "canonical": "Query Service",
+      "aliases": ["continued query service"]
+    }
+  ],
+  "declared_subsumptions": [
+    {"gold": "Event Envelope", "predicted": "Event Envelope contract"},
+    {"gold": "Evidence Ledger", "predicted": "Evidence Ledger which records source identifiers and checksums"},
+    {"gold": "Hybrid Retrieval Process", "predicted": "Hybrid Retrieval Process which combines candidate passages from Qdrant with related entities and assertions from Neo4j"},
+    {"gold": "Recovery Report", "predicted": "Recovery Report during quarterly operational reviews"},
+    {"gold": "Recovery Time Objective", "predicted": "measured Recovery Time Objective for the exercise"},
+    {"gold": "Recovery Report", "predicted": "Recovery Report because both are reviewed during post-incident analysis"}
+  ],
+  "surface_predicate_lexicon": {
+    "uses": ["use", "uses", "apply", "applies"],
+    "depends_on": ["depend on", "depends on", "relies on"],
+    "supports": ["support", "supports", "coordinate", "coordinates"],
+    "part_of": ["part of", "component of"],
+    "produces": ["produce", "produces", "emit", "emits"],
+    "consumes": ["consume", "consumes", "consumed by", "accept", "accepts"],
+    "owns": ["own", "owns", "operated by"],
+    "causes": ["cause", "causes", "caused"],
+    "derived_from": ["derived from"],
+    "defines": ["define", "defines", "defined by"],
+    "implements": ["implement", "implements", "implemented by"],
+    "related_to": ["related to", "occurred in"]
+  }
+}

@@ -35,7 +35,11 @@ from models.schemas import (
 )
 from pydantic import BaseModel, Field
 from routers.auth import get_current_user
-from services.ingestion_service import FrozenFieldError, ingestion_service
+from services.ingestion_service import (
+    ExtractionEngineLockedError,
+    FrozenFieldError,
+    ingestion_service,
+)
 from services.ingestion import batches as ingest_batches
 from services.ingestion import dedup
 from utils.streaming import build_sse_done, build_sse_error
@@ -209,10 +213,7 @@ class LocalIngestBatchRequest(BaseModel):
     """Create a durable backend-owned ingest batch from a local folder path."""
 
     root_path: str = Field(..., min_length=1)
-    profile: Literal[
-        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst",
-        "runpod_extract_first"
-    ] | None = None
+    profile: Literal["mac_safe", "mac_queryable_first"] | None = None
     recursive: bool = True
     extensions: list[str] | None = None
     max_files: int | None = Field(default=None, ge=1, le=20000)
@@ -1056,181 +1057,31 @@ async def get_extraction_contract(
     corpus_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Resolved extraction contract for this corpus — EXACTLY as the worker
-    resolves it (services/ingestion/extraction_contract.py), plus live sidecar
-    probes. The Corpus Manager renders this as its truth line so the active
-    workflow is visible in the same screen where models are configured (§13
-    ground-truth correction: engine and pools lived on different screens and
-    neither showed the resolved contract)."""
-    import asyncio as _asyncio
-
-    import httpx as _httpx
-
-    from services.extraction_provider_cards import (
-        resolve_extraction_provider_card,
-        safe_extraction_pool_contract,
-    )
+    """Return the same Graphify-only extraction contract used by the worker."""
     from services.ingestion.extraction_contract import resolve_extraction_contract
-    from services.private_vllm_capacity import fetch_private_vllm_capacity
-    from services.settings import settings_service as _ss
 
     corpus = await ingestion_service.get_corpus(corpus_id)
     if not corpus:
         raise HTTPException(status_code=404, detail="Corpus not found")
     cfg = IngestionConfig(**(corpus.get("default_ingestion_config") or {}))
 
-    engine_global = "local"
-    endpoints = []
-    runpod_config = None
-    try:
-        ext = await _ss.get_system_extraction()
-        engine_global = str(getattr(ext, "engine", "local") or "local")
-        endpoints = list(ext.endpoints or [])
-        runpod_config, _runpod_key = await _ss.get_system_runpod_flash(
-            current_user["user_id"]
-        )
-    except Exception:  # noqa: BLE001 — resolver defaults are the floor
-        pass
-
-    enabled_urls = [
-        e.url.strip().rstrip("/")
-        for e in endpoints
-        if e.enabled and e.url and e.url.strip()
-    ]
-    provider_pool_refs = (
-        cfg.summary_models
-        if cfg.models_linked
-        else cfg.extraction_models
-    )
     contract = resolve_extraction_contract(
         corpus_engine=getattr(cfg, "extraction_engine", None),
-        global_engine=engine_global,
-        models_linked=cfg.models_linked,
-        summary_model_count=len(cfg.summary_models or []),
-        extraction_model_count=len(cfg.extraction_models or []),
-        enabled_endpoint_urls=enabled_urls,
-        provider_pool_entries=provider_pool_refs,
+        global_engine="graphify_cpu",
+        models_linked=False,
+        summary_model_count=0,
+        extraction_model_count=0,
     )
-
-    async def _probe(url: str) -> bool:
-        try:
-            async with _httpx.AsyncClient(timeout=1.5) as cli:
-                r = await cli.get(f"{url}/health")
-                return r.status_code == 200
-        except Exception:  # noqa: BLE001
-            return False
-
-    alive: dict[str, bool] = {}
-    if contract.uses_legacy_local and enabled_urls:
-        flags = await _asyncio.gather(*[_probe(u) for u in enabled_urls])
-        alive = dict(zip(enabled_urls, flags))
-
-    pool_refs = (
-        cfg.extraction_models
-        if contract.pool_source == "extraction_models"
-        else cfg.summary_models
-    )
-    async def _capacity_status(m) -> dict | None:
-        lifecycle = str(getattr(m, "lifecycle_base_url", "") or "").strip()
-        if not lifecycle:
-            return None
-        lifecycle_api_key = getattr(m, "lifecycle_api_key", None)
-        if lifecycle_api_key:
-            from services.secrets import decrypt
-
-            lifecycle_api_key = decrypt(lifecycle_api_key) or lifecycle_api_key
-        try:
-            capacity = await fetch_private_vllm_capacity(
-                lifecycle,
-                api_key=lifecycle_api_key,
-                status_path=str(getattr(m, "lifecycle_status_path", "/status") or "/status"),
-                timeout_s=1.5,
-            )
-            return {"ok": True, **capacity.to_dict()}
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "ok": False,
-                "ready": False,
-                "error": str(exc)[:200],
-            }
-
-    pool_items = []
-    safe_pool_contract = None
-    if contract.uses_provider_llm and contract.pool_source != "none":
-        safe_pool_contract = safe_extraction_pool_contract(
-            pool_source=contract.pool_source,
-            pool=list(pool_refs or []),
-        )
-        for m in pool_refs or []:
-            card = resolve_extraction_provider_card(m)
-            pool_items.append(
-                {
-                    "provider_preset": m.provider_preset,
-                    "model": m.model,
-                    "base_url": m.base_url,
-                    "max_concurrent": m.max_concurrent,
-                    "lifecycle_base_url": m.lifecycle_base_url,
-                    "lifecycle_auto_start": m.lifecycle_auto_start,
-                    "lifecycle_auto_stop": m.lifecycle_auto_stop,
-                    "provider_card": card.to_safe_dict(),
-                    "lifecycle_status": await _capacity_status(m)
-                    if card.managed_vllm
-                    else None,
-                }
-            )
-    pool = (
-        pool_items
-        if contract.uses_provider_llm and contract.pool_source != "none"
-        else []
-    )
-
-    contract_errors = list(contract.errors)
-    if contract.engine == "runpod_flash":
-        if runpod_config is None or not runpod_config.enabled:
-            contract_errors.append("Runpod Flash is disabled in Settings")
-        elif not runpod_config.endpoint_id.strip():
-            contract_errors.append("Runpod Flash endpoint ID is missing in Settings")
 
     return {
         "engine": contract.engine,
         "source": contract.source,
-        "models_linked": cfg.models_linked,
-        "pool_source": contract.pool_source if contract.uses_provider_llm else "none",
-        "routing_policy": (
-            safe_pool_contract.get("routing_policy")
-            if safe_pool_contract
-            else None
-        ),
-        "lane_capacities": (
-            safe_pool_contract.get("lane_capacities")
-            if safe_pool_contract
-            else []
-        ),
-        "pool": pool,
-        "runpod_flash": (
-            {
-                "enabled": bool(runpod_config.enabled),
-                "configured": bool(runpod_config.endpoint_id.strip()),
-                "endpoint_id": runpod_config.endpoint_id.strip() or None,
-                "endpoint_name": runpod_config.endpoint_name,
-                "model_id": runpod_config.model_id,
-                "request_batch_size": runpod_config.request_batch_size,
-                "request_concurrency": runpod_config.request_concurrency,
-                "max_workers": runpod_config.max_workers,
-            }
-            if runpod_config is not None
-            else None
-        ),
-        "endpoints": [
-            {
-                "label": e.label,
-                "url": (e.url or "").strip().rstrip("/"),
-                "enabled": bool(e.enabled),
-                "alive": alive.get((e.url or "").strip().rstrip("/")),
-            }
-            for e in endpoints
-        ],
-        "errors": contract_errors,
+        "models_linked": False,
+        "pool_source": "none",
+        "routing_policy": None,
+        "lane_capacities": [],
+        "pool": [],
+        "errors": list(contract.errors),
         "warnings": list(contract.warnings),
     }
 
@@ -1305,6 +1156,25 @@ async def update_corpus(
                 "solution": (
                     "Delete all documents OR create a new corpus with the "
                     "desired config."
+                ),
+            },
+        ) from exc
+    except ExtractionEngineLockedError as exc:
+        # Owner directive 2026-08-03 — engine lock on non-empty corpora.
+        # Re-extraction must go through a new generation or an audited
+        # migration workflow, never an ordinary config update.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "extraction_engine_locked",
+                "required_action": "create_reextraction_generation",
+                "current_engine": exc.current_engine,
+                "attempted_engine": exc.attempted_engine,
+                "doc_count": exc.doc_count,
+                "reason": (
+                    "extraction_engine is locked once a corpus holds "
+                    "documents/artifacts so one active corpus identity "
+                    "never mixes engines."
                 ),
             },
         ) from exc
@@ -2669,14 +2539,10 @@ async def create_local_ingest_batch(
         if body.chunk_summarization is not None
         else corpus_summary_enabled
     )
-    if summary_enabled and body.summary_cost_authority_usd is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "summary_cost_authority_usd is required when chunk_summarization "
-                "is enabled"
-            ),
-        )
+    # chunk_summarization alone uses deterministic_summary.v1 (no authority).
+    # summary_cost_authority_usd is optional and only opens deprecated
+    # llm_summary_enrichment.v1 (owner control plane 2026-08-05).
+    _ = summary_enabled  # retained for readability / future gates
     try:
         batch = await ingest_batches.create_local_batch(
             db=ingestion_service.db,
@@ -2714,10 +2580,7 @@ async def create_upload_ingest_batch(
     chunk_summarization: bool | None = Form(default=None),
     model: str = Form(default=""),
     concurrency: int | None = Form(default=1),
-    profile: Literal[
-        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst",
-        "runpod_extract_first"
-    ] | None = Form(default=None),
+    profile: Literal["mac_safe", "mac_queryable_first"] | None = Form(default=None),
     start: bool = Form(default=True),
     summary_cost_authority_usd: Decimal | None = Form(default=None, gt=0, le=10000),
     current_user: dict = Depends(get_current_user),
@@ -2734,14 +2597,7 @@ async def create_upload_ingest_batch(
         if chunk_summarization is not None
         else corpus_summary_enabled
     )
-    if summary_enabled and summary_cost_authority_usd is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "summary_cost_authority_usd is required when chunk_summarization "
-                "is enabled"
-            ),
-        )
+    # Authority optional: absent → deterministic_summary.v1 baseline.
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
     if len(files) > 25:
@@ -3179,22 +3035,6 @@ async def ingestion_health(
     }
 
 
-@router.post("/ingestion/docling/unload")
-async def unload_docling(
-    current_user: dict = Depends(get_current_user),
-):
-    """Release the optional Docling sidecar's heavy converter immediately."""
-    from services.ingestion import docling_adapter
-
-    try:
-        return await docling_adapter.unload_docling_sidecar()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Docling sidecar unload unavailable: {_safe_ingest_error(exc)}",
-        ) from exc
-
-
 @router.post("/corpora/{corpus_id}/graph-cache/warm")
 async def warm_graph_cache(
     corpus_id: str,
@@ -3328,6 +3168,15 @@ async def get_job_status(
 
     ws_raw = doc.get("write_state", {})
     progress = _resolve_ingest_progress(doc)
+    # Control Plane V2 — hand back the deterministic run-ledger pointer so
+    # callers can follow up with GET /api/runs/{run_id} for the proof.
+    run_id: str | None = None
+    try:
+        from services.control_plane.ledger import run_id_for
+
+        run_id = run_id_for(corpus_id=doc["corpus_id"], doc_id=doc["doc_id"])
+    except Exception:  # noqa: BLE001 — status poll must not fail on this
+        run_id = None
     return IngestJobResponse(
         job_id=doc.get("file_id", doc_id),
         doc_id=doc["doc_id"],
@@ -3339,6 +3188,7 @@ async def get_job_status(
         chunk_count=doc.get("chunk_count", 0),
         parent_count=int(doc.get("parent_count") or len(doc.get("parent_chunks", []))),
         error=progress["error"],
+        run_id=run_id,
     )
 
 
@@ -3528,10 +3378,9 @@ async def finalize_upload_session(
     corpus_id: str,
     session_id: str,
     concurrency: int = Form(default=6),
-    profile: Literal[
-        "mac_safe", "mac_queryable_first", "rtx_assisted", "runpod_burst",
-        "runpod_extract_first"
-    ] = Form(default="runpod_extract_first"),
+    profile: Literal["mac_safe", "mac_queryable_first"] = Form(
+        default="mac_queryable_first"
+    ),
     chunk_summarization: bool | None = Form(default=None),
     summary_cost_authority_usd: Decimal | None = Form(default=None, gt=0, le=10000),
     current_user: dict = Depends(get_current_user),
@@ -3552,8 +3401,8 @@ async def finalize_upload_session(
     summary_enabled = (
         chunk_summarization if chunk_summarization is not None else corpus_summary_enabled
     )
-    if summary_enabled and summary_cost_authority_usd is None:
-        summary_cost_authority_usd = Decimal(n_files) * Decimal("0.50")
+    # Do NOT invent cost authority. Absent authority keeps the required
+    # deterministic_summary.v1 lane (cloud enrichment stays opt-in).
     batch = await ingest_batches.create_local_batch(
         db=ingestion_service.db,
         corpus_id=corpus_id,

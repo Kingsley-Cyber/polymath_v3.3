@@ -20,6 +20,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from models.release_stamp import ReleaseStamp
+
 EXTRACT_SCHEMA_VERSION = "polymath.extract.v2"
 PROMOTE_VERSION = "polymath.promote.v1"
 
@@ -82,7 +84,11 @@ class ChunkExtraction(BaseModel):
     `extractor` is the ONLY field that differs between local and cloud."""
 
     schema_version: Literal["polymath.extract.v2"] = EXTRACT_SCHEMA_VERSION
-    extractor: Literal["gliner_glirel_local", "cloud_llm"]
+    #: Graphify is the only production writer. Retired values remain for
+    #: historical artifact validation and quarantine accounting only.
+    extractor: Literal[
+        "graphify_gliner2_cpu", "relex_local", "gliner_glirel_local", "cloud_llm"
+    ]
     corpus_id: str
     doc_id: str
     chunk_id: str
@@ -92,6 +98,10 @@ class ChunkExtraction(BaseModel):
     relations: list[ExtractedRelation] = Field(default_factory=list)
     facts: list[ExtractedFact] = Field(default_factory=list)
     schema_lens_id: Optional[str] = None
+    #: Step 3 — release identity of the producing extractor. Descriptive
+    #: only (non-authoritative), nullable for historical artifacts, and
+    #: copied through promotion without reinterpretation.
+    release_stamp: Optional[ReleaseStamp] = None
 
 
 # ── 2. ChunkMetadata — identity & provenance (Mongo source of truth) ───────
@@ -193,14 +203,17 @@ class RerankerInput(BaseModel):
     source_book: str = ""
     section: str = ""
     parent_context: str = ""
+    query_aspect: str = ""
     excerpt: str
 
     def render(self) -> str:
         prefix = ""
+        if self.query_aspect:
+            prefix += f"aspect: {self.query_aspect}\n"
         if self.source_book and self.section:
-            prefix = f"{self.source_book} › {self.section}\n"
+            prefix += f"{self.source_book} › {self.section}\n"
         elif self.source_book:
-            prefix = f"{self.source_book}\n"
+            prefix += f"{self.source_book}\n"
         context = (
             f"Parent context: {self.parent_context}\n" if self.parent_context else ""
         )

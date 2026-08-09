@@ -1,0 +1,50 @@
+{
+  "fixture": "04_identity_mechanics.md",
+  "purpose": "Node identity round-trips: hyphenated identifiers, versioned names, abbreviation-safe sentence segmentation, declared aliases and acronyms. Validates the slug fix synthetically (per remediation plan, never by Meridian score).",
+  "declared_aliases": [
+    {"canonical": "Dr. Imani Reyes", "aliases": ["Dr. Reyes"]},
+    {"canonical": "Quartzline Retrieval Layer", "aliases": ["QRL"]}
+  ],
+  "items": [
+    {"id": "I01", "check": "positive", "evidence": "Sensor K-12 produces Report Q-9.",
+     "expect": {"type": "canonical", "subject": "Sensor K-12", "predicate": "produces", "object": "Report Q-9", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "graph node identities must round-trip so that a scorer normalizing 'K-12' and the node key agree; 'sensor k12' vs gold 'sensor k 12' mismatches are failures (the Alert C-17 bug)"}},
+    {"id": "I02", "check": "positive", "evidence": "The Recovery Desk consumes Report Q-9 within ten minutes of publication.",
+     "expect": {"type": "canonical", "subject": "Recovery Desk", "predicate": "consumes", "object": "Report Q-9", "status": "ASSERTED_TRUE"}},
+    {"id": "I03", "check": "passive", "evidence": "Report Q-9 is produced by Sensor K-12 on an hourly schedule.",
+     "expect": {"type": "canonical", "subject": "Sensor K-12", "predicate": "produces", "object": "Report Q-9", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "must merge with I01 into one edge (same identity), not create a duplicate node pair"}},
+    {"id": "I04", "check": "positive", "evidence": "Pinion 3.1 depends on the COLD-7 protocol.",
+     "expect": {"type": "canonical", "subject": "Pinion 3.1", "predicate": "depends_on", "object": "COLD-7", "status": "ASSERTED_TRUE"}},
+    {"id": "I05", "check": "positive", "evidence": "Pinion 3.2 depends on the Sable Index.",
+     "expect": {"type": "canonical", "subject": "Pinion 3.2", "predicate": "depends_on", "object": "Sable Index", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "the Beacon 2.2 failure class: Pinion 3.2 must not collapse onto Pinion or Pinion 3.1"}},
+    {"id": "I06", "check": "positive", "evidence": "Pinion is maintained by the Telemetry Group.",
+     "expect": {"type": "canonical", "subject": "Telemetry Group", "predicate": "supports", "object": "Pinion", "any_of": ["supports"], "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "subject is bare Pinion — distinct node from Pinion 3.1/3.2"}},
+    {"id": "I07", "check": "false_claim_trap", "evidence": "A draft note claimed that Pinion 3.1 depends on the Sable Index, but the dependency ledger disagrees.",
+     "expect": {"type": "qualified", "subject": "Pinion 3.1", "predicate": "depends_on", "object": "Sable Index", "status": "REPORTED_CLAIM", "any_of_status": ["REPORTED_CLAIM", "REPORTED_FALSE"]},
+     "must_not": {"promote_positive_edge": true, "notes": "must not merge with I05 (different subject version)"}},
+    {"id": "I08", "check": "positive", "evidence": "The Telemetry Group supports Dr. Imani Reyes.",
+     "expect": {"type": "canonical", "subject": "Telemetry Group", "predicate": "supports", "object": "Dr. Imani Reyes", "status": "ASSERTED_TRUE"},
+     "must_not": {"entities": ["Dr.", "Reyes (as standalone)"], "notes": "the Meridian 'Dr.' failure class: segmentation must not split at the abbreviation; the object must be the full person entity"}},
+    {"id": "I09", "check": "positive", "evidence": "Dr. Reyes owns the COLD-7 Rollout Plan.",
+     "expect": {"type": "canonical", "subject": "Dr. Imani Reyes", "predicate": "owns", "object": "COLD-7 Rollout Plan", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "alias unification: Dr. Reyes resolves to Dr. Imani Reyes — one node, not two"}},
+    {"id": "I10", "check": "positive", "evidence": "The Quartzline Retrieval Layer (QRL) uses the Falcon Cache.",
+     "expect": {"type": "canonical", "subject": "Quartzline Retrieval Layer", "predicate": "uses", "object": "Falcon Cache", "status": "ASSERTED_TRUE"}},
+    {"id": "I11", "check": "paraphrase", "evidence": "QRL is part of Pinion 3.2.",
+     "expect": {"type": "canonical", "subject": "Quartzline Retrieval Layer", "predicate": "part_of", "object": "Pinion 3.2", "status": "ASSERTED_TRUE"},
+     "must_not": {"entities": ["QRL (as a node distinct from Quartzline Retrieval Layer)"], "notes": "acronym defined in-document must unify"}},
+    {"id": "I12", "check": "negative", "evidence": "The pipeline processes readings (e.g. Sensor K-12 output) without pause.",
+     "expect": {"type": "no_edge"},
+     "must_not": {"promote_positive_edge": true, "notes": "'e.g.' must not split the sentence; no relation should be extracted from the parenthetical"}}
+  ],
+  "negative_entities": ["Dr.", "pipeline", "readings", "publication", "hourly schedule", "dependency ledger", "draft note"],
+  "invariants": [
+    "distinct gold entities never share a canonical node key: {Pinion, Pinion 3.1, Pinion 3.2}, {Sensor K-12}, {Report Q-9}, {COLD-7, COLD-7 Rollout Plan}",
+    "hyphens/dots in identifiers survive projection reversibly (node key normalization must be scorer-compatible)",
+    "alias pairs (Dr. Reyes, QRL) each resolve to exactly one node",
+    "rebuild digest equality still holds after the identity fixes"
+  ]
+}

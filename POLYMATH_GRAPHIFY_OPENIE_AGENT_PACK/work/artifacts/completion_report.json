@@ -1,0 +1,65 @@
+{
+  "completed_mentions": 2889,
+  "deterministic_ids": true,
+  "document_reports": [
+    {
+      "ambiguous_context_rejections": 1,
+      "candidate_matches": 75,
+      "compiled_patterns": 33,
+      "completed_mentions": 72,
+      "deterministic_ids": true,
+      "document_id": "graphify_quality_fixture",
+      "eligible_entities": 32,
+      "identity_digest": "7e0d367bba34547de0dda2b4e14a9a4c1c7f5f9fa8bc4d7886e019825c21caf2",
+      "overlap_rejections": 2,
+      "release": "graphify-document-mention-completion-v1",
+      "schema_version": "polymath.document_mention_completion_report.v1",
+      "status": "passed",
+      "strict_offset_rate": 1.0
+    },
+    {
+      "ambiguous_context_rejections": 0,
+      "candidate_matches": 3873,
+      "compiled_patterns": 61,
+      "completed_mentions": 2817,
+      "deterministic_ids": true,
+      "document_id": "graphify_throughput_fixture",
+      "eligible_entities": 61,
+      "identity_digest": "e802b1ec4889d24ea649b789ac33ec784f23fbcd6bf8c3d99579bf631b7fcbd6",
+      "overlap_rejections": 1056,
+      "release": "graphify-document-mention-completion-v1",
+      "schema_version": "polymath.document_mention_completion_report.v1",
+      "status": "passed",
+      "strict_offset_rate": 1.0
+    }
+  ],
+  "documents": 2,
+  "identity_digest": "e296ca3d514e857fc028b30d1a43a0e67aca8e18c9e4d9eb01230dc3fce0e165",
+  "quality": {
+    "accepted_pronoun_endpoints": 0,
+    "ambiguous_negative_hits": 0,
+    "ambiguous_surface_cross_sense_merge": false,
+    "exact_span_f1": 0.8088235294117647,
+    "exact_span_precision": 0.7638888888888888,
+    "exact_span_recall": 0.859375,
+    "exact_span_true_positives": 55,
+    "generic_negative_spans": 3,
+    "generic_noun_false_positive_rate": 0.0,
+    "gold_entities": 64,
+    "negative_fixture_hits": 0,
+    "predicted_entities": 72,
+    "strict_alignment_rate": 1.0,
+    "type_f1": 0.573529411764706,
+    "type_precision": 0.5416666666666666,
+    "type_recall": 0.609375,
+    "typed_true_positives": 39
+  },
+  "schema_version": "polymath.corpus_mention_completion_report.v1",
+  "state_source_counts": {
+    "acronym": 3,
+    "exact_name": 2535,
+    "raw": 351
+  },
+  "status": "passed",
+  "strict_offset_rate": 1.0
+}

@@ -7,8 +7,9 @@ clone after `source .env`. It verifies the same path a remote agent uses:
 1. initialize MCP session
 2. send initialized notification
 3. list tools
-4. call polymath_mcp_status
-5. call polymath_plan_ingestion
+4. verify the app instructions include the receipt-first ingestion gate
+5. call polymath_mcp_status and polymath_plan_ingestion
+6. verify the document-scoped ingestion receipt contract
 
 Environment:
   MCP_SMOKE_URL   Optional. Defaults to MCP_PUBLIC_URL or localhost:8765/mcp.
@@ -24,6 +25,9 @@ import sys
 import urllib.error
 import urllib.request
 from typing import Any
+
+
+CURRENT_PROTOCOL_VERSION = "2025-11-25"
 
 
 def _default_url() -> str:
@@ -61,12 +65,14 @@ class McpSmokeClient:
         self.token = token
         self.session_id: str | None = None
         self.next_id = 1
+        self.protocol_version = CURRENT_PROTOCOL_VERSION
 
     def post(self, body: dict[str, Any], *, expect_response: bool = True) -> dict[str, Any] | None:
         headers = {
             "Accept": "application/json, text/event-stream",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.token}",
+            "MCP-Protocol-Version": self.protocol_version,
             "User-Agent": "Polymath-MCP-Smoke/1.0 (+https://github.com)",
         }
         if self.session_id:
@@ -107,6 +113,13 @@ class McpSmokeClient:
             expect_response=False,
         )
 
+    def accept_protocol(self, initialize_response: dict[str, Any]) -> None:
+        negotiated = str(
+            ((initialize_response.get("result") or {}).get("protocolVersion") or "")
+        ).strip()
+        if negotiated:
+            self.protocol_version = negotiated
+
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return _tool_json(
             self.request(
@@ -131,11 +144,12 @@ def main() -> int:
     init = client.request(
         "initialize",
         {
-            "protocolVersion": "2025-03-26",
+            "protocolVersion": CURRENT_PROTOCOL_VERSION,
             "capabilities": {},
             "clientInfo": {"name": "polymath-mcp-smoke", "version": "1.0"},
         },
     )
+    client.accept_protocol(init)
     client.notify("notifications/initialized")
     tools = client.request("tools/list")
     tool_names = {
@@ -145,7 +159,9 @@ def main() -> int:
     required = {
         "polymath_mcp_status",
         "polymath_check_source",
+        "polymath_app_guide",
         "polymath_plan_ingestion",
+        "polymath_verify_ingestion",
         "polymath_backfill_summaries",
     }
     missing = sorted(required - tool_names)
@@ -153,6 +169,9 @@ def main() -> int:
         raise RuntimeError(f"missing expected MCP tools: {missing}")
 
     status = client.call_tool("polymath_mcp_status", {"detail": "summary"})
+    guide = client.call_tool("polymath_app_guide", {"detail": "full"})
+    if "polymath_verify_ingestion" not in str(guide.get("agent_instructions") or ""):
+        raise RuntimeError("MCP app instructions do not enforce ingestion receipt verification")
     plan = client.call_tool(
         "polymath_plan_ingestion",
         {
@@ -164,6 +183,16 @@ def main() -> int:
     )
     if plan.get("profile") != "transcript" or plan.get("summary_required") is not True:
         raise RuntimeError(f"ingestion planner returned unexpected plan: {plan}")
+    receipt = client.call_tool(
+        "polymath_verify_ingestion",
+        {"doc_id": "__mcp_contract_probe_missing__"},
+    )
+    if (
+        receipt.get("contract_version") != "polymath.ingestion_evidence.v1"
+        or receipt.get("status") != "not_found"
+        or receipt.get("query_ready") is not False
+    ):
+        raise RuntimeError(f"unexpected ingestion evidence contract: {receipt}")
 
     result = {
         "status": "ok",
@@ -172,6 +201,8 @@ def main() -> int:
         "server": (init.get("result") or {}).get("serverInfo"),
         "tool_count": len(tool_names),
         "mcp_status": status.get("status"),
+        "protocol_version": client.protocol_version,
+        "ingestion_evidence_contract": receipt.get("contract_version"),
         "ingestion_plan": {
             "profile": plan.get("profile"),
             "summary_required": plan.get("summary_required"),

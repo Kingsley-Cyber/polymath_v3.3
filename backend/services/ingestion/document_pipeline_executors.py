@@ -342,6 +342,13 @@ async def embed_documents_to_qdrant_from_artifacts(
                     doc_id=doc_id,
                     target_qdrant_collections=target_collections,
                 ):
+                    from services.ingestion.verify import (
+                        stamp_by_design_vector_omissions,
+                    )
+
+                    await stamp_by_design_vector_omissions(
+                        db, doc_id=doc_id, corpus_id=corpus_id
+                    )
                     remaining_errors = [
                         error
                         for error in (write_state.get("verify_errors") or [])
@@ -435,7 +442,14 @@ async def embed_documents_to_qdrant_from_artifacts(
                 # repair complete. Otherwise qdrant_written=True can coexist
                 # with a stale verified=False mismatch, causing every planner
                 # tick to re-embed the same document forever.
-                from services.ingestion.verify import verify_ingest
+                from services.ingestion.verify import (
+                    stamp_by_design_vector_omissions,
+                    verify_ingest,
+                )
+
+                await stamp_by_design_vector_omissions(
+                    db, doc_id=doc_id, corpus_id=corpus_id
+                )
 
                 verified, verify_errors = await verify_ingest(
                     db=db,

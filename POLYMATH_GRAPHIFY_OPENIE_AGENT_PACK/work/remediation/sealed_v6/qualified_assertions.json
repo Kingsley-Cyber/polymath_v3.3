@@ -1,0 +1,551 @@
+[
+  {
+    "evidence_end": 574,
+    "evidence_start": 447,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "source statement",
+    "predicate": "part_of",
+    "qualifiers": {},
+    "subject": "passages"
+  },
+  {
+    "evidence_end": 574,
+    "evidence_start": 447,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the governing source statement",
+    "predicate": "part_of",
+    "qualifiers": {},
+    "subject": "whose cited passages"
+  },
+  {
+    "evidence_end": 574,
+    "evidence_start": 447,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "governing source statement",
+    "predicate": "part_of",
+    "qualifiers": {},
+    "subject": "passages"
+  },
+  {
+    "evidence_end": 574,
+    "evidence_start": 447,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "source statement",
+    "predicate": "part_of",
+    "qualifiers": {},
+    "subject": "whose cited passages"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "blinded evaluation",
+    "predicate": "were reserved for",
+    "qualifiers": {},
+    "subject": "only 2 400"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "orion contains questions",
+    "predicate": "were reserved",
+    "qualifiers": {},
+    "subject": "2 400"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "questions",
+    "predicate": "part_of",
+    "qualifiers": {},
+    "subject": "Orion"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "blinded evaluation",
+    "predicate": "reserved for",
+    "qualifiers": {},
+    "subject": "2 400"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "orion contains questions",
+    "predicate": "were reserved",
+    "qualifiers": {},
+    "subject": "only 2 400"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "12 000 questions",
+    "predicate": "part_of",
+    "qualifiers": {},
+    "subject": "Orion"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the blinded evaluation",
+    "predicate": "were reserved for",
+    "qualifiers": {},
+    "subject": "only 2 400"
+  },
+  {
+    "evidence_end": 773,
+    "evidence_start": 575,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "orion contains 12 000 questions",
+    "predicate": "were reserved",
+    "qualifiers": {},
+    "subject": "only 2 400"
+  },
+  {
+    "evidence_end": 1051,
+    "evidence_start": 936,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "their source hash",
+    "predicate": "disagree on",
+    "qualifiers": {},
+    "subject": "two representations of same source"
+  },
+  {
+    "evidence_end": 1284,
+    "evidence_start": 1052,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "semantic cache supports raven during repeated retrieval",
+    "predicate": "does not depend",
+    "qualifiers": {},
+    "subject": "raven"
+  },
+  {
+    "evidence_end": 1284,
+    "evidence_start": 1052,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the cache",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "raven"
+  },
+  {
+    "evidence_end": 1284,
+    "evidence_start": 1052,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "cache",
+    "predicate": "depends_on",
+    "qualifiers": {},
+    "subject": "raven"
+  },
+  {
+    "evidence_end": 1284,
+    "evidence_start": 1052,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "semantic cache supports during repeated retrieval",
+    "predicate": "does not depend",
+    "qualifiers": {},
+    "subject": "raven"
+  },
+  {
+    "evidence_end": 1284,
+    "evidence_start": 1052,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "semantic cache supports raven during retrieval",
+    "predicate": "does not depend",
+    "qualifiers": {},
+    "subject": "raven"
+  },
+  {
+    "evidence_end": 1524,
+    "evidence_start": 1285,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "false citation acceptance",
+    "predicate": "not is in",
+    "qualifiers": {},
+    "subject": "cache"
+  },
+  {
+    "evidence_end": 1524,
+    "evidence_start": 1285,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "citation acceptance",
+    "predicate": "not is in",
+    "qualifiers": {},
+    "subject": "cache"
+  },
+  {
+    "evidence_end": 1524,
+    "evidence_start": 1285,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "most of",
+    "predicate": "not is for",
+    "qualifiers": {},
+    "subject": "cache"
+  },
+  {
+    "evidence_end": 1524,
+    "evidence_start": 1285,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "most of citation acceptance",
+    "predicate": "not is for",
+    "qualifiers": {},
+    "subject": "cache"
+  },
+  {
+    "evidence_end": 1524,
+    "evidence_start": 1285,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "most of reduction in false citation acceptance",
+    "predicate": "not is for",
+    "qualifiers": {},
+    "subject": "cache"
+  },
+  {
+    "evidence_end": 1626,
+    "evidence_start": 1526,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "6 4 citation recall points",
+    "predicate": "exceeded by",
+    "qualifiers": {},
+    "subject": "Helix-2"
+  },
+  {
+    "evidence_end": 1626,
+    "evidence_start": 1526,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the blinded split",
+    "predicate": "exceeded on",
+    "qualifiers": {},
+    "subject": "Helix-2"
+  },
+  {
+    "evidence_end": 1626,
+    "evidence_start": 1526,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Atlas-7B",
+    "predicate": "exceeded",
+    "qualifiers": {},
+    "subject": "Helix-2"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to train either answer model",
+    "predicate": "had been used",
+    "qualifiers": {},
+    "subject": "no blinded orion question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "either answer model",
+    "predicate": "to train",
+    "qualifiers": {},
+    "subject": "blinded orion question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "apparent improvement resulted from hidden evaluation leakage",
+    "predicate": "however claimed",
+    "qualifiers": {},
+    "subject": "reviewer"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to train either answer model",
+    "predicate": "had used",
+    "qualifiers": {},
+    "subject": "no blinded orion question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "apparent improvement resulted from hidden evaluation leakage",
+    "predicate": "claimed",
+    "qualifiers": {},
+    "subject": "reviewer"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "either answer model",
+    "predicate": "to train",
+    "qualifiers": {},
+    "subject": "no blinded orion question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to train either answer model",
+    "predicate": "had been used",
+    "qualifiers": {},
+    "subject": "blinded orion question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "that the apparent improvement resulted from hidden evaluation leakage",
+    "predicate": "however claimed",
+    "qualifiers": {},
+    "subject": "an external reviewer"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "either answer model",
+    "predicate": "to train",
+    "qualifiers": {},
+    "subject": "no blinded question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "hidden evaluation leakage",
+    "predicate": "resulted from",
+    "qualifiers": {},
+    "subject": "the apparent improvement"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "to train either answer model",
+    "predicate": "had been used",
+    "qualifiers": {},
+    "subject": "no blinded question"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "hidden evaluation leakage",
+    "predicate": "resulted from",
+    "qualifiers": {},
+    "subject": "reviewer"
+  },
+  {
+    "evidence_end": 1873,
+    "evidence_start": 1627,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "hidden evaluation leakage",
+    "predicate": "resulted from",
+    "qualifiers": {},
+    "subject": "apparent improvement"
+  },
+  {
+    "evidence_end": 1961,
+    "evidence_start": 1874,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "neo4 j",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "paper states"
+  },
+  {
+    "evidence_end": 1961,
+    "evidence_start": 1874,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "online ranking",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "DeltaGraph"
+  },
+  {
+    "evidence_end": 1961,
+    "evidence_start": 1874,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "online ranking",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "paper states"
+  },
+  {
+    "evidence_end": 1961,
+    "evidence_start": 1874,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "online",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "DeltaGraph"
+  },
+  {
+    "evidence_end": 1961,
+    "evidence_start": 1874,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "online",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "paper states"
+  },
+  {
+    "evidence_end": 1961,
+    "evidence_start": 1874,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "neo4 j",
+    "predicate": "uses",
+    "qualifiers": {},
+    "subject": "DeltaGraph"
+  },
+  {
+    "evidence_end": 2117,
+    "evidence_start": 1962,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "accepted answers",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "whose records reference evidence"
+  },
+  {
+    "evidence_end": 2117,
+    "evidence_start": 1962,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "accepted answers",
+    "predicate": "supports",
+    "qualifiers": {},
+    "subject": "the evidence packets"
+  },
+  {
+    "evidence_end": 2117,
+    "evidence_start": 1962,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "answers",
+    "predicate": "accepted",
+    "qualifiers": {},
+    "subject": "whose records reference evidence packets"
+  },
+  {
+    "evidence_end": 2533,
+    "evidence_start": 2317,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "a rejected packet",
+    "predicate": "overrides",
+    "qualifiers": {},
+    "subject": "a reviewer"
+  },
+  {
+    "evidence_end": 2765,
+    "evidence_start": 2534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "nikhil rao who owns the experiment and must report its result by july 1 2026",
+    "predicate": "assigned to",
+    "qualifiers": {},
+    "subject": "Solano"
+  },
+  {
+    "evidence_end": 2765,
+    "evidence_start": 2534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "follow up action ar 17",
+    "predicate": "assigned",
+    "qualifiers": {},
+    "subject": "Solano"
+  },
+  {
+    "evidence_end": 2765,
+    "evidence_start": 2534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "the experiment",
+    "predicate": "owns",
+    "qualifiers": {},
+    "subject": "who"
+  },
+  {
+    "evidence_end": 2765,
+    "evidence_start": 2534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "solano assigned follow up action ar 17 to nikhil rao who owns the experiment and must report its result by july 1 2026",
+    "predicate": "will test",
+    "qualifiers": {},
+    "subject": "the experiment"
+  },
+  {
+    "evidence_end": 2765,
+    "evidence_start": 2534,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "whether human review queue can be bypassed when three independent sources agree",
+    "predicate": "will test",
+    "qualifiers": {},
+    "subject": "experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Q4 2026",
+    "predicate": "may evaluate during",
+    "qualifiers": {},
+    "subject": "a separate experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "legal-policy documents",
+    "predicate": "may evaluate on",
+    "qualifiers": {},
+    "subject": "a separate experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "Q4 2026",
+    "predicate": "may evaluate during",
+    "qualifiers": {},
+    "subject": "experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "deltagraph legal",
+    "predicate": "may evaluate",
+    "qualifiers": {},
+    "subject": "experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "DeltaGraph",
+    "predicate": "may evaluate",
+    "qualifiers": {},
+    "subject": "experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "deltagraph legal policy documents",
+    "predicate": "may evaluate",
+    "qualifiers": {},
+    "subject": "experiment"
+  },
+  {
+    "evidence_end": 3084,
+    "evidence_start": 2911,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "legal-policy documents",
+    "predicate": "may evaluate on",
+    "qualifiers": {},
+    "subject": "experiment"
+  }
+]

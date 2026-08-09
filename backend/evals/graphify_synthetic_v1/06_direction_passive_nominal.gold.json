@@ -1,0 +1,43 @@
+{
+  "fixture": "06_direction_passive_nominal.md",
+  "purpose": "Direction preservation across active, passive, copular-nominal ('is a dependency of'), possessive-nominal ('acquisition of'), and flow phrasings. The compiler was 15/15 on reached pairs; this family keeps that true as reachability opens up.",
+  "items": [
+    {"id": "D01", "check": "control", "evidence": "The Pinion API depends on the Falcon Cache.",
+     "expect": {"type": "canonical", "subject": "Pinion API", "predicate": "depends_on", "object": "Falcon Cache", "status": "ASSERTED_TRUE"}},
+    {"id": "D02", "check": "passive", "evidence": "The Falcon Cache is relied on by the Pinion API during peak load.",
+     "expect": {"type": "canonical", "subject": "Pinion API", "predicate": "depends_on", "object": "Falcon Cache", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "must merge with D01, not duplicate or reverse"}},
+    {"id": "D03", "check": "direction_trap", "evidence": "The Falcon Cache is a dependency of the Pinion API.",
+     "expect": {"type": "canonical", "subject": "Pinion API", "predicate": "depends_on", "object": "Falcon Cache", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "copular nominal: 'X is a dependency of Y' means Y depends_on X — the classic reversal"}},
+    {"id": "D04", "check": "passive", "evidence": "The Nightly Snapshot Feed is produced by Vaultstone.",
+     "expect": {"type": "canonical", "subject": "Vaultstone", "predicate": "produces", "object": "Nightly Snapshot Feed", "status": "ASSERTED_TRUE"}},
+    {"id": "D05", "check": "nominalized", "evidence": "Quartzline's acquisition of the Redlark database closed in 2029.",
+     "expect": {"type": "canonical", "subject": "Quartzline", "predicate": "owns", "object": "Redlark", "any_of": ["owns"], "status": "ASSERTED_TRUE", "optional": true},
+     "must_not": {"notes": "possessive nominalization; if not compiled to owns, it must surface as an open relation 'acquisition of' — silent drop is a failure; reversed direction is a failure"}},
+    {"id": "D06", "check": "passive", "evidence": "The Glowline Metrics dashboard is derived from the Redlark database.",
+     "expect": {"type": "canonical", "subject": "Glowline Metrics", "predicate": "derived_from", "object": "Redlark", "status": "ASSERTED_TRUE"}},
+    {"id": "D07", "check": "direction_trap", "evidence": "The Redlark database is the source from which Glowline Metrics is derived.",
+     "expect": {"type": "canonical", "subject": "Glowline Metrics", "predicate": "derived_from", "object": "Redlark", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "cleft/source phrasing: Redlark as sentence subject must not become the derived_from subject; must merge with D06"}},
+    {"id": "D08", "check": "passive", "evidence": "The Sable Index is owned and operated by Quartzline Analytics.",
+     "expect": {"type": "canonical", "subject": "Quartzline Analytics", "predicate": "owns", "object": "Sable Index", "status": "ASSERTED_TRUE"},
+     "must_not": {"notes": "coordinated passive participles; 'operated by' may additionally map to supports/open but must not block owns"}},
+    {"id": "D09", "check": "paraphrase", "evidence": "Rollups flow from Redlark into the Glowline Metrics dashboard.",
+     "expect": {"type": "canonical", "subject": "Glowline Metrics", "predicate": "consumes", "object": "Redlark", "any_of": ["consumes", "uses"], "status": "ASSERTED_TRUE", "optional": true},
+     "must_not": {"entities": ["Rollups"], "notes": "flow phrasing; direction is toward the receiver. Edge optional; minting 'Rollups' is a failure"}},
+    {"id": "D10", "check": "negative", "evidence": "The Falcon Cache does not depend on the Sable Index.",
+     "expect": {"type": "qualified", "subject": "Falcon Cache", "predicate": "depends_on", "object": "Sable Index", "status": "NEGATED"},
+     "must_not": {"promote_positive_edge": true}},
+    {"id": "D11", "check": "false_claim_trap", "evidence": "A partner deck claimed the Falcon Cache is a dependency of the Sable Index, but the ledger shows no such link.",
+     "expect": {"type": "qualified", "subject": "Sable Index", "predicate": "depends_on", "object": "Falcon Cache", "status": "REPORTED_CLAIM", "any_of_status": ["REPORTED_CLAIM", "REPORTED_FALSE"]},
+     "must_not": {"promote_positive_edge": true, "notes": "nested direction trap inside a claim: 'Falcon is a dependency of Sable' = Sable depends_on Falcon; neither direction may reach the positive graph"}}
+  ],
+  "negative_entities": ["Rollups", "peak load", "partner deck", "ledger", "source"],
+  "invariants": [
+    "D01/D02/D03 collapse to ONE edge Pinion API -depends_on-> Falcon Cache",
+    "D06/D07 collapse to ONE edge Glowline Metrics -derived_from-> Redlark",
+    "no reversed-direction duplicate of any gold edge exists in the graph",
+    "the only depends_on edges in the graph are D01-class; nothing between Falcon Cache and Sable Index in either direction"
+  ]
+}

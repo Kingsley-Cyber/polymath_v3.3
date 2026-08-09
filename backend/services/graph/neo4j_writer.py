@@ -38,6 +38,18 @@ from services.ghost_b import (
 )
 from services.graph.entity_cleaning import is_junk_extracted_entity
 from services.graph.entity_dedup.resolve import resolve_entity_ids
+from services.extraction.canonical import (
+    ENTITY_ID_PREFIX,
+    GENERIC_ENTITY_TERMS,
+    _load_entity_type_overrides as _canonical_load_entity_type_overrides,
+    _load_alias_lookup as _canonical_load_alias_lookup,
+    _slugify_name,
+    canonicalize_entity_name,
+    entity_id_from_name,
+    is_generic_entity_name,
+    normalize_entity_name,
+    resolve_entity_alias,
+)
 
 logger = logging.getLogger(__name__)
 ALIAS_MAP_PATH = Path(__file__).with_name("entity_aliases.json")
@@ -46,10 +58,13 @@ DOMAIN_TAXONOMY_PATH = Path(__file__).with_name("domain_taxonomy.json")
 CANONICAL_FAMILIES_PATH = Path(__file__).with_name("canonical_families.json")
 ENTITY_TYPE_OVERRIDES_PATH = Path(__file__).with_name("entity_type_overrides.json")
 ONTOLOGY_VERSION = "2026-04-25-v3"
-ENTITY_ID_PREFIX = "entity"
 GRAPH_PROMOTE_VERSION = "polymath.promote.v1"
 GRAPH_WRITE_MAX_ATTEMPTS = 3
 GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS = 0.75
+# Memory-pool rejections need more headroom than deadlocks: the pool only
+# frees once competing transactions drain, so an immediate retry just fails
+# again and burns the attempt budget (observed 2026-07-19).
+GRAPH_WRITE_MEMORY_BACKOFF_SECONDS = 3.0
 # Neo4j transaction-memory safety.  These constants bound every data-sized
 # production write/refresh in this module; callers must not replace them with
 # a whole-document/corpus list.  Aggregate refresh is intentionally the most
@@ -614,9 +629,10 @@ def _candidate_predicate_records(
 ) -> list[tuple[str, float, str]]:
     """Recover deterministic candidate predicates for surviving fallback edges.
 
-    GLiREL/LLM validation can demote a relation to `related_to`; the original
-    predicate and evidence cue are still partial signal. Store those signals as
-    primitive arrays so Neo4j can persist them directly on the relationship.
+    Arbitration/LLM validation can demote a relation to `related_to`; the
+    original predicate and evidence cue are still partial signal. Store those
+    signals as primitive arrays so Neo4j can persist them directly on the
+    relationship.
     """
 
     candidates: list[tuple[str, float, str]] = []
@@ -883,14 +899,24 @@ def refine_related_to_predicate(
     if not subject_identity or not object_identity:
         return predicate
 
+    original_predicate = str(source_predicate or "").strip()
+    original_predicate, _ = normalize_relation_predicate_alias(original_predicate)
+    if (
+        original_predicate == SchemaContext.RELATION_SENTINEL
+        and re.search(
+            r"\b(?:related(?:\s+to)?|occurred\s+in)\b",
+            str(relation_cue or evidence_phrase or ""),
+            re.I,
+        )
+    ):
+        return predicate
+
     evidence_predicate = _predicate_from_evidence(evidence_phrase, relation_cue)
     if evidence_predicate and _relation_compatible_with_facets(
         evidence_predicate, subject_identity, object_identity
     ):
         return evidence_predicate
 
-    original_predicate = str(source_predicate or "").strip()
-    original_predicate, _ = normalize_relation_predicate_alias(original_predicate)
     if (
         original_predicate in _APPROVED_SPECIFIC_RELATIONS
         and _relation_compatible_with_facets(
@@ -1007,68 +1033,11 @@ def relation_eligible_for_synthesis(
     return True
 
 
-def normalize_entity_name(name: str) -> str:
-    """Canonical form for dedup: lowercase, NFKD, strip punctuation, collapse spaces."""
-    name = name.lower().strip()
-    name = unicodedata.normalize("NFKD", name)
-    name = re.sub(r"[^\w\s]", "", name)
-    return re.sub(r"\s+", " ", name).strip()
-
-
-@lru_cache(maxsize=1)
-def _load_alias_lookup() -> dict[str, str]:
-    try:
-        data = json.loads(ALIAS_MAP_PATH.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except Exception as exc:
-        logger.warning("Entity alias map failed to load: %s", exc)
-        return {}
-
-    lookup: dict[str, str] = {}
-    for canonical, aliases in data.items():
-        canonical_norm = normalize_entity_name(canonical)
-        if not canonical_norm:
-            continue
-        lookup[canonical_norm] = canonical_norm
-        for alias in aliases or []:
-            alias_norm = normalize_entity_name(str(alias))
-            if alias_norm:
-                lookup[alias_norm] = canonical_norm
-    return lookup
-
-
-def resolve_entity_alias(normalized_name: str) -> str:
-    """Return the configured canonical alias for an already-normalized name."""
-    return _load_alias_lookup().get(normalized_name, normalized_name)
-
-
-def canonicalize_entity_name(name: str) -> str:
-    return resolve_entity_alias(normalize_entity_name(name))
-
-
-@lru_cache(maxsize=1)
-def _load_entity_type_overrides() -> dict[str, str]:
-    try:
-        data = json.loads(ENTITY_TYPE_OVERRIDES_PATH.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except Exception as exc:
-        logger.warning("Entity type overrides failed to load: %s", exc)
-        return {}
-    if not isinstance(data, dict):
-        return {}
-
-    overrides: dict[str, str] = {}
-    for name, value in data.items():
-        canonical = canonicalize_entity_name(str(name))
-        if not canonical:
-            continue
-        if isinstance(value, str):
-            overrides[canonical] = value
-        elif isinstance(value, dict) and value.get("primary_entity_type"):
-            overrides[canonical] = str(value["primary_entity_type"])
-    return overrides
+# Canonicalization functions are now owned by services.extraction.canonical.
+# Re-exported here for backwards compatibility — all existing callers that
+# import from neo4j_writer continue to work without changes.
+_load_alias_lookup = _canonical_load_alias_lookup
+_load_entity_type_overrides = _canonical_load_entity_type_overrides
 
 
 def resolve_primary_entity_type(
@@ -1289,19 +1258,41 @@ def resolve_domain_type(
     return {}
 
 
-def resolve_ontology_metadata(
+@lru_cache(maxsize=32_768)
+def _resolve_ontology_metadata_cached(
     entity_name: str,
     entity_type: str,
-    text_context: str = "",
-) -> dict[str, str]:
-    """Resolve all deterministic ontology metadata stored on Entity nodes."""
+    text_context: str,
+) -> tuple[tuple[str, str], ...]:
+    """Memoized core of resolve_ontology_metadata.
+
+    The resolution is a pure deterministic function of (name, type, context)
+    against a frozen ontology — within one corpus-generation the same entity
+    recurs across hundreds of chunks, and summarize_dominant_facets used to
+    recompute it per mention. Caching returns an immutable tuple of items so
+    the public dict constructor can build a fresh mutable dict per call (the
+    cache must never hand out a shared mutable dict callers could mutate).
+    Cache is keyed on the frozen ontology implicitly via ONTOLOGY_VERSION
+    being constant for the process lifetime.
+    """
     metadata = resolve_facets(entity_name, entity_type, text_context)
     metadata.update(resolve_domain_type(entity_name, entity_type, text_context))
     family = resolve_canonical_family(entity_name, text_context)
     if family:
         metadata["canonical_family"] = family
     metadata["ontology_version"] = ONTOLOGY_VERSION
-    return metadata
+    return tuple(metadata.items())
+
+
+def resolve_ontology_metadata(
+    entity_name: str,
+    entity_type: str,
+    text_context: str = "",
+) -> dict[str, str]:
+    """Resolve all deterministic ontology metadata stored on Entity nodes."""
+    return dict(
+        _resolve_ontology_metadata_cached(entity_name, entity_type, text_context)
+    )
 
 
 def _slugify_type(entity_type: str) -> str:
@@ -1310,28 +1301,8 @@ def _slugify_type(entity_type: str) -> str:
     return slug or SchemaContext.ENTITY_SENTINEL
 
 
-def _slugify_name(canonical_name: str) -> str:
-    """Normalized canonical name → URL-safe slug (spaces → hyphens, no punctuation)."""
-    return canonicalize_entity_name(canonical_name).replace(" ", "-")
-
-
-def entity_id_from_name(canonical_name: str, entity_type: str | None = None) -> str:
-    """Deterministic canonical entity ID.
-
-    Format: `entity:{name_slug}`.
-
-    The `entity_type` argument is intentionally ignored and retained only for
-    call-site compatibility. Type is now extraction evidence, stored as
-    primary_entity_type / observed_entity_types on Entity and extracted_type on
-    MENTIONS. This prevents Product:pvector, Method:pvector, and Concept:pvector
-    from becoming separate graph nodes.
-    """
-    return f"{ENTITY_ID_PREFIX}:{_slugify_name(canonical_name)}"
-
-
-def is_generic_entity_name(canonical_name: str) -> bool:
-    normalized = canonicalize_entity_name(canonical_name)
-    return normalized in GENERIC_ENTITY_TERMS
+# _slugify_name, entity_id_from_name, is_generic_entity_name are now imported
+# from services.extraction.canonical at the top of this module.
 
 
 def _support_id_for_row(
@@ -1779,6 +1750,55 @@ async def _upsert_chunk(
         )
 
 
+async def _write_explains_edges(
+    session,
+    *,
+    corpus_id: str,
+    doc_id: str,
+    explains_rows: list[dict] | None,
+) -> int:
+    """Write deterministic EXPLAINS edges (prose chunk → code chunk).
+
+    Mixed-content book lane: rows come from tier_chunker's adjacency pass
+    (``{explains_chunk_id, code_chunk_id, basis}``). Both endpoints are
+    MATCHed corpus-scoped; rows referencing chunks outside this corpus are
+    silently skipped. Empty rows = no-op. Returns the number of edges
+    merged. delete_document_graph prunes these with the doc's Chunk nodes
+    (DETACH DELETE is corpus/doc-scoped).
+    """
+    rows: list[dict] = []
+    for raw in explains_rows or []:
+        prose_id = str(raw.get("explains_chunk_id") or "").strip()
+        code_id = str(raw.get("code_chunk_id") or "").strip()
+        if prose_id and code_id:
+            rows.append({"prose_chunk_id": prose_id, "code_chunk_id": code_id})
+    if not rows:
+        return 0
+    written = 0
+    for row_batch in _row_batches(rows, batch_size=GRAPH_WRITE_ROW_BATCH_SIZE):
+        result = await session.run(
+            """
+            UNWIND $rows AS row
+            MATCH (prose:Chunk {corpus_id: $corpus_id, chunk_id: row.prose_chunk_id})
+            MATCH (code:Chunk {corpus_id: $corpus_id, chunk_id: row.code_chunk_id})
+            MERGE (prose)-[e:EXPLAINS]->(code)
+            SET e.basis = coalesce(row.basis, 'adjacency'), e.doc_id = $doc_id,
+                e.projection_kind = 'structural_shadow',
+                e.authority = 'noncanonical'
+            RETURN count(e) AS written
+            """,
+            rows=[
+                {**r, "basis": "adjacency"}
+                for r in row_batch
+            ],
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+        )
+        rec = await result.single()
+        written += int(rec.get("written") or 0) if rec else 0
+    return written
+
+
 async def _upsert_entity_and_mention(
     driver: AsyncDriver,
     entity: EntityItem,
@@ -1887,6 +1907,8 @@ async def _upsert_entity_and_mention(
                 m.extracted_type = $extracted_type,
                 m.surface_form = $surface_form,
                 m.extractor = 'ghost_b',
+                m.projection_kind = 'structural_shadow',
+                m.authority = 'noncanonical',
                 m.ontology_version = $ontology_version
             SET m.extracted_types = CASE
                 WHEN m.extracted_types IS NULL THEN [$extracted_type]
@@ -2002,20 +2024,49 @@ async def _upsert_relation(
         )
 
 
-async def _delete_orphan_entities(session) -> None:
-    """Remove Entity nodes without chunk evidence in bounded transactions."""
+async def _delete_orphan_entities(
+    session, entity_ids: list[str] | None = None
+) -> None:
+    """Remove Entity nodes without chunk evidence in bounded transactions.
+
+    ``entity_ids`` scopes the sweep to a candidate set (e.g. only the
+    entities a just-deleted document used to mention). When provided, the
+    MATCH is restricted to those ids — never a global ``MATCH (e:Entity)``
+    full-graph scan. When None the legacy global sweep runs (corpus deletes,
+    repair lanes) where a full scan is actually intended.
+    """
     while True:
-        result = await session.run(
-            """
-        MATCH (e:Entity)
-        WHERE coalesce(e.tombstone, false) = false
-          AND NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
-            WITH e LIMIT $batch_size
-        DETACH DELETE e
-            RETURN count(e) AS deleted
-            """,
-            batch_size=GRAPH_DELETE_BATCH_SIZE,
-        )
+        if entity_ids:
+            # Non-empty candidate set: scope the sweep to only those entities.
+            result = await session.run(
+                """
+            MATCH (e:Entity)
+            WHERE e.entity_id IN $entity_ids
+              AND coalesce(e.tombstone, false) = false
+              AND NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
+                WITH e LIMIT $batch_size
+            DETACH DELETE e
+                RETURN count(e) AS deleted
+                """,
+                entity_ids=entity_ids,
+                batch_size=GRAPH_DELETE_BATCH_SIZE,
+            )
+        else:
+            # No candidate scope (empty set or None): fall back to the global
+            # sweep. An empty candidate list means this doc's pre-delete entity
+            # collection found nothing to scope to — the global sweep is the
+            # safe conservative path and preserves the delete contract.
+            result = await session.run(
+                """
+            MATCH (e:Entity)
+            WHERE coalesce(e.tombstone, false) = false
+              AND NOT EXISTS { MATCH (:Chunk)-[:MENTIONS]->(e) }
+                WITH e LIMIT $batch_size
+            DETACH DELETE e
+                RETURN count(e) AS deleted
+                """,
+                batch_size=GRAPH_DELETE_BATCH_SIZE,
+            )
         row = await result.single()
         if not row or int(row.get("deleted") or 0) == 0:
             break
@@ -2350,7 +2401,9 @@ async def delete_document_graph(
             row = await result.single()
             if not row or int(row.get("deleted") or 0) == 0:
                 break
-        await _delete_orphan_entities(session)
+        # Scope the orphan sweep to only this doc's pre-delete entities —
+        # never a global MATCH (e:Entity) scan per document.
+        await _delete_orphan_entities(session, entity_ids=affected_entity_ids)
         if affected_entity_ids:
             await _refresh_entity_aggregates(session, affected_entity_ids)
 
@@ -2395,7 +2448,7 @@ async def _clear_document_graph_payload(
             row = await result.single()
             if not row or int(row.get("deleted") or 0) == 0:
                 break
-        await _delete_orphan_entities(session)
+        await _delete_orphan_entities(session, entity_ids=affected_entity_ids)
         if affected_entity_ids:
             await _refresh_entity_aggregates(session, affected_entity_ids)
 
@@ -2436,10 +2489,25 @@ async def delete_corpus_graph(
             await _refresh_entity_aggregates(session, affected_entity_ids)
 
 
+_GRAPH_WRITE_MEMORY_MARKERS = ("MemoryPoolOutOfMemory", "OutOfMemory")
+
+
+def _is_memory_graph_write_transient(exc: TransientError) -> bool:
+    combined = f"{getattr(exc, 'code', '') or ''} {exc}"
+    return any(marker in combined for marker in _GRAPH_WRITE_MEMORY_MARKERS)
+
+
 def _is_retryable_graph_write_transient(exc: TransientError) -> bool:
+    # Neo4j marks both lock contention and transaction-memory rejection as
+    # TransientError. Deadlocks clear on quick retry; memory-pool rejections
+    # clear once competing transactions drain. 2026-07-19: OOM raised straight
+    # through here on attempt 1 — the outer batch retry then re-hit the still-
+    # saturated pool with no in-writer damping and burned 215 items' attempts.
     code = str(getattr(exc, "code", "") or "")
     text = str(exc)
-    return "DeadlockDetected" in code or "DeadlockDetected" in text
+    if "DeadlockDetected" in code or "DeadlockDetected" in text:
+        return True
+    return _is_memory_graph_write_transient(exc)
 
 
 async def write_document_graph(*args: Any, **kwargs: Any) -> None:
@@ -2455,9 +2523,15 @@ async def write_document_graph(*args: Any, **kwargs: Any) -> None:
                 or attempt >= GRAPH_WRITE_MAX_ATTEMPTS
             ):
                 raise
-            delay = GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS * attempt
+            backoff = (
+                GRAPH_WRITE_MEMORY_BACKOFF_SECONDS
+                if _is_memory_graph_write_transient(exc)
+                else GRAPH_WRITE_DEADLOCK_BACKOFF_SECONDS
+            )
+            delay = backoff * attempt
             logger.warning(
-                "Neo4j graph write deadlock; retrying doc=%s corpus=%s attempt=%d/%d delay=%.2fs",
+                "Neo4j graph write transient (%s); retrying doc=%s corpus=%s attempt=%d/%d delay=%.2fs",
+                str(getattr(exc, "code", "") or type(exc).__name__),
                 doc_id[:12],
                 corpus_id[:8],
                 attempt + 1,
@@ -2486,6 +2560,9 @@ async def _write_document_graph_once(
     ghost_b_total: int | None = None,
     db: Any | None = None,
     chunk_parent_ids: dict[str, str] | None = None,
+    chunk_attributes: dict[str, dict] | None = None,
+    explains_rows: list[dict] | None = None,
+    skip_preclear: bool = False,
 ) -> None:
     """
     Write the full graph for one document after GHOST B completes.
@@ -2508,11 +2585,19 @@ async def _write_document_graph_once(
     anchor for the books-as-clusters view. `chunk_count` is auto-derived
     from `all_chunk_ids` + the extraction-result chunk ids.
     """
-    await _clear_document_graph_payload(
-        driver,
-        corpus_id=corpus_id,
-        doc_id=doc_id,
-    )
+    # Redundant-clear elision: the ingestion worker already ran
+    # delete_document_graph (which prunes RELATES_TO, deletes the doc's nodes
+    # in bounded batches, sweeps orphans, and refreshes entity aggregates)
+    # immediately before this write. Re-running _clear_document_graph_payload
+    # here repeats the SAME prune + delete + a GLOBAL orphan sweep — pure
+    # fixed overhead with zero semantic effect on a just-deleted doc. Skip it
+    # when the caller guarantees a delete just ran (skip_preclear=True).
+    if not skip_preclear:
+        await _clear_document_graph_payload(
+            driver,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+        )
 
     # 1. Document node — rich anchor MERGE with cluster-anchor flags. When the
     # caller provides all_chunk_ids, Mongo's current chunk table is the source
@@ -2564,7 +2649,18 @@ async def _write_document_graph_once(
 
     # 2. Build batched payloads from the extraction results. `chunk_ids` was
     # computed above for the anchor's chunk_count — reuse it for the chunk rows.
-    chunk_rows: list[dict] = [{"chunk_id": chunk_id} for chunk_id in chunk_ids]
+    # Mixed-content book lane: `chunk_attributes` carries per-chunk
+    # chunk_kind/language from the ingestion lane so Chunk nodes expose the
+    # same kind filters Qdrant payloads already index.
+    attrs = chunk_attributes or {}
+    chunk_rows: list[dict] = [
+        {
+            "chunk_id": chunk_id,
+            "chunk_kind": attrs.get(chunk_id, {}).get("chunk_kind"),
+            "language": attrs.get(chunk_id, {}).get("language"),
+        }
+        for chunk_id in chunk_ids
+    ]
 
     entity_groups: dict[str, dict] = {}
     skipped_junk_entities = 0
@@ -2770,14 +2866,25 @@ async def _write_document_graph_once(
             if not subject_identity or not object_identity:
                 skipped_relations_missing_endpoint += 1
                 continue
-            refined_predicate = refine_related_to_predicate(
-                relation.predicate,
-                subject_identity,
-                object_identity,
-                source_predicate=normalized_source_predicate,
-                evidence_phrase=relation.evidence_phrase,
-                relation_cue=relation.relation_cue,
+            compiler_authoritative = bool(
+                relation.validation_status
+                and "accepted" in relation.validation_status
+                and (relation.source_predicate or relation.predicate) == relation.predicate
             )
+            if compiler_authoritative:
+                # The deterministic compiler's canonical predicate is final —
+                # including a deliberate related_to. Refinement exists only for
+                # legacy sentinel edges lacking compiled provenance.
+                refined_predicate = relation.predicate
+            else:
+                refined_predicate = refine_related_to_predicate(
+                    relation.predicate,
+                    subject_identity,
+                    object_identity,
+                    source_predicate=normalized_source_predicate,
+                    evidence_phrase=relation.evidence_phrase,
+                    relation_cue=relation.relation_cue,
+                )
             if refined_predicate != relation.predicate:
                 related_to_refinement_count += 1
             predicate_refined = refined_predicate != relation.predicate
@@ -2960,7 +3067,9 @@ async def _write_document_graph_once(
                 """
                 UNWIND $rows AS row
                 MERGE (c:Chunk {corpus_id: $corpus_id, chunk_id: row.chunk_id})
-                SET c.doc_id = $doc_id
+                SET c.doc_id = $doc_id,
+                    c.chunk_kind = coalesce(row.chunk_kind, c.chunk_kind),
+                    c.language = coalesce(row.language, c.language)
                 WITH c
                 MATCH (d:Document {doc_id: $doc_id, corpus_id: $corpus_id})
                 MERGE (d)-[:HAS_CHUNK]->(c)
@@ -2968,6 +3077,22 @@ async def _write_document_graph_once(
                 rows=row_batch,
                 doc_id=doc_id,
                 corpus_id=corpus_id,
+            )
+
+        # Mixed-content book lane — deterministic EXPLAINS edges between
+        # prose and code chunks (adjacency basis, emitted by tier_chunker).
+        explains_written = await _write_explains_edges(
+            session,
+            corpus_id=corpus_id,
+            doc_id=doc_id,
+            explains_rows=explains_rows,
+        )
+        if explains_written:
+            logger.info(
+                "Neo4j EXPLAINS edges written: doc=%s corpus=%s count=%d",
+                doc_id[:12],
+                corpus_id[:8],
+                explains_written,
             )
 
         # Entities + MENTIONS edges.
@@ -3069,6 +3194,8 @@ async def _write_document_graph_once(
                     m.surface_form = row.surface_form,
                     m.evidence_phrase = coalesce(row.evidence_phrase, m.evidence_phrase),
                     m.extractor = 'ghost_b',
+                    m.projection_kind = 'structural_shadow',
+                    m.authority = 'noncanonical',
                     m.ontology_version = row.ontology_version,
                     m.corpus_id = $corpus_id,
                     m.doc_id = c.doc_id
@@ -3249,6 +3376,8 @@ async def _write_document_graph_once(
                     END,
                     r.extract_schema_version = coalesce(r.extract_schema_version, row.schema_version, 'polymath.extract.v1'),
                     r.promote_version = $promote_version,
+                    r.projection_kind = coalesce(r.projection_kind, 'structural_shadow'),
+                    r.authority = coalesce(r.authority, 'noncanonical'),
                     r.last_seen_at = timestamp()
                 """,
                 rows=row_batch,
@@ -3293,6 +3422,9 @@ async def _write_document_graph_once(
                     END,
                     f.evidence_phrase = row.evidence_phrase,
                     f.extractor = 'ghost_b',
+                    f.knowledge_status = coalesce(f.knowledge_status, 'candidate'),
+                    f.projection_kind = coalesce(f.projection_kind, 'structural_shadow'),
+                    f.authority = coalesce(f.authority, 'noncanonical'),
                     f.updated_at = timestamp()
                 MERGE (e)-[:HAS_FACT]->(f)
                 MERGE (c)-[:SUPPORTS_FACT]->(f)
@@ -3423,6 +3555,8 @@ async def write_graphify_enrichment(
                 MERGE (src)-[r:CALLS]->(dst)
                 ON CREATE SET r.confidence = 1.0,
                               r.extractor = 'graphify',
+                              r.projection_kind = 'structural_shadow',
+                              r.authority = 'noncanonical',
                               r.first_seen = timestamp()
                 SET r.source_file = coalesce(row.source_file, r.source_file),
                     r.source_location = coalesce(row.source_location, r.source_location),

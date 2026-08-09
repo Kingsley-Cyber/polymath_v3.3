@@ -1,0 +1,37 @@
+[
+  {
+    "subject": "berth fairness charter",
+    "predicate": "defines",
+    "object": "berth fairness"
+  },
+  {
+    "subject": "exception desk",
+    "predicate": "consumes",
+    "object": "rejected manifests"
+  },
+  {
+    "subject": "exception desk",
+    "predicate": "produces",
+    "object": "correction queue"
+  },
+  {
+    "subject": "load manifest",
+    "predicate": "derived_from",
+    "object": "booking ledger"
+  },
+  {
+    "subject": "stowage planner",
+    "predicate": "consumes",
+    "object": "load manifest"
+  },
+  {
+    "subject": "stowage planner",
+    "predicate": "depends_on",
+    "object": "booking ledger"
+  },
+  {
+    "subject": "voltage sag",
+    "predicate": "causes",
+    "object": "breaker trips"
+  }
+]

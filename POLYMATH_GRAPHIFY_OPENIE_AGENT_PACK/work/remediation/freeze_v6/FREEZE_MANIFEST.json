@@ -1,0 +1,160 @@
+{
+ "benchmarks": {
+  "final_qualification_pegasus_cpcs": {
+   "genre": "final scored qualification \u2014 front-matter + dense prose + tables/schemas, full gold pack",
+   "package": "/Users/king/Downloads/rag_graph_entity_relation_test",
+   "protocol": [
+    "1. production-candidate pin at this commit; FREEZE INTACT before ingest",
+    "2. ingest source through the LIVE worker path; digest-lock receipts",
+    "3. expected/ gold files read ONLY after lock; score with the pack's scorer",
+    "4. scores stand as they fall"
+   ],
+   "source": "source_document.md ONLY (per pack instruction)",
+   "source_bytes": 5581,
+   "source_sha256": "9924ce5d1b6f9c7cf6cf84a9c3036a7c22517acdaff31c002ec8fee374a454d7",
+   "status": "SOURCE_SEALED_SCORING_AFTER_LOCK",
+   "transparency": "README glance-table (7 QA answers) was displayed when the owner pointed at test_final.md, before ingest; extraction semantics are frozen @0cb56088 with zero changes informed by this pack."
+  },
+  "sealed_qualification_v3": {
+   "package": "/Users/king/Downloads/sealed_qualification_v3",
+   "protocol": [
+    "1. verify_freeze INTACT (done)",
+    "2. extract-only with placeholder key; lock artifact + graph digests",
+    "3. owner supplies key; isolated grader converts it (implementation agent never reads it)",
+    "4. ONE scored run; graph digest must reproduce the locked digest",
+    "5. verify_freeze INTACT; the score stands as-is"
+   ],
+   "provenance": "owner-provided 03_transcript_test.md; answer key retained by owner off-flow \u2014 strongest seal: extraction completes before the key exists on this side",
+   "source_bytes": 2170,
+   "source_sha256": "c118a2dd096ca6a91045e6d87d8e2a832b4babe7aeb2ba6507e36633c2b8b477",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v4": {
+   "genre": "technical (control)",
+   "package": "/Users/king/Downloads/sealed_qualification_v4",
+   "provenance": "owner 01_technical_test.md; key off-flow; standstill in force (no code/mapping changes since freeze_v4)",
+   "source_bytes": 2427,
+   "source_sha256": "6f3880045b831d3549f57cb408ce2886cfc65252b08fc2d1b94859702d5026e4",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v5": {
+   "genre": "philosophical (new)",
+   "package": "/Users/king/Downloads/sealed_qualification_v5",
+   "provenance": "owner 02_philosophical_test.md; key off-flow; standstill in force",
+   "source_bytes": 2476,
+   "source_sha256": "e8beba9741d6318514ea8f1466a73b2df47d972e3a8af405372593e73ee3e21e",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v6": {
+   "genre": "arxiv-style dense technical abstract (hard test)",
+   "package": "/Users/king/Downloads/# Adaptive Evidence Graphs for Audi (1).txt",
+   "protocol": [
+    "1. verify_freeze (v5) INTACT",
+    "2. extract-only with placeholder key; lock artifact + graph digests; export frozen observations",
+    "3. owner supplies key; isolated grading only",
+    "4. downstream debugging via replay_downstream.py on frozen observations \u2014 no re-extraction"
+   ],
+   "provenance": "owner-provided; key off-flow; first test on the UNION stack",
+   "source_bytes": 3102,
+   "source_sha256": "bd8e686e81c7e44e49c8c865a92b0717c345ab0733a90c697e79624f2b8b4d60",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v7": {
+   "genre": "full research monograph (hierarchical motion grammar; YAML front matter, citation ids, status labels) \u2014 SCALE test",
+   "package": "/Users/king/Downloads/s/CPCS_MX_Hierarchical_Motion_Grammar_Research_Paper.md",
+   "protocol": [
+    "1. verify_freeze (v5) INTACT",
+    "2. extract-only with placeholder key; lock artifact + graph digests; export frozen observations",
+    "3. owner supplies key; isolated grading only",
+    "4. downstream debugging via replay_downstream.py on frozen observations \u2014 no re-extraction"
+   ],
+   "provenance": "owner-provided pair (1/2); key off-flow; extraction at 17326e6 (adapter-v2 ladder + evidence-scoped merge)",
+   "source_bytes": 193277,
+   "source_sha256": "5655c63082ebad79f4f1c4881abb9348689409724ea1807b68bca40c5423af17",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  },
+  "sealed_qualification_v8": {
+   "genre": "full research monograph (FACS/Laban directorial control) \u2014 SCALE test",
+   "package": "/Users/king/Downloads/s/CPCS_FACS_Laban_AI_Video_Directorial_Control_Research_Paper.md",
+   "protocol": [
+    "1. verify_freeze (v5) INTACT",
+    "2. extract-only with placeholder key; lock artifact + graph digests; export frozen observations",
+    "3. owner supplies key; isolated grading only",
+    "4. downstream debugging via replay_downstream.py on frozen observations \u2014 no re-extraction"
+   ],
+   "provenance": "owner-provided pair (2/2); key off-flow; extraction at 17326e6",
+   "source_bytes": 435888,
+   "source_sha256": "7ba240f350f58291bb8d2e67cfca679cfa8a92cbf4da33de924aae5370d606b5",
+   "status": "SOURCE_SEALED_OWNER_HOLDS_KEY"
+  }
+ },
+ "code": {
+  "backend/evals/graphify_synthetic_v1/score_synthetic_family.py": "f6a7d3158678ab4159b77ac97007ee1875fb1f2909125c9dc2b9b3d0ec969336",
+  "backend/models/graphify_contracts.py": "4abb11690f2d9f6b3ecf0c32723c9913d158a3d1962fe139a60cfacda96828e7",
+  "backend/scripts/audit_graphify_stress_frozen.py": "976f87b913f6334910daac54153a93c487949da00a7fdee462a029e1e8652c85",
+  "backend/scripts/replay_downstream.py": "aae7d258651ae4a01d55496749e1b3113c55aa73820e1af7bd805931a8f31453",
+  "backend/scripts/run_graphify_stress_answer_key.py": "94e4db839bc594b7ae3dc9808e998bbd9bc747e78d21b3e15da27237be92f7e4",
+  "backend/services/extraction/canonical.py": "65a542216978dcb2c17efc6eacb4d602a1d435b3ba98ec6f4fd62718bd827a1b",
+  "backend/services/extraction/corpus_coordinator.py": "86ac1d881c4003cd7347084c16424f74d9bd3e03738c513cb358740f80f483fa",
+  "backend/services/extraction/dep_path_extractor.py": "631e8e75c01c623dc6da8102375dcf998687282e637206cf00dd8f4b21ef38cc",
+  "backend/services/extraction/gliner2_cpu_provider.py": "4cdb2e6dabf8b4c834706f5130de44c887216afd0243239bc4cedcaa8ca7a7f5",
+  "backend/services/extraction/graphify_argument_adapter.py": "92a829aa25a1d6e5210159cf84d2ab5ccffc3c85f08a85b5265bd2e2faa936e5",
+  "backend/services/extraction/graphify_assertion_assembler.py": "bc8a665cdf46039bf6f927bf4776439bd99b979aa25eb34721ae73ff88e047b7",
+  "backend/services/extraction/graphify_assertion_semantics.py": "67f9e5602dd583e290e8017e73009e578f592080a669b9b9ec18f1994961a8c8",
+  "backend/services/extraction/graphify_census.py": "f8c2968b002a70e3f70db8f51e7431b93112f27b001a7d1a54e2a19787bc4669",
+  "backend/services/extraction/graphify_completion.py": "faac6cb22e3831ada1a4574f825b4080fe6ce7477e4053bcc9e59588bb569064",
+  "backend/services/extraction/graphify_normalization.py": "ca137159ad89925050930eb9963e4a719bbcb9ed42ddce89cf0b37551b4d29d6",
+  "backend/services/extraction/graphify_openie.py": "ffbb065210f79c1c7c0bd776ce1fd88fa7e61428c9bd3ebc4a5dc9f12589f753",
+  "backend/services/extraction/graphify_pipeline.py": "2c79f9084a88a62a6d29acae3d07bde5688b5b905e0eb4e8cd345717fe5e5bc2",
+  "backend/services/extraction/graphify_predicate_compiler.py": "8960d610b6a548418512f6dc0c1135e66ecf3531e5b8d5fadb0d65741cd8c187",
+  "backend/services/extraction/graphify_proposition_reducer.py": "e86c0b03c4a43e7239eec3c4efa3272950e46d2e8f6f01b8e56a1170b5d239e5",
+  "backend/services/extraction/graphify_reducer.py": "6de159311e4eca17c2de1c60f39b48e3aad69904ed63635800c3c435f9266583",
+  "backend/services/extraction/graphify_relations.py": "7b090e1416b5ae5e30c83828c57ee0e02c936893f96dd7b7400ddc0108f5b79e",
+  "backend/services/extraction/graphify_survey.py": "c06828c6e8e62b778ecbccc5d17b523569e1adbc666d790d61bd3bbe0b4b13f2",
+  "backend/services/extraction/graphify_unit_kind.py": "cc7d908c6f51cdea1df0acbcd7ae3c7ccf40c417d08ba9c80433eca74d308eb9",
+  "backend/services/extraction/graphify_value_ir.py": "6583d1b9220236e6da8b4a5fa0a155de24b77866631bc05bdc3ba23663aae774",
+  "backend/services/extraction/openie_farm.py": "f7af024b46205358de9775e3f471a2ccea1043e960c0eda753b32a58a2412c98",
+  "backend/services/ghost_b.py": "497dd4c678b72a544ec306937f8e6e74a7ebb0e818929790e0fca7fca7c69792",
+  "backend/services/graph/neo4j_writer.py": "a90c06cd00c05c9bd0f3d22db0942c353ece411141ffdc85cb77ed1a9af60e5d",
+  "backend/services/ingestion/docling_adapter.py": "87d90c9981f50fa2dcbf2ca94aea1b2d6ceb1b1a420b5b4104868f15e08835f5",
+  "backend/services/storage/graphify_artifact_codec.py": "295558d8dc599973b2c17aafa67a377f211507e207775ee75619eb8ca479e62f",
+  "config/entity_schema.yaml": "73bad40139d3f369e649d48b3e889fe9731f0bc77f1a5e084447119a113d9fe0",
+  "config/ontology.yaml": "04caa3324848c1fa9d8d02d5ab2dae54e9d7d51959ac83b0c5e60bd7cd5ecead",
+  "config/predicate_synonyms.yaml": "e7261d8e0628f58cc09fc963d13e0662dfa3ddb8538d2e0e5339396b10e05ce4"
+ },
+ "cycle_results": {
+  "book_66": "59/66, F1 .868, zero leakage, passed (unmoved)",
+  "families": "95/102 + family 10 (structured metadata) PASS 9/9 \u2014 total 104/111, eight of ten green",
+  "sealed_v1_as_dev": "40/51, F1 .808, zero leaks (precision -.018 from unknown-wildcard, watched)",
+  "sealed_v2_as_dev": "0/26 -> 1/26; metadata observations now captured (6 structured open relations incl. primary_system/document_id); remaining distance = lowercase concept-phrase entity contract (owner decision) + spec-key mapping policy"
+ },
+ "environment": {
+  "entity_model": "fastino/gliner2-base-v1",
+  "entity_schema_release": "graphify-entity-schema-v2",
+  "interpreter": "local_ghost_b/.venv/bin/python",
+  "packages": {
+   "en_core_web_sm": "3.8.0",
+   "gliner2": "1.3.2",
+   "motor": "3.3.2",
+   "neo4j": "5.17.0",
+   "pydantic": "2.5.0",
+   "pymongo": "4.6.0",
+   "spacy": "3.8.14",
+   "torch": "2.12.0",
+   "triplet-extract": "0.5.0"
+  },
+  "python": "3.11.15",
+  "spacy_model": "en_core_web_sm"
+ },
+ "freeze_id": "graphify-qualification-freeze-v6",
+ "frozen_at_commit": "b3c700430320fad41f5d054ede1e39bb0131dfe7",
+ "known_residuals_at_freeze": [
+  "lowercase concept-phrase entities ('atomic deconstruction', 'text-to-video') intentionally suppressed by genericity gates \u2014 sealed-v2-class gold needs an owner contract decision before such relations can promote",
+  "spec-metadata key mapping policy beyond self-naming keys (primary_system, has_type ...) undecided",
+  "corroboration policy for full gate opening (OpenIE lane) pending; structured+dependency lanes are the ACCEPT-eligible set",
+  "DENSE_STRUCTURE routing (labeling live, handler pending); per-proposer promotion telemetry pending",
+  "agentless participles (E10), D04-class typing, cross-sentence relations"
+ ],
+ "purpose": "Round-1 downstream remediation freeze: adapter-v2 deterministic linking ladder, evidence-scoped FACT merge, self-loop + function-word guards. Precedes sealed_qualification_v7/v8 (research-monograph scale tests). Revised post-census-fold fix (scale crash on v7 first attempt; no key existed, seal unaffected). Re-pinned after promotable-endpoint acceptance rule (v7 scale crash #2). Re-pinned after artifact shard codec (v8 DocumentTooLarge). Re-pinned after legacy GLiNER/GLiREL purge (behavior-neutral, A/B-proven). Re-pinned after ratified #5+#6 (according-to attribution, frame-scoped operate). Re-pinned after factory station 1 (unit.kind + structure propagation). Re-pinned after factory station 2 (structural endpoint eligibility). Re-pinned after factory station 3 (identifier minting). Re-pinned after factory station 4 (qualifier IR). Re-pinned after factory station A (openie farm; digest-equal execution change only). Re-pinned after factory station B (coordinator; digest-equal execution change only). PRODUCTION-CANDIDATE PIN for the final scored qualification.",
+ "supersedes": "freeze_v5 (closed; sealed_v6 graded under it: traps 11/11, FACT .462)"
+}

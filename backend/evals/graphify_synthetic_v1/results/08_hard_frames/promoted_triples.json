@@ -1,0 +1,27 @@
+[
+  {
+    "subject": "crane scheduler",
+    "predicate": "part_of",
+    "object": "yard stack"
+  },
+  {
+    "subject": "draft survey",
+    "predicate": "related_to",
+    "object": "spring audit window"
+  },
+  {
+    "subject": "february grounding event",
+    "predicate": "related_to",
+    "object": "pier nine"
+  },
+  {
+    "subject": "gate controller",
+    "predicate": "part_of",
+    "object": "yard stack"
+  },
+  {
+    "subject": "yard stack",
+    "predicate": "depends_on",
+    "object": "gate controller"
+  }
+]

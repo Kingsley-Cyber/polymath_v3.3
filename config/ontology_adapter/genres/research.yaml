@@ -1,0 +1,9 @@
+# Genre pack: research paper / technical report structure.
+version: "1.0"
+cues: [abstract, introduction, methodology, conclusion, references, appendix, figure, table]
+structure_cues: {citations: 3, headings: 5}
+entity_labels:
+  Document_Section: {description: a named section or component of this document, core: document, facet: section}
+native_predicates:
+  proposes: {canonical: defines, status: broader}
+  cites: {canonical: null, status: OPEN}

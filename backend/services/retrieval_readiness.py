@@ -21,6 +21,7 @@ from typing import Any
 
 from config import get_settings
 from services.storage.qdrant_writer import _col_for_corpus, ensure_collections_for_corpus
+from services.storage.record_status import active_record_clause
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,7 @@ async def repair_retrieval_readiness_for_all_corpora(
 
     reports: list[dict[str, Any]] = []
     cursor = db["corpora"].find(
-        {},
+        active_record_clause(),
         {
             "_id": 0,
             "corpus_id": 1,

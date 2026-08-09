@@ -1,0 +1,8 @@
+# Genre pack: manuals, runbooks, how-to documentation.
+version: "1.0"
+cues: [install, configure, setup, usage, instructions, requirements, steps, troubleshooting]
+structure_cues: {code_fences: 2, kv_lines: 5}
+entity_labels:
+  Procedure: {description: a named installation or operational procedure, core: method, facet: procedure}
+native_predicates:
+  requires: {canonical: depends_on, status: exact}

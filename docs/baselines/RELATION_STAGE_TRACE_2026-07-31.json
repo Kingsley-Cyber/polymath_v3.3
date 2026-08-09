@@ -1,0 +1,977 @@
+{
+  "total": 36,
+  "matcher": "FUZZY (+ratio>0.85)",
+  "harness_faults": [
+    "ch16: lack of awareness -causes-> reduced trial rate \u2014 absent: ['reduced trial rate']"
+  ],
+  "generator_coverage": {
+    "mine": 8,
+    "native_svo": 3,
+    "textacy": 2,
+    "any": 8
+  },
+  "stage_counts": {
+    "text_present": 27,
+    "adapter_allowed_pairs_rejected": 1,
+    "frame_predicate_unnamed": 1,
+    "generated": 4,
+    "frame_bibliographic_appositive": 2,
+    "ABSENT_FROM_TEXT": 1
+  },
+  "rows": [
+    {
+      "chunk": 1,
+      "relation": "CAPTCHA -detects-> spam",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Companies often use CAPTCHA fields to reduce spam by detecting whether the form filler is a real person.",
+      "mine_in_sentence": [
+        "Companies -use(active_transitive)-> fields",
+        "filler -is(copular)-> person"
+      ],
+      "svo_in_sentence": [
+        "Companies -use-> fields"
+      ],
+      "textacy_in_chunk": [
+        "Companies -use-> CAPTCHA fields",
+        "mistakes -filling-> them",
+        "prospects -prove-> humanity"
+      ],
+      "entities_in_sentence": [
+        "form",
+        "CAPTCHA fields",
+        "form",
+        "Companies",
+        "CAPTCHA fields",
+        "form",
+        "real person",
+        "fields"
+      ]
+    },
+    {
+      "chunk": 1,
+      "relation": "companies -uses-> CAPTCHA",
+      "stage": "adapter_allowed_pairs_rejected",
+      "mine": true,
+      "svo": true,
+      "textacy": true
+    },
+    {
+      "chunk": 2,
+      "relation": "Michael Boyd -affiliated_with-> Royal Shakespeare Company",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "## OEBPS/ritc_9781119685401_epub3_022_r1.xhtml\n\nMichael Boyd\n\nStage Left,\n\nStage Right \u2013\n\nThe Heavens  & Hell\n\nEmbodied Meaning  &\n\nMemory in Performance\n\nFormer Artistic Director of the Royal Shakespeare\n\nCompany  Michael Boyd  proposes an analogy\n\nbetween the \u2018thrust\u2019 stage and the human brain.",
+      "mine_in_sentence": [
+        "Right -Right(appositive)-> Heavens",
+        "Performance -Performance(appositive)-> Director",
+        "Left -proposes(active_transitive)-> analogy",
+        "Right -proposes(active_transitive)-> analogy"
+      ],
+      "svo_in_sentence": [
+        "Left -proposes-> analogy",
+        "Right -proposes-> analogy"
+      ],
+      "textacy_in_chunk": [
+        "Stage Left Stage Right -proposes-> analogy",
+        "actor -holds-> centre",
+        "that -demands-> communication",
+        "that -allows-> communication"
+      ],
+      "entities_in_sentence": [
+        "Michael Boyd",
+        "Stage Left",
+        "Stage Right",
+        "Royal Shakespeare\n\nCompany",
+        "Michael Boyd",
+        "stage"
+      ]
+    },
+    {
+      "chunk": 3,
+      "relation": "Microsoft -produces-> write-up on red teaming",
+      "stage": "frame_predicate_unnamed",
+      "mine": true,
+      "svo": true,
+      "textacy": false
+    },
+    {
+      "chunk": 3,
+      "relation": "organizations -owns-> security red team",
+      "stage": "generated",
+      "mine": true,
+      "svo": true,
+      "textacy": true,
+      "sentence": "Many organizations have a security red team that comes up with new\nattacks so that they can make their systems safe against them.",
+      "mine_in_sentence": [
+        "organizations -have(active_transitive)-> team",
+        "that -comes(prep_object)-> attacks"
+      ],
+      "svo_in_sentence": [
+        "organizations -have-> team"
+      ],
+      "textacy_in_chunk": [
+        "organizations -have-> team",
+        "Microsoft -has-> write up",
+        "Learnings -will help-> devise the right defense \n mechanisms",
+        "system -has-> capabilities"
+      ],
+      "entities_in_sentence": [
+        "Many organizations",
+        "systems",
+        "system",
+        "system"
+      ]
+    },
+    {
+      "chunk": 6,
+      "relation": "Gone Home -created_by-> S. Gaynor",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Gaynor, S. (2013) Gone Home [video game].",
+      "mine_in_sentence": [
+        "S. -S.(appositive)-> 2013"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [],
+      "entities_in_sentence": [
+        "Gaynor, S.",
+        "Gone Home"
+      ]
+    },
+    {
+      "chunk": 6,
+      "relation": "Gone Home -created_by-> The Fullbright Company",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "(spans sentences)",
+      "mine_in_sentence": [
+        "Ithaca -Ithaca(appositive)-> Press",
+        "G. -G.(appositive)-> 1999",
+        "Narratology -Narratology(appositive)-> Similitudes",
+        "Between -Between(appositive)-> Video)Games",
+        "S. -S.(appositive)-> 2013",
+        "Genette -Genette(appositive)-> G.",
+        "Genette -Genette(appositive)-> Discourse",
+        "G. -G.(appositive)-> 1980",
+        "Discourse -Discourse(appositive)-> Essay",
+        "Oxford -Oxford(appositive)-> Blackwell"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [],
+      "entities_in_sentence": []
+    },
+    {
+      "chunk": 6,
+      "relation": "Narrative Discourse -created_by-> G. Genette",
+      "stage": "generated",
+      "mine": true,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Frasca, G. (1999) Ludology Meets Narratology: Similitudes and Differences Between (Video)Games and Narrative.",
+      "mine_in_sentence": [
+        "G. -G.(appositive)-> 1999",
+        "Narratology -Narratology(appositive)-> Similitudes",
+        "Between -Between(appositive)-> Video)Games"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [],
+      "entities_in_sentence": [
+        "Frasca, G.",
+        "Narratology"
+      ]
+    },
+    {
+      "chunk": 6,
+      "relation": "Ludology Meets Narratology -created_by-> G. Frasca",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Frasca, G. (1999) Ludology Meets Narratology: Similitudes and Differences Between (Video)Games and Narrative.",
+      "mine_in_sentence": [
+        "G. -G.(appositive)-> 1999",
+        "Narratology -Narratology(appositive)-> Similitudes",
+        "Between -Between(appositive)-> Video)Games"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [],
+      "entities_in_sentence": [
+        "Frasca, G.",
+        "Narratology"
+      ]
+    },
+    {
+      "chunk": 7,
+      "relation": "general manager -located_in-> Quebec",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "**Example**\n\nThe general manager of a hotel in Quebec institutes a new system of customer satisfaction monitoring (see Figure 2.5).",
+      "mine_in_sentence": [
+        "manager -institutes(active_transitive)-> system"
+      ],
+      "svo_in_sentence": [
+        "manager -institutes-> system"
+      ],
+      "textacy_in_chunk": [
+        "Marketers -convert-> expressions",
+        "that -show-> percentage",
+        "who -checked-> 4 5",
+        "manager -institutes-> system",
+        "She -leaves-> satisfaction surveys"
+      ],
+      "entities_in_sentence": [
+        "general manager",
+        "hotel",
+        "Quebec",
+        "new system of customer satisfaction monitoring",
+        "Figure 2.5"
+      ]
+    },
+    {
+      "chunk": 9,
+      "relation": "Barney -detects-> camera noise",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "In addition, the camera cover (the Barney) we use to reduce camera noise has to be taken off; the camera has to be opened; and then the film has to be threaded through all those little gears.",
+      "mine_in_sentence": [
+        "cover -cover(appositive)-> Barney",
+        "we -use(prep_object)-> addition"
+      ],
+      "svo_in_sentence": [
+        "we -use-> reduce",
+        "we -has-> taken",
+        "camera -has-> opened",
+        "film -has-> threaded"
+      ],
+      "textacy_in_chunk": [
+        "take -would mean-> interruption",
+        "We -have-> to reload one of the cameras",
+        "we -use-> to reduce camera noise",
+        "we -has-> to be taken off",
+        "camera -has-> to be opened",
+        "film -has-> to be threaded through all those little gears",
+        "process -takes-> minutes",
+        "I -put-> tent",
+        "We -cut-> holes",
+        "cameraman -hold-> film magazine",
+        "we -needed-> it"
+      ],
+      "entities_in_sentence": [
+        "I",
+        "Al",
+        "Al",
+        "I",
+        "We",
+        "I",
+        "we"
+      ]
+    },
+    {
+      "chunk": 9,
+      "relation": "camera crew -part_of-> operator",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "And I had the second assistant cameraman (there are three men on a camera crew: operator, focus puller, and second assistant) hold an extra film magazine in his lap, in case we needed it.",
+      "mine_in_sentence": [
+        "men -men(appositive)-> operator",
+        "cameraman -hold(active_transitive)-> magazine",
+        "cameraman -hold(prep_object)-> lap",
+        "cameraman -hold(prep_object)-> case",
+        "we -needed(active_transitive)-> it"
+      ],
+      "svo_in_sentence": [
+        "cameraman -hold-> magazine",
+        "we -needed-> it"
+      ],
+      "textacy_in_chunk": [
+        "take -would mean-> interruption",
+        "We -have-> to reload one of the cameras",
+        "we -use-> to reduce camera noise",
+        "we -has-> to be taken off",
+        "camera -has-> to be opened",
+        "film -has-> to be threaded through all those little gears",
+        "process -takes-> minutes",
+        "I -put-> tent",
+        "We -cut-> holes",
+        "cameraman -hold-> film magazine",
+        "we -needed-> it"
+      ],
+      "entities_in_sentence": [
+        "I",
+        "I",
+        "We",
+        "I",
+        "second assistant cameraman",
+        "operator",
+        "focus puller",
+        "second assistant",
+        "we"
+      ]
+    },
+    {
+      "chunk": 9,
+      "relation": "camera crew -part_of-> focus puller",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "And I had the second assistant cameraman (there are three men on a camera crew: operator, focus puller, and second assistant) hold an extra film magazine in his lap, in case we needed it.",
+      "mine_in_sentence": [
+        "men -men(appositive)-> operator",
+        "cameraman -hold(active_transitive)-> magazine",
+        "cameraman -hold(prep_object)-> lap",
+        "cameraman -hold(prep_object)-> case",
+        "we -needed(active_transitive)-> it"
+      ],
+      "svo_in_sentence": [
+        "cameraman -hold-> magazine",
+        "we -needed-> it"
+      ],
+      "textacy_in_chunk": [
+        "take -would mean-> interruption",
+        "We -have-> to reload one of the cameras",
+        "we -use-> to reduce camera noise",
+        "we -has-> to be taken off",
+        "camera -has-> to be opened",
+        "film -has-> to be threaded through all those little gears",
+        "process -takes-> minutes",
+        "I -put-> tent",
+        "We -cut-> holes",
+        "cameraman -hold-> film magazine",
+        "we -needed-> it"
+      ],
+      "entities_in_sentence": [
+        "I",
+        "I",
+        "We",
+        "I",
+        "second assistant cameraman",
+        "operator",
+        "focus puller",
+        "second assistant",
+        "we"
+      ]
+    },
+    {
+      "chunk": 9,
+      "relation": "camera crew -part_of-> second assistant",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "And I had the second assistant cameraman (there are three men on a camera crew: operator, focus puller, and second assistant) hold an extra film magazine in his lap, in case we needed it.",
+      "mine_in_sentence": [
+        "men -men(appositive)-> operator",
+        "cameraman -hold(active_transitive)-> magazine",
+        "cameraman -hold(prep_object)-> lap",
+        "cameraman -hold(prep_object)-> case",
+        "we -needed(active_transitive)-> it"
+      ],
+      "svo_in_sentence": [
+        "cameraman -hold-> magazine",
+        "we -needed-> it"
+      ],
+      "textacy_in_chunk": [
+        "take -would mean-> interruption",
+        "We -have-> to reload one of the cameras",
+        "we -use-> to reduce camera noise",
+        "we -has-> to be taken off",
+        "camera -has-> to be opened",
+        "film -has-> to be threaded through all those little gears",
+        "process -takes-> minutes",
+        "I -put-> tent",
+        "We -cut-> holes",
+        "cameraman -hold-> film magazine",
+        "we -needed-> it"
+      ],
+      "entities_in_sentence": [
+        "I",
+        "I",
+        "We",
+        "I",
+        "second assistant cameraman",
+        "operator",
+        "focus puller",
+        "second assistant",
+        "we"
+      ]
+    },
+    {
+      "chunk": 10,
+      "relation": "prediction-based lead -instance_of-> Proclamation Lead",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "As we said about Proclamation Leads in general, in a prediction-based lead, once an emotionally-compelling statement (in the form of a prediction) has hooked the reader, the copy can then start using some of the techniques that work in other types of leads.",
+      "mine_in_sentence": [
+        "we -said(prep_object)-> Leads",
+        "statement -hooked(active_transitive)-> reader",
+        "statement -hooked(prep_object)-> lead",
+        "statement -hooked(prep_object)-> form",
+        "that -work(prep_object)-> types"
+      ],
+      "svo_in_sentence": [
+        "statement -hooked-> reader",
+        "copy -start-> using"
+      ],
+      "textacy_in_chunk": [
+        "statement -has hooked-> reader",
+        "copy -can start-> using some of the techniques that work in other types of leads",
+        "you -can see-> pull",
+        "recommendations -will protect-> reader"
+      ],
+      "entities_in_sentence": [
+        "prediction-based lead",
+        "emotionally-compelling statement",
+        "reader",
+        "copy",
+        "techniques",
+        "reader"
+      ]
+    },
+    {
+      "chunk": 12,
+      "relation": "Shadow Cities -uses-> soft movement mechanic",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Like in *Parallel Kingdom*, these functions enable the soft movement mechanic, but the strong social aspects of *Shadow Cities* are also in good accord with the territorial game mechanics.",
+      "mine_in_sentence": [
+        "functions -enable(active_transitive)-> mechanic",
+        "aspects -are(prep_object)-> accord"
+      ],
+      "svo_in_sentence": [
+        "functions -enable-> mechanic"
+      ],
+      "textacy_in_chunk": [
+        "it -is intended-> to be played with friends exploring and conquering nearby ( algorithmically generated ) neighbourhoods",
+        "game -contains-> features",
+        "functions -enable-> movement mechanic",
+        "cities neighbourhoods -evoke-> emotions",
+        "investment -helps-> amplify the emotional investment in the territorial mechanic",
+        "players -have-> that"
+      ],
+      "entities_in_sentence": [
+        "Shadow Cities",
+        "soft movement mechanic",
+        "Shadow Cities",
+        "cities"
+      ]
+    },
+    {
+      "chunk": 12,
+      "relation": "Parallel Kingdom -uses-> soft movement mechanic",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Like in *Parallel Kingdom*, these functions enable the soft movement mechanic, but the strong social aspects of *Shadow Cities* are also in good accord with the territorial game mechanics.",
+      "mine_in_sentence": [
+        "functions -enable(active_transitive)-> mechanic",
+        "aspects -are(prep_object)-> accord"
+      ],
+      "svo_in_sentence": [
+        "functions -enable-> mechanic"
+      ],
+      "textacy_in_chunk": [
+        "it -is intended-> to be played with friends exploring and conquering nearby ( algorithmically generated ) neighbourhoods",
+        "game -contains-> features",
+        "functions -enable-> movement mechanic",
+        "cities neighbourhoods -evoke-> emotions",
+        "investment -helps-> amplify the emotional investment in the territorial mechanic",
+        "players -have-> that"
+      ],
+      "entities_in_sentence": [
+        "Shadow Cities",
+        "soft movement mechanic",
+        "Shadow Cities",
+        "cities"
+      ]
+    },
+    {
+      "chunk": 15,
+      "relation": "A Twentieth Century Memorial -created_by-> Michael Sandle",
+      "stage": "generated",
+      "mine": true,
+      "svo": false,
+      "textacy": false,
+      "sentence": "## OEBPS/ritc_9781119685401_epub3_130_r1.xhtml\n\n130\n\nMichael Sandle,  ATwentieth Century Memorial,  1978\n\nThe 20th century was characterised by two World Wars and something\n\nlike 200 conflicts.",
+      "mine_in_sentence": [
+        "Sandle -Sandle(appositive)-> Memorial",
+        "Sandle -characterised(passive_agent)-> Wars",
+        "century -characterised(passive_agent)-> Wars"
+      ],
+      "svo_in_sentence": [
+        "Sandle -characterised-> Wars",
+        "Sandle -characterised-> something",
+        "century -characterised-> Wars",
+        "century -characterised-> something"
+      ],
+      "textacy_in_chunk": [
+        "ritc_9781119685401_epub3_130_r1.xhtml Michael Sandle century -was characterised-> World Wars something",
+        "form -launches-> television"
+      ],
+      "entities_in_sentence": [
+        "OEBPS",
+        "Michael Sandle",
+        "20th century",
+        "Michael Sandle"
+      ]
+    },
+    {
+      "chunk": 15,
+      "relation": "A Mighty Blow for Freedom -created_by-> Michael Sandle",
+      "stage": "frame_bibliographic_appositive",
+      "mine": true,
+      "svo": false,
+      "textacy": false
+    },
+    {
+      "chunk": 15,
+      "relation": "Ludlow Castle -located_in-> Shropshire",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Here photographed in the Norman chapel of Ludlow Castle\n\nin Shropshire.",
+      "mine_in_sentence": [],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "ritc_9781119685401_epub3_130_r1.xhtml Michael Sandle century -was characterised-> World Wars something",
+        "form -launches-> television"
+      ],
+      "entities_in_sentence": [
+        "Norman chapel",
+        "Ludlow Castle",
+        "Shropshire"
+      ]
+    },
+    {
+      "chunk": 16,
+      "relation": "lack of awareness -causes-> reduced trial rate",
+      "stage": "ABSENT_FROM_TEXT",
+      "mine": false,
+      "svo": false,
+      "textacy": false
+    },
+    {
+      "chunk": 18,
+      "relation": "cold lead -instance_of-> lead",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Two main classifications of leads include cold leads and warm leads.",
+      "mine_in_sentence": [
+        "classifications -include(active_transitive)-> leads",
+        "classifications -include(active_transitive)-> leads"
+      ],
+      "svo_in_sentence": [
+        "classifications -include-> leads",
+        "classifications -include-> leads"
+      ],
+      "textacy_in_chunk": [
+        "This -entails-> building awareness of a product through such activities as trade shows , direct mail , and advertising",
+        "salespeople -can generate-> leads",
+        "they -can identify-> targets",
+        "classifications -include-> leads leads",
+        "that -has not expressed-> interest"
+      ],
+      "entities_in_sentence": [
+        "leads",
+        "leads"
+      ]
+    },
+    {
+      "chunk": 18,
+      "relation": "warm lead -instance_of-> lead",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Two main classifications of leads include cold leads and warm leads.",
+      "mine_in_sentence": [
+        "classifications -include(active_transitive)-> leads",
+        "classifications -include(active_transitive)-> leads"
+      ],
+      "svo_in_sentence": [
+        "classifications -include-> leads",
+        "classifications -include-> leads"
+      ],
+      "textacy_in_chunk": [
+        "This -entails-> building awareness of a product through such activities as trade shows , direct mail , and advertising",
+        "salespeople -can generate-> leads",
+        "they -can identify-> targets",
+        "classifications -include-> leads leads",
+        "that -has not expressed-> interest"
+      ],
+      "entities_in_sentence": [
+        "leads",
+        "leads"
+      ]
+    },
+    {
+      "chunk": 19,
+      "relation": "Heller -works_for-> Israeli army",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Before entering the field of psychology, Heller worked as a tour guide\nfor American, British, Australian, and South African volunteers in the\nIsraeli army as part of her compulsory army service.",
+      "mine_in_sentence": [
+        "Heller -worked(prep_object)-> guide",
+        "Heller -worked(prep_object)-> part"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [],
+      "entities_in_sentence": [
+        "Heller",
+        "Australian",
+        "South African",
+        "volunteers",
+        "Israeli army"
+      ]
+    },
+    {
+      "chunk": 19,
+      "relation": "Heller -works_for-> Israeli Knesset",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Before entering the field of psychology, Heller worked as a tour guide\nfor American, British, Australian, and South African volunteers in the\nIsraeli army as part of her compulsory army service.",
+      "mine_in_sentence": [
+        "Heller -worked(prep_object)-> guide",
+        "Heller -worked(prep_object)-> part"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [],
+      "entities_in_sentence": [
+        "Heller",
+        "Australian",
+        "South African",
+        "volunteers",
+        "Israeli army"
+      ]
+    },
+    {
+      "chunk": 20,
+      "relation": "DevOps -derived_from-> Agile",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "DevOps: DevOps is a continuation of the Agile framework\nthat features full collaboration among the development and\noperations teams.",
+      "mine_in_sentence": [
+        "DevOps -is(copular)-> continuation",
+        "that -features(active_transitive)-> collaboration",
+        "that -features(prep_object)-> teams"
+      ],
+      "svo_in_sentence": [
+        "that -features-> collaboration"
+      ],
+      "textacy_in_chunk": [
+        "that -features-> collaboration"
+      ],
+      "entities_in_sentence": [
+        "Agile",
+        "Agile",
+        "develop",
+        "DevOps",
+        "DevOps",
+        "Agile"
+      ]
+    },
+    {
+      "chunk": 21,
+      "relation": "percent good value -synonym_of-> reservation prices",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "When it is not possible or convenient to ask customers about their reservation prices, percent good value can provide a substitute for that metric.",
+      "mine_in_sentence": [
+        "value -provide(active_transitive)-> substitute"
+      ],
+      "svo_in_sentence": [
+        "it -is-> ask",
+        "value -provide-> substitute"
+      ],
+      "textacy_in_chunk": [
+        "# Reservation prices -provide-> basis",
+        "They -offer-> insight",
+        "value -can provide-> substitute"
+      ],
+      "entities_in_sentence": [
+        "Reservation prices",
+        "customers",
+        "reservation prices",
+        "percent good value"
+      ]
+    },
+    {
+      "chunk": 22,
+      "relation": "Viking -part_of-> Penguin Random House LLC",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "<!-- section:9780399563744_EPUB-1.xhtml -->\n\nVIKING\n\nAn imprint of Penguin Random House LLC\n\n375 Hudson Street\n\nNew York, New York 10014\n\npenguin.com\n\nCopyright \u00a9 2017 by Mitchell Prinstein\n\nPenguin supports copyright.",
+      "mine_in_sentence": [
+        "LLC -LLC(appositive)-> York",
+        "penguin.com -penguin.com(appositive)-> \u00a9",
+        "section:9780399563744_EPUB-1.xhtml -supports(active_transitive)-> copyright"
+      ],
+      "svo_in_sentence": [
+        "section:9780399563744_EPUB-1.xhtml -supports-> copyright",
+        "penguin.com -supports-> copyright"
+      ],
+      "textacy_in_chunk": [
+        "section:9780399563744_EPUB-1.xhtml penguin.com -supports-> copyright",
+        "fuels creativity -encourages-> voices",
+        "fuels creativity -promotes-> speech",
+        "fuels creativity -creates-> culture",
+        "You -are supporting-> writers",
+        "Penguin -to continue-> to publish books for every reader"
+      ],
+      "entities_in_sentence": [
+        "VIKING",
+        "Penguin Random House LLC",
+        "375 Hudson Street",
+        "New York",
+        "New York",
+        "penguin",
+        "Copyright",
+        "Mitchell Prinstein",
+        "Penguin",
+        "copyright",
+        "Copyright",
+        "Penguin"
+      ]
+    },
+    {
+      "chunk": 22,
+      "relation": "Penguin Random House LLC -located_in-> New York",
+      "stage": "frame_bibliographic_appositive",
+      "mine": true,
+      "svo": false,
+      "textacy": false
+    },
+    {
+      "chunk": 23,
+      "relation": "executive dysfunction -part_of-> ADHD",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Again, these are the sorts of endeavors that executive dysfunction makes more difficult for persons with ADHD.",
+      "mine_in_sentence": [
+        "these -are(copular)-> sorts",
+        "dysfunction -makes(prep_object)-> persons"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "you -build-> endurance",
+        "that you -do not want-> to do",
+        "that -are connected-> endurance",
+        "that -trigger-> discomfort"
+      ],
+      "entities_in_sentence": [
+        "ADHD"
+      ]
+    },
+    {
+      "chunk": 25,
+      "relation": "LAMA -created_by-> Meta",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Introduced by Meta's AI lab in 2019, the LAMA\n(Language Model Analysis) benchmark ([Petroni et al.,\n2019]( probes for the relational\nknowledge present in the training data.",
+      "mine_in_sentence": [
+        "Meta -lab(possessive)-> lab",
+        "LAMA -LAMA(appositive)-> Analysis",
+        "benchmark -benchmark(appositive)-> al",
+        ". -.(appositive)-> 2019",
+        ". -.(appositive)-> probes"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "model -knows-> what",
+        "Relational knowledge -follows-> format",
+        "that -has-> knowledge"
+      ],
+      "entities_in_sentence": [
+        "Meta",
+        "AI lab",
+        "2019",
+        "2019",
+        "relational\nknowledge",
+        "Y",
+        "Y"
+      ]
+    },
+    {
+      "chunk": 25,
+      "relation": "LAMA -detects-> relational knowledge",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "Introduced by Meta's AI lab in 2019, the LAMA\n(Language Model Analysis) benchmark ([Petroni et al.,\n2019]( probes for the relational\nknowledge present in the training data.",
+      "mine_in_sentence": [
+        "Meta -lab(possessive)-> lab",
+        "LAMA -LAMA(appositive)-> Analysis",
+        "benchmark -benchmark(appositive)-> al",
+        ". -.(appositive)-> 2019",
+        ". -.(appositive)-> probes"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "model -knows-> what",
+        "Relational knowledge -follows-> format",
+        "that -has-> knowledge"
+      ],
+      "entities_in_sentence": [
+        "Meta",
+        "AI lab",
+        "2019",
+        "2019",
+        "relational\nknowledge",
+        "Y",
+        "Y"
+      ]
+    },
+    {
+      "chunk": 27,
+      "relation": "A Christmas Story -created_by-> Jean Shepherd",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "A CHRISTMAS STORY\n\n(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)",
+      "mine_in_sentence": [
+        "STORY -STORY(appositive)-> screenplay",
+        "Shepherd -Shepherd(appositive)-> 1983"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "you -wish-> to use a ritual or holiday in your story",
+        "you -must examine-> philosophy",
+        "you -may wish-> to support or attack all or part of that philosophy",
+        "Others -Pay-> Cash screenplay"
+      ],
+      "entities_in_sentence": [
+        "A CHRISTMAS STORY",
+        "Jean Shepherd",
+        "Leigh Brown",
+        "Jean Shepherd",
+        "Jean Shepherd"
+      ]
+    },
+    {
+      "chunk": 27,
+      "relation": "A Christmas Story -created_by-> Leigh Brown",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "A CHRISTMAS STORY\n\n(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)",
+      "mine_in_sentence": [
+        "STORY -STORY(appositive)-> screenplay",
+        "Shepherd -Shepherd(appositive)-> 1983"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "you -wish-> to use a ritual or holiday in your story",
+        "you -must examine-> philosophy",
+        "you -may wish-> to support or attack all or part of that philosophy",
+        "Others -Pay-> Cash screenplay"
+      ],
+      "entities_in_sentence": [
+        "A CHRISTMAS STORY",
+        "Jean Shepherd",
+        "Leigh Brown",
+        "Jean Shepherd",
+        "Jean Shepherd"
+      ]
+    },
+    {
+      "chunk": 27,
+      "relation": "A Christmas Story -created_by-> Bob Clark",
+      "stage": "text_present",
+      "mine": false,
+      "svo": false,
+      "textacy": false,
+      "sentence": "A CHRISTMAS STORY\n\n(screenplay by Jean Shepherd & Leigh Brown & Bob Clark, 1983)",
+      "mine_in_sentence": [
+        "STORY -STORY(appositive)-> screenplay",
+        "Shepherd -Shepherd(appositive)-> 1983"
+      ],
+      "svo_in_sentence": [],
+      "textacy_in_chunk": [
+        "you -wish-> to use a ritual or holiday in your story",
+        "you -must examine-> philosophy",
+        "you -may wish-> to support or attack all or part of that philosophy",
+        "Others -Pay-> Cash screenplay"
+      ],
+      "entities_in_sentence": [
+        "A CHRISTMAS STORY",
+        "Jean Shepherd",
+        "Leigh Brown",
+        "Jean Shepherd",
+        "Jean Shepherd"
+      ]
+    },
+    {
+      "chunk": 27,
+      "relation": "In God We Trust, All Others Pay Cash -created_by-> Jean Shepherd",
+      "stage": "generated",
+      "mine": true,
+      "svo": false,
+      "textacy": false,
+      "sentence": "THE GREAT AMERICAN FOURTH OF JULY AND OTHER DISASTERS\n\n(novel In God We Trust, All Others Pay Cash by Jean Shepherd, screenplay by Jean Shepherd, 1982)",
+      "mine_in_sentence": [
+        "AMERICAN -AMERICAN(appositive)-> FOURTH",
+        "AMERICAN -AMERICAN(appositive)-> novel",
+        "AMERICAN -AMERICAN(appositive)-> Trust",
+        "Others -Pay(active_transitive)-> Cash",
+        "Others -Pay(active_transitive)-> screenplay",
+        "Others -Pay(prep_object)-> Shepherd",
+        "Shepherd -Shepherd(appositive)-> 1982"
+      ],
+      "svo_in_sentence": [
+        "Others -Pay-> Cash",
+        "Others -Pay-> screenplay"
+      ],
+      "textacy_in_chunk": [
+        "you -wish-> to use a ritual or holiday in your story",
+        "you -must examine-> philosophy",
+        "you -may wish-> to support or attack all or part of that philosophy",
+        "Others -Pay-> Cash screenplay"
+      ],
+      "entities_in_sentence": [
+        "Jean Shepherd",
+        "Jean Shepherd",
+        "Jean Shepherd"
+      ]
+    }
+  ]
+}

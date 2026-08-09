@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Durable pointer: owner directive polymath_alias_pipeline_directive v1.0
+     pasted 2026-08-04. Full text lived in chat; execute from that authority +
+     CONTINUITY/ALIAS_IDENTITY_AUTHORITATIVE_STATE_20260804.md.
+     production_mutation_authorized=false. Phase 0 deliverable:
+     CONTINUITY/ALIAS_PIPELINE_BASELINE_20260804.md -->
+<polymath_alias_pipeline_directive version="1.0">
+  <metadata>
+    <title>Polymath Deterministic Alias Identity Pipeline</title>
+    <date>2026-08-04</date>
+    <persisted_at>2026-08-04T17:55Z</persisted_at>
+    <authority>owner_approved</authority>
+    <production_mutation_authorized>false</production_mutation_authorized>
+  </metadata>
+  <status_pointer>
+    <phase order="0" status="COMPLETE" deliverable="CONTINUITY/ALIAS_PIPELINE_BASELINE_20260804.md">baseline_inventory</phase>
+    <phase order="1" status="COMPLETE" code="backend/models/alias_identity.py" tests="9_passed">typed_contracts</phase>
+    <phase order="2" status="COMPLETE" code="backend/services/ingestion/alias_candidates.py" tests="11_passed">candidate_unification</phase>
+    <phase order="3" status="COMPLETE" closeout="CONTINUITY/ALIAS_PIPELINE_PHASE3_CLOSEOUT_20260804.md" tests="30_passed_phases_1_2_3">apposition_fix_and_wiring</phase>
+    <phase order="4" status="COMPLETE" closeout="CONTINUITY/ALIAS_PIPELINE_PHASE4_CLOSEOUT_20260804.md" tests="48_passed_phases_1_2_3_4" pause="HARD_PAUSE">alias_gate</phase>
+    <phase order="5" status="COMPLETE" closeout="CONTINUITY/ALIAS_PIPELINE_PHASE5_CLOSEOUT_20260804.md" tests="59_passed_phases_1_to_5">document_identity_clustering</phase>
+    <phase order="6" status="COMPLETE" closeout="CONTINUITY/ALIAS_PIPELINE_PHASE6_CLOSEOUT_20260804.md" tests="75_passed_phases_1_to_6" pause="HARD_PAUSE_BEFORE_PHASE7">corpus_identity_clustering</phase>
+    <phase order="7" status="COMPLETE" closeout="CONTINUITY/ALIAS_PIPELINE_PHASE7_CLOSEOUT_20260804.md" tests="87_passed_phases_1_to_7" pause="HARD_PAUSE_BEFORE_PRODUCTION">shadow_schemas_projection_and_retrieval_integration</phase>
+    <phase order="8" status="COMPLETE_SHADOW_CANARY" closeout="CONTINUITY/ALIAS_PIPELINE_PHASE8_CLOSEOUT_20260804.md" tests="102_passed_phases_1_to_8" pause="HARD_PAUSE_NO_PRODUCTION_ACTIVATION">live_retriever_shadow_wiring</phase>
+    <phase order="8b" status="PENDING" requires_owner="true">production_activation</phase>
+    <phase order="9" status="PENDING">unit_and_property_tests</phase>
+    <phase order="10" status="PENDING">isolated_end_to_end_test</phase>
+    <phase order="11" status="PENDING">closeout_and_hard_pause</phase>
+  </status_pointer>
+  <final_invariant>
+    GLiNER-Relex detects spans and explicitly supported relations. Deterministic
+    rules create evidence-backed alias candidates. A versioned gate decides
+    identity, temporal identity, retrieval-only expansion, review, or rejection.
+    Document evidence remains the only answer authority.
+  </final_invariant>
+</polymath_alias_pipeline_directive>

@@ -1,22 +1,25 @@
 """
-Docling adapter — thin httpx client for the docling sidecar.
+Deterministic parse adapter (historically the "docling adapter").
 
-The sidecar (`docling_svc/`) wraps IBM Docling so the backend image stays
-free of torch / transformers / accelerate. Backend code only ever sees the
-adapter's `parse_document(...) -> DoclingParseResult` contract.
+q9 deterministic parsing contract: every supported format parses locally
+with zero AI models, zero OCR, and zero external parser runtimes. The
+Docling sidecar and all OCR paths were removed in q9. Backend code only
+ever sees the adapter's `parse_document(...) -> DoclingParseResult`
+contract.
 
 Responsibilities split:
-  • Sidecar parses bytes → DoclingDocument → flat sections + markdown.
-  • PDF uploads are text-first. Text-layer PDFs use Docling layout parsing
-    without OCR when the sidecar is available; a surfaced local font-layout
-    fallback preserves headings when the sidecar is unavailable. Sparse or
-    image-only PDFs remain on the OCR-AST candidate lane.
-  • Adapter does ONE pre-processing step: when the upload looks like a
-    structurally-implicit `.txt` file, run `inject_synthetic_headers` first
-    so docling sees real `#`/`##` markers and can promote tier_b_plus.
-  • Adapter then asks the sidecar to parse the (possibly augmented) bytes
-    and packages the response into a `DoclingParseResult` ready for
-    `source_classifier` and `tier_chunker` to consume.
+  • PDF uploads are text-first. Text-layer PDFs parse through the pinned
+    firecrawl/pdf-inspector engine; a local font-layout parser preserves
+    headings when the inspector is unavailable. Sparse or image-only PDFs
+    stay on the OCR-AST candidate lane and are rejected downstream as
+    `unsupported_by_policy` (OCR is not supported).
+  • Markdown, plain text, HTML, EPUB, DOCX, code, subtitles, and table
+    formats parse through native deterministic parsers.
+  • Plain-text uploads are pre-augmented with synthetic headers when
+    `inject_synthetic_headers` finds qualifying markers so structural
+    tiers can be promoted.
+  • Uploads with no deterministic parser raise a terminal error instead
+    of reaching any sidecar or model.
 """
 
 from __future__ import annotations
@@ -30,8 +33,6 @@ from io import BytesIO, StringIO
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
-
-import httpx
 
 from models.schemas import SourceTier
 from services.ingestion.b_plus_normalizer import inject_synthetic_headers
@@ -50,15 +51,8 @@ from services.ingestion.bibliographic import (
 
 logger = logging.getLogger(__name__)
 
-DOCLING_URL = os.getenv("DOCLING_URL", "http://docling:8500")
-# Sidecar timeout. OCR is disabled; this mainly protects large layout parses
-# for non-PDF formats and unusual PDFs routed to Docling without OCR.
-DOCLING_TIMEOUT_SECONDS = float(os.getenv("DOCLING_TIMEOUT_SECONDS", "600"))
-DOCLING_SIDECAR_POLICY = os.getenv("DOCLING_SIDECAR_POLICY", "auto").strip().lower()
-DOCLING_AUTO_UNLOAD_AFTER_PARSE = (
-    os.getenv("DOCLING_AUTO_UNLOAD_AFTER_PARSE", "false").strip().lower()
-    in {"1", "true", "yes", "on"}
-)
+# q9 contract: the Docling sidecar and every DOCLING_* env knob were
+# removed. Parsing is fully deterministic and local; see parse_policy.py.
 
 _PLAIN_TEXT_MIMES = {"text/plain"}
 _PLAIN_TEXT_EXTS = {".txt", ".text", ".log"}
@@ -528,13 +522,30 @@ def finalize_source_meta(result: "DoclingParseResult", filename: str | None) -> 
 
 
 def _strip_yaml_frontmatter(text: str) -> str:
+    """Open-discovery revision: front matter is explicit document metadata, so
+    deleting it destroys observations before any stage can see them. The
+    fences and quoting are removed but the key-value lines survive as a plain
+    metadata block — the deterministic structured-data lane consumes exactly
+    this shape, and the endpoint mint policy contains junk values."""
     if not text or not text.lstrip("﻿").startswith("---"):
         return text
-    stripped = _FRONTMATTER_RE.sub("", text, count=1)
-    if stripped is not text:
-        logger.info("local_markdown: stripped YAML frontmatter (%d chars)",
-                    len(text) - len(stripped))
-    return stripped
+    clean = text.lstrip("﻿")
+    match = _FRONTMATTER_RE.match(clean)
+    if not match:
+        return text
+    block_lines = match.group(0).splitlines()[1:-1]
+    kept: list[str] = []
+    for line in block_lines:
+        key, sep, value = line.partition(":")
+        if sep and key.strip() and value.strip():
+            kept.append(f"{key.strip()}: {value.strip().strip(chr(39) + chr(34))}")
+    replacement = ("\n".join(kept) + "\n\n") if kept else ""
+    transformed = clean[:match.start()] + replacement + clean[match.end():]
+    logger.info(
+        "local_markdown: preserved YAML frontmatter as metadata block (%d keys)",
+        len(kept),
+    )
+    return transformed
 
 
 # Bold-key metadata line: `**Source:** https://…`, `**Extracted:** 2026-03-24`.
@@ -600,35 +611,12 @@ def _looks_like_code(filename: str) -> bool:
     return basename in _CODE_FILENAME_TO_LANGUAGE or _extension(filename) in _CODE_EXT_TO_LANGUAGE
 
 
-def docling_sidecar_needed(filename: str, mime: str) -> bool:
-    """True only for formats that cannot use the local parser path."""
-    if _looks_like_code(filename):
-        return False
-    if _looks_like_pdf(filename, mime):
-        # Digital PDFs prefer the sidecar, but the font-layout parser is a
-        # complete local fallback and therefore the sidecar is not required.
-        return False
-    if _looks_like_markdown(filename, mime):
-        return False
-    if _looks_like_html(filename, mime):
-        return False
-    if _looks_like_epub(filename, mime):
-        return False
-    if _looks_like_docx(filename, mime):
-        return False
-    if _looks_like_csv(filename, mime) or _looks_like_spreadsheet(filename, mime):
-        return False
-    if _looks_like_plain_text(filename, mime):
-        return False
-    return True
-
-
 def parser_strategy(filename: str, mime: str) -> str:
     """Human-readable parse lane for diagnostics and tests."""
     if _looks_like_code(filename):
         return "local_code"
     if _looks_like_pdf(filename, mime):
-        return "pdf_layout_then_local_fallback"
+        return "pdf_inspector_then_font_layout"
     if _looks_like_markdown(filename, mime):
         return "local_markdown"
     if _looks_like_html(filename, mime):
@@ -720,6 +708,10 @@ def _looks_like_plain_text(filename: str, mime: str) -> bool:
 
 _FENCE_OPEN_RE = re.compile(r"^```([a-zA-Z0-9_+\-]*)\s*$")
 _FENCE_CLOSE_RE = re.compile(r"^```\s*$")
+# Mixed-content book lane — standalone caption lines ("Figure 4.1: ...",
+# "Table 3: ...", "Listing 2-1 ...", "Example 5: ..."). Case-sensitive on
+# purpose: book captions are capitalized; lowercase prose mentions stay body.
+_CAPTION_LINE_RE = re.compile(r"^(?:Figure|Table|Listing|Example)\s+\d")
 _HEADING_ANCHOR_RE = re.compile(r"\s*\{#[^\n}]*\}\s*$")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 _TABLE_CAPTION_RE = re.compile(
@@ -1443,6 +1435,67 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
 
     def flush_paragraph() -> None:
         nonlocal paragraph
+        # Mixed-content book lane: when the buffer directly follows a code
+        # (or output) block, a leading fully-indented run is the example's
+        # console output, not prose (classic textbook layout). Blank lines
+        # between the fence and the run are allowed.
+        if paragraph and sections and sections[-1].element_type in (
+            "code_block",
+            "output_block",
+        ):
+            k = 0
+            while k < len(paragraph) and (
+                not paragraph[k].strip()
+                or paragraph[k].startswith("    ")
+                or paragraph[k].startswith("\t")
+            ):
+                k += 1
+            indented = [ln for ln in paragraph[:k] if ln.strip()]
+            if indented and all(
+                ln.startswith("    ") or ln.startswith("\t") for ln in indented
+            ):
+                out_text = "\n".join(paragraph[:k]).strip()
+                if out_text:
+                    sections.append(
+                        Section(
+                            heading_path=list(current_path),
+                            text=out_text,
+                            element_type="output_block",
+                        )
+                    )
+                paragraph = paragraph[k:]
+        # Mixed-content book lane: a leading caption unit (up to the first
+        # blank line) that names a figure/table/listing/example becomes its
+        # own caption section so it stays retrievable evidence, not merged
+        # prose. Bounded length keeps ordinary sentences out.
+        if paragraph:
+            # Blank lines before the unit (e.g. right after a heading) don't
+            # break caption detection — skip them before scanning the unit.
+            start = 0
+            while start < len(paragraph) and not paragraph[start].strip():
+                start += 1
+            blank_at = next(
+                (
+                    idx
+                    for idx in range(start, len(paragraph))
+                    if not paragraph[idx].strip()
+                ),
+                len(paragraph),
+            )
+            unit_text = "\n".join(paragraph[start:blank_at]).strip()
+            if (
+                unit_text
+                and len(unit_text) <= 300
+                and _CAPTION_LINE_RE.match(unit_text)
+            ):
+                sections.append(
+                    Section(
+                        heading_path=list(current_path),
+                        text=unit_text,
+                        element_type="caption",
+                    )
+                )
+                paragraph = paragraph[blank_at:]
         text = _scrub_inline_links("\n".join(paragraph)).strip()
         if text:
             sections.append(
@@ -1551,10 +1604,9 @@ def _markdown_sections(markdown: str) -> tuple[list[Section], int, int]:
 
 
 def _parse_local_text_document(raw_bytes: bytes, filename: str, mime: str) -> DoclingParseResult | None:
-    """Parse text/markdown/html without the Docling sidecar.
-
-    Local parsing keeps default Docker startup API-first. Docling remains an
-    explicit profile for formats that truly need layout-aware conversion.
+    """Parse text/markdown/html/office-like formats with deterministic
+    local parsers. This is the only parse path — no external parser
+    runtime exists anymore (q9 contract).
     """
     csv_result = _parse_delimited_table_document(raw_bytes, filename, mime)
     if csv_result is not None:
@@ -2262,103 +2314,85 @@ def _parse_pdf_font_layout(
     )
 
 
-def _sidecar_disabled() -> bool:
-    return DOCLING_SIDECAR_POLICY in {"0", "false", "off", "disabled", "none", "local"}
-
-
-def _docling_required_error(filename: str, mime: str) -> RuntimeError:
-    return RuntimeError(
-        "This upload needs the Docling sidecar because it is not markdown, "
-        "plain text, code, HTML, or a fast-text PDF. Current parse strategy "
-        f"for {filename!r} ({mime or 'unknown MIME'}) is docling_sidecar. "
-        "Start it with `docker compose --profile local-parser up -d docling`, "
-        "set DOCLING_SIDECAR_POLICY=auto, or convert the file to .md/.txt."
-    )
-
-
-async def unload_docling_sidecar() -> dict:
-    """Ask the sidecar to release the heavy converter immediately."""
-    async with httpx.AsyncClient(
-        base_url=DOCLING_URL,
-        timeout=httpx.Timeout(10.0, connect=3.0),
-    ) as client:
-        resp = await client.post("/unload")
-        resp.raise_for_status()
-        return resp.json()
-
-
-async def _parse_with_docling_sidecar(
+def _parse_pdf_with_inspector(
     raw_bytes: bytes,
     filename: str,
     mime: str,
-    *,
-    augmented: bool = False,
-    audit: list[dict] | None = None,
-) -> DoclingParseResult:
-    """Run a no-OCR layout parse and normalize the sidecar response."""
-    files = {"file": (filename, raw_bytes, mime)}
-    data = {"do_ocr": "false"}
+    fast_result: DoclingParseResult,
+) -> DoclingParseResult | None:
+    """q9 deterministic PDF contract — firecrawl/pdf-inspector (pinned 0.2.6).
 
+    Replaces the Docling sidecar for TEXT PDFs only: pure Rust, zero AI
+    models, zero OCR, no network round trip. Produces position-aware
+    Markdown with headings, tables, lists, and reading order.
+
+    Returns None when the library is unavailable, the parse errors, or the
+    classifier does not confirm a text-based document — the deterministic
+    fallback chain (font-layout) or the q9 parse-policy gate then decides.
+    Scanned / image-based / mixed PDFs are never silently partially parsed
+    here; they terminate upstream with ``unsupported_by_policy``.
+    """
     try:
-        async with httpx.AsyncClient(
-            base_url=DOCLING_URL,
-            timeout=httpx.Timeout(DOCLING_TIMEOUT_SECONDS, connect=30.0),
-        ) as client:
-            try:
-                resp = await client.post("/parse", files=files, data=data)
-            except httpx.RequestError as exc:
-                raise RuntimeError("Docling parser sidecar is unavailable") from exc
-            resp.raise_for_status()
-            payload = resp.json()
-    finally:
-        if DOCLING_AUTO_UNLOAD_AFTER_PARSE:
-            try:
-                await unload_docling_sidecar()
-            except Exception as exc:
-                logger.debug("Docling sidecar auto-unload failed: %s", exc)
-
-    sections = [
-        Section(
-            heading_path=list(section.get("heading_path") or []),
-            text=section.get("text", "") or "",
-            element_type=section.get("element_type", "paragraph"),
-            level=section.get("level"),
-            language=section.get("language"),
-            metadata=section.get("metadata") or {},
+        import pdf_inspector
+    except Exception:
+        logger.warning(
+            "pdf-inspector not installed; falling back for %s", filename
         )
-        for section in payload.get("sections", [])
-    ]
-    h1 = int(payload.get("h1_count", 0))
-    h2 = int(payload.get("h2_count", 0))
+        return None
+    try:
+        inspected = pdf_inspector.process_pdf_bytes(raw_bytes)
+    except Exception as exc:
+        logger.warning(
+            "pdf-inspector parse failed for %s: %s",
+            filename,
+            type(exc).__name__,
+        )
+        return None
+
+    pdf_type = str(getattr(inspected, "pdf_type", "") or "")
+    markdown = str(getattr(inspected, "markdown", "") or "").strip()
+    if pdf_type != "text_based" or not markdown:
+        # Scanned / image-based / mixed: leave the fast result in charge so
+        # the q9 parse-policy gate terminates the document with
+        # document_requires_ocr instead of ingesting partial content.
+        logger.info(
+            "phase=pdf_inspector_reject file=%s pdf_type=%s",
+            filename,
+            pdf_type,
+        )
+        return None
+
+    sections, h1, h2 = _markdown_sections(markdown)
     has_tables = any(section.element_type == "table" for section in sections)
-    has_structure = bool(
-        payload.get("has_structure", False) or (h1 + h2) > 0 or has_tables
-    )
-    num_pages = int(payload.get("num_pages", 1))
+    has_structure = (h1 + h2) > 0 or has_tables
     tier = _classify_tier(
         original_mime=mime,
         original_filename=filename,
-        augmented=augmented,
+        augmented=False,
         h1_count=h1,
         h2_count=h2,
-        num_pages=num_pages,
+        num_pages=fast_result.num_pages,
         has_structure=has_structure,
         has_tables=has_tables,
     )
+    logger.info(
+        "phase=pdf_inspector file=%s pages=%d headings=%d tier=%s",
+        filename,
+        fast_result.num_pages,
+        h1 + h2,
+        tier.value,
+    )
     return DoclingParseResult(
-        text=payload.get("text", "") or "",
-        markdown=payload.get("markdown", "") or "",
+        text=markdown,
+        markdown=markdown,
         sections=sections,
-        pages=payload.get("pages"),
+        pages=fast_result.pages,
         has_structure=has_structure,
         source_tier=tier,
         h1_count=h1,
         h2_count=h2,
-        num_pages=num_pages,
-        source_format=payload.get("source_format", "") or "",
-        augmented_with_synthetic_headers=augmented,
-        injected_headers_audit=list(audit or []),
-        language=None,
+        num_pages=fast_result.num_pages,
+        source_format="pdf_inspector",
         filename=filename,
     )
 
@@ -2369,9 +2403,10 @@ async def parse_document(
     mime: str,
     do_ocr: bool = False,
 ) -> DoclingParseResult:
-    """Hand the upload to the docling sidecar and return a structured
-    DoclingParseResult. Plain-text uploads are pre-augmented with synthetic
-    headers when `inject_synthetic_headers` finds qualifying markers.
+    """Parse an upload through the deterministic local parsers and return a
+    structured DoclingParseResult. Plain-text uploads are pre-augmented with
+    synthetic headers when `inject_synthetic_headers` finds qualifying
+    markers. No sidecar, no OCR, and no parser AI models are ever invoked.
     """
     if do_ocr:
         logger.warning("Ignoring do_ocr=True for %s; OCR is disabled by policy", filename)
@@ -2442,33 +2477,21 @@ async def parse_document(
             )
             return fast_result
 
-        if not _sidecar_disabled():
-            try:
-                layout_result = await _parse_with_docling_sidecar(
-                    raw_bytes,
-                    filename,
-                    mime,
-                )
-                _apply_pdf_bibliographic_capture(
-                    layout_result,
-                    raw_bytes,
-                    pdf_meta=pdf_meta,
-                )
-                return layout_result
-            except Exception as exc:
-                logger.warning(
-                    "Docling PDF layout parse failed for %s; using surfaced "
-                    "font-layout fallback: %s",
-                    filename,
-                    type(exc).__name__,
-                )
-                fallback_reason = (
-                    "docling_sidecar_unavailable"
-                    if isinstance(exc, RuntimeError)
-                    else "docling_sidecar_parse_error"
-                )
-        else:
-            fallback_reason = "docling_sidecar_disabled"
+        # q9 deterministic parsing contract: text PDFs parse through the
+        # pinned firecrawl/pdf-inspector engine (no models, no OCR, no
+        # sidecar). Docling layout parsing is no longer invoked for PDFs.
+        inspector_result = _parse_pdf_with_inspector(
+            raw_bytes, filename, mime, fast_result
+        )
+        if inspector_result is not None:
+            _apply_pdf_bibliographic_capture(
+                inspector_result,
+                raw_bytes,
+                pdf_meta=pdf_meta,
+            )
+            return inspector_result
+
+        fallback_reason = "pdf_inspector_unavailable"
 
         layout_result = _parse_pdf_font_layout(
             raw_bytes,
@@ -2488,16 +2511,14 @@ async def parse_document(
     if local_result is not None:
         return local_result
 
-    aug_bytes, aug_filename, aug_mime, augmented, audit = _maybe_augment_plaintext(
-        raw_bytes, filename, mime
-    )
-
-    if _sidecar_disabled():
-        raise _docling_required_error(filename, mime)
-    return await _parse_with_docling_sidecar(
-        aug_bytes,
-        aug_filename,
-        aug_mime,
-        augmented=augmented,
-        audit=audit,
+    # q9 deterministic parsing contract: every supported format parses
+    # locally above. Anything reaching this point has no deterministic
+    # parser, so it is rejected terminally — no sidecar, no OCR, and no
+    # parser models exist to fall back to.
+    raise RuntimeError(
+        f"Unsupported upload format for {filename!r} ({mime or 'unknown MIME'}): "
+        "no deterministic parser is available. The Docling sidecar and OCR "
+        "were removed by the q9 parsing contract. Convert the file to one "
+        "of: md, txt, html, pdf (text layer), docx, epub, csv, xlsx, or a "
+        "recognized code/transcript format."
     )

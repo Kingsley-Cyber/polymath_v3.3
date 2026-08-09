@@ -102,7 +102,7 @@ const SERVICES: {
   },
   {
     key: "extraction",
-    label: "Extraction (GLiNER/GLiREL)",
+    label: "Extraction (Relex sidecar)",
     icon: Cloud,
     iconColor: "text-emerald-400",
     urlKey: "extraction_url",

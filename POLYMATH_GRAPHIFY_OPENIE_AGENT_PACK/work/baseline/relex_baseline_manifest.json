@@ -1,0 +1,122 @@
+{
+  "checks": {
+    "fixture_hashes_match": true,
+    "frozen_provider": true,
+    "isolated_no_database_writes": true,
+    "raw_records_preserved": true,
+    "reports_passed": true
+  },
+  "created_at": "2026-08-06T23:23:34.548110+00:00",
+  "measured": {
+    "quality": {
+      "counts": {
+        "entities": 160,
+        "failures": 0,
+        "projection_edges": 12,
+        "projection_nodes": 146,
+        "relations": 12,
+        "results": 7,
+        "windows": 7
+      },
+      "identity_digest": "6e35ba63f679c970be788a317b16185b6a4e39d2e1fcf6df46bc11d85914ce00",
+      "metrics": {
+        "entity": {
+          "exact_span_supported": false,
+          "gold_surface_types": 26,
+          "predicted_surface_types": 146,
+          "surface_type_precision": 0.0547945205479452,
+          "surface_type_recall": 0.3076923076923077,
+          "surface_type_true_positives": 8
+        },
+        "relation": {
+          "directed_triple_f1": 0.2,
+          "directed_triple_precision": 0.25,
+          "directed_triple_recall": 0.16666666666666666,
+          "directed_triple_true_positives": 3,
+          "gold_accepted_directed_triples": 18,
+          "predicted_directed_triples": 12
+        },
+        "throughput": {
+          "source_bytes": 3805,
+          "source_bytes_per_second": 1728.9959089060353,
+          "windows_per_second": 3.1808071911543356
+        }
+      },
+      "projection_digest": "d0dc550de5012e2aab3baaeeaa64cb41f4bd98083e900ec29a53fd6f1c912f1a",
+      "release_pins": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "fixture_sha256": "adebcd4dfd58b64d7c6f192b210efe7cbf42b6153091a9e97d91911054d062c3",
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "schema_version": "polymath.extract.relex_local.v1"
+      },
+      "stage_timings": {
+        "semantic_extraction_seconds": 2.200699250010075,
+        "total_seconds": 2.200699250010075
+      }
+    },
+    "throughput": {
+      "counts": {
+        "entities": 3765,
+        "failures": 0,
+        "projection_edges": 3,
+        "projection_nodes": 381,
+        "relations": 102,
+        "results": 148,
+        "windows": 148
+      },
+      "identity_digest": "851de8e9eaad072ad4037daeb9e1f850f1b15bc546182899465074d4d4b4a858",
+      "metrics": {
+        "entity": {
+          "exact_span_supported": false,
+          "gold_surface_types": 7,
+          "predicted_surface_types": 381,
+          "surface_type_precision": 0.007874015748031496,
+          "surface_type_recall": 0.42857142857142855,
+          "surface_type_true_positives": 3
+        },
+        "relation": {
+          "directed_triple_f1": 0.0,
+          "directed_triple_precision": 0.0,
+          "directed_triple_recall": 0.0,
+          "directed_triple_true_positives": 0,
+          "gold_accepted_directed_triples": 2,
+          "predicted_directed_triples": 3
+        },
+        "throughput": {
+          "source_bytes": 81822,
+          "source_bytes_per_second": 3055.006565298517,
+          "windows_per_second": 5.525909555671832
+        }
+      },
+      "projection_digest": "636b590e3135dde16b13fb67fbab3e5d88ebf9ff1cbf6a653245fb2f57fe2291",
+      "release_pins": {
+        "acceptance_policy_hash": "ebe3a82d13515d5017f7b3a8e86d5da313e925420fdc02b9de2b8cca6b7b3e8b",
+        "extractor_engine": "relex_local",
+        "extractor_release": "relex_local.v1",
+        "fixture_sha256": "0ddd182724b5ebfd2b0404beccc4436ca7f9de9bc1cb40faf74f4e92ecbb4658",
+        "model_hash": "7c5bd751e1b24e4254d70fe4355a986cd65400676ce3735f7752429fcc26960a",
+        "model_id": "knowledgator/gliner-relex-large-v1.0",
+        "ontology_hash": "f484cb6acf4062fe08d2f473a80e659cb3d3239db8567d25d63efaf9d45ee956",
+        "schema_version": "polymath.extract.relex_local.v1"
+      },
+      "stage_timings": {
+        "semantic_extraction_seconds": 26.78292116599914,
+        "total_seconds": 26.78292116599914
+      }
+    }
+  },
+  "provider": "relex_local_frozen_baseline",
+  "raw_records": {
+    "quality": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_quality_records.json",
+    "throughput": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_throughput_records.json"
+  },
+  "reports": {
+    "quality": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_quality.json",
+    "throughput": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/baseline/relex_throughput.json"
+  },
+  "status": "PASSED"
+}

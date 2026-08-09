@@ -1,0 +1,47 @@
+[
+  {
+    "evidence_end": 1429,
+    "evidence_start": 1288,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "human review queue",
+    "predicate": "enter",
+    "qualifiers": {},
+    "subject": "vr 19 so low confidence cross version edges"
+  },
+  {
+    "evidence_end": 1429,
+    "evidence_start": 1288,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "human review queue",
+    "predicate": "enter",
+    "qualifiers": {},
+    "subject": "so low confidence cross version edges"
+  },
+  {
+    "evidence_end": 1587,
+    "evidence_start": 1430,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "related amendment was found but is awaiting review whenever unconfirmed edge contributes evidence",
+    "predicate": "say",
+    "qualifiers": {},
+    "subject": "support console fallback"
+  },
+  {
+    "evidence_end": 1587,
+    "evidence_start": 1430,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "evidence",
+    "predicate": "whenever contributes",
+    "qualifiers": {},
+    "subject": "unconfirmed edge"
+  },
+  {
+    "evidence_end": 2037,
+    "evidence_start": 1802,
+    "lane": "QUALIFIED_CLAIM",
+    "object": "review",
+    "predicate": "could move from",
+    "qualifiers": {},
+    "subject": "VR-19"
+  }
+]

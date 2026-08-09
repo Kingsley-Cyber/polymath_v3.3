@@ -32,7 +32,11 @@ def test_markdown_frontmatter_extracted_then_stripped():
     assert res.title == "The Art of Testing"
     assert res.author == "Jane Coder"
     assert res.document_date == "2026-01-15"
-    assert "title: The Art of Testing" not in res.text  # frontmatter still stripped
+    # Open-discovery revision (2026-08-07, owner-ratified): frontmatter is
+    # preserved as a plain metadata block — explicit document metadata is an
+    # observation, not junk; the structured-data lane consumes it and the
+    # endpoint mint policy contains junk values.
+    assert "title: The Art of Testing" in res.text
 
 
 def test_markdown_without_frontmatter_has_no_meta():

@@ -1684,6 +1684,122 @@ Acceptance:
 - [ ] Require profile presence and validated source support.
 - [ ] Detect polluted concept cards that would mis-reserve documents.
 
+### P2.9 RTX Default Extraction Control Plane — RETIRED 2026-07-30
+
+**Ruling (Step 0a of the recall ladder): RETIRED, not built.**
+`CONTINUITY/Extraction_Elite_Roadmap.md` cited "RTX spec **P2.9**
+(`CONTINUITY/RTX_DEFAULT_EXTRACTION_CONTROL_PLANE.md`)". Verified 2026-07-30:
+**neither the checklist item nor the companion file has ever existed.** The
+roadmap referenced an anchor that was never written.
+
+Retired rather than reconstructed because the owner directive of 2026-07-30
+supersedes its premise: **local on-device extraction is the default road**
+(explicitly allowed to be slower), with RunPod retained for bursts under
+existing ingestion doctrine. A wake-on-demand RTX control plane as the *default*
+extraction path is no longer the intended architecture. The surviving RTX
+material is the burst runbook already referenced by the roadmap's speed ladder
+(`RTX_SIDECAR_RUNBOOK.md`), which needs no checklist anchor of its own.
+
+- [x] Ruling recorded; no build. Superseded by local-default + burst doctrine.
+
+### P2.10 Deterministic Relation Lane — Gate, Precision, Integration, Flip
+
+**Reconstructed 2026-07-30 (Step 0a).** The roadmap executed P1–P4 against this
+anchor for weeks while the anchor did not exist — work ran without its
+item-level ledger entry, against the north-star rule. Reconstructed from the
+roadmap's own recorded receipts rather than from memory; each box below is
+marked only where the roadmap records a verified result.
+
+Plan of record: `CONTINUITY/Extraction_Elite_Roadmap.md`.
+
+- [x] P1 Gate infrastructure: `spacy_relation_gate_v1` preregistered; fixture
+  `spacy_relation_asserted_gold_v1.json` (11 samples / 15 asserted relations /
+  12 predicate types, sha256 8d2912e2…); both engines measured on identical
+  gold entity inputs.
+- [x] P2 Precision remediation: dep-path **P 1.000 / R 0.467 / F1 0.636** vs
+  GLiREL **0.273 / 0.200 / 0.231**. 3 structural guards (single-clause,
+  conjunct-crossing, exception-boundary) + YAML `__DROP__` rules; 16 FP → 0.
+- [x] P3 Integration completeness: one parse per chunk shared across Stage B/C
+  (27x speedup MEASURED 4.5 ms vs 121 ms/chunk), 0 contract drops,
+  byte-identical reruns.
+- [x] P4 Atomic flip: shipped — relation engine pinned to spaCy in
+  `ghost_b_local.py`; Stage C runs dep-path in production.
+- [x] P4 rollback criterion — **CLOSED AS UNSATISFIABLE, claim deleted.** The
+  documented rollback (`GHOST_B_RELATION_ENGINE=glirel` + recreate) could never
+  fire: the env var was read into a comment and ignored, so setting it was a
+  silent no-op. GLiREL is owner-retired, so Step 0b deleted the claim instead of
+  restoring the switch. The var now raises loudly; the unreachable GLiREL branch
+  and a **1.87 GB eager model load that ran on every extraction call** were
+  deleted. Proof: `backend/tests/test_relation_engine_switch_honesty.py` (green).
+- [ ] P5 Scale → production — **SUPERSEDED by P2.11.** P5 measured scale, not
+  yield; live measurement showed the lane emits 0.04 relations/chunk. P5's
+  10-file batch and 20-edge spot-check survive as acceptance steps inside P2.11.
+- [ ] P6 Speed ladder (GLiNER fp16/ONNX; RTX burst) — optional, after P2.11.
+
+### P2.11 Deterministic Relation RECALL Ladder (owner-directed 2026-07-30)
+
+Spec: **`CONTINUITY/DETERMINISTIC_RELATION_RECALL_SPEC.md`**. Closes the gap P2.10
+opened: precision 1.000 was bought with near-silence (0.04 rel/chunk vs GLiREL's
+1.10 raw). Target = GLiREL-level *yield* at deterministic precision, on a
+**measured** target (R-pre), never inherited from GLiREL's noisy raw count.
+
+Hard constraints: no LLM/SLM in extraction (locked); GLiREL stays retired from
+production (offline candidate-suggestion only); precision floor >= 0.80 on gate
+v2 AND 1.000 on the v1 canary, else the rung is reverted in-session;
+byte-identical reruns; local path must need no special flags.
+
+- [x] Step 0a Ledger debt: P2.9 retired, P2.10 reconstructed, P2.11 created.
+- [x] Step 0b Dead relation-engine switch made fail-loud; unreachable GLiREL
+  branch + eager 1.87 GB load deleted; asserting test green.
+- [x] Step 0c Roadmap P4 status corrected (was `queued`, is live); false
+  rollback claim removed from the roadmap prompt.
+- [ ] R-pre Suppression counters plumbed to Mongo + measured over >= 5,000
+  chunks. **Sets the yield target and R3's true ceiling.** (Counters are
+  currently computed and garbage-collected: `ghost_b_local.py` emits 4 of 14+,
+  and never initializes the three P2 structural-guard keys — the "never drop
+  silently" law is honored in the extractor and defeated at the emit boundary.)
+- [ ] R0 `spacy_relation_gate_v2` preregistered: >= 120 asserted relations,
+  >= 40 samples, >= 12 predicate types, incl. >= 8 real ASR transcript chunks.
+  v1 retained as regression canary. GLiREL offline as suggester only; a human
+  rules every row; suggester provenance recorded.
+- [ ] R1 T4 lemma telemetry → mined `predicate_synonyms.yaml` expansion.
+- [ ] R2 AttributeRuler POS-override lexicon (backlog PF-2).
+- [ ] R3 Coordination distribution (conjunct guard STAYS; distribute an
+  already-validated head edge only; non-distributive guards mandatory).
+- [ ] R4 Nominal predicate lane (light-verb suppressor becomes a router).
+- [ ] R5 Rank-then-cap before `max_related` truncation.
+- [ ] R7 ASR re-segmentation lane — scored on the ASR subset IN ISOLATION;
+  >= 0.80 or ships disabled behind a flag. Promoted above R6 (local is default).
+- [ ] R6 Adjacent-sentence carry-over — CLAIMS PATH ONLY; graph promotion needs
+  its own owner GO. Forces the `coreference_heuristic` wire-or-delete decision.
+- [ ] R8 RunPod parity — `relations=[]` hardcode replaced behind wire contract
+  `local_extraction_v2`; new image digest (never retag); cross-runtime
+  byte-identity proof Mac vs pod; 1-slice canary. Route join = owner GO.
+- [ ] Re-extraction of contaminated corpora (653/680 stored relations are
+  GLiREL-era) — owner GO, after the ladder closes, one corpus at a time.
+
+### P2.12 GLiNER2 entity-census → grammar relations (WAY AHEAD — adopted 2026-08-06)
+
+**Item-level execution ledger:** `CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md`
+(§ OPEN work G0–G13). **Architecture detail:** `CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md`
+§ WAY AHEAD.
+
+Law: *Batch globally; adjudicate document-locally.* Hot path = GLiNER2 entity census →
+document entity reducer → deterministic mention completion → selective spaCy → existing
+predicate compiler/gate. Relex = frozen benchmark baseline only (`production_candidate: removed`).
+Canonical graph writes disabled until closed-world qualification + owner GO.
+
+- [ ] G0 Gold-entity syntax ceiling rerun (block production flip if recall fails)
+- [ ] G3–G6 Census + reducer + mention completion + eligibility (see SPEED_BENCH)
+- [ ] G4 MPS vs MLX corpus bench (`fastino/gliner2-base-v1`)
+- [ ] G8–G11 Wire durable surface relations + startup endpoint signatures + Mongo/Neo4j
+- [ ] G12 Semantic-rescue shadow (GLiNER2 Python relations) until G0 qualifies
+- [ ] G13 Closed-world calibration + held-out directed-triple qualification + owner GO
+- [ ] Pri 0 Vector-first Pass-1 remains mandatory for searchable SLO
+
+P2.11 rungs that improve the **shared** syntax/predicate stack still feed P2.12; do not
+rebuild FrameExtractor/DependencyMatcher/SVO (see `KNOWLEDGE_PIPELINE_LINEAGE_MAP_20260804.md`).
+
 ## P3 - Semantic-Relational RAPTOR And Cross-Corpus Bridges
 
 ### P3.1 Pilot Claim And Mechanism-Frame Routing
@@ -1887,6 +2003,18 @@ A corpus is strict-ready only when:
 - [ ] All three retrieval tiers pass smoke and negative-control probes.
 
 ## Implementation Log
+
+### 2026-08-05 - Complex Query / Multi-Hop Phase 0–3 (dark)
+
+- Owner directive: Complex Query and Multi-Hop Graph RAG plan
+- Baseline: `CONTINUITY/COMPLEX_QUERY_SUBQUERY_BASELINE_20260804.md`
+- Code: `models/complex_query.py`, `services/retriever/complex_query_templates.py`,
+  `services/retriever/complex_query_executor.py`, `COMPLEX_QUERY_*` config (default off),
+  dark diagnostics hook in `retrieve_planned`
+- Tests: `test_complex_query_contracts.py` + `test_complex_query_templates.py` (12 passed)
+- Production: subquery planner / vocabulary ranking / ontology / backfill = false
+- Next: Phase 4–5 fixture-gated lane reuse + traversal compiler
+
 
 ### 2026-07-13 - Baseline capture (pre-edit requirement)
 

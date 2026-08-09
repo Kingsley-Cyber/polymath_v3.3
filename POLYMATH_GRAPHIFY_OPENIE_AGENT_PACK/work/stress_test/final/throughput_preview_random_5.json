@@ -1,0 +1,63 @@
+{
+  "fixture": "graphify_throughput_fixture.md",
+  "population": "160 FACT-lane OpenIE assertion instances",
+  "random_seed": 20260806,
+  "note": "The throughput fixture deliberately repeats modules, so random instances can share the same semantic triple while retaining different evidence offsets and assertion identities.",
+  "records": [
+    {
+      "assertion_id": "openie-assertion:3d8f2463b4ba4e780b85a430",
+      "subject": "MongoDB",
+      "predicate": "stores",
+      "object": "canonical artifacts",
+      "surface_relation": "stores",
+      "lane": "FACT",
+      "score": 1.0,
+      "evidence_start": 47514,
+      "evidence_end": 47644
+    },
+    {
+      "assertion_id": "openie-assertion:1c6a1d09c9c51ec8b2bcf25e",
+      "subject": "MongoDB",
+      "predicate": "stores",
+      "object": "canonical artifacts",
+      "surface_relation": "stores",
+      "lane": "FACT",
+      "score": 1.0,
+      "evidence_start": 36234,
+      "evidence_end": 36364
+    },
+    {
+      "assertion_id": "openie-assertion:e358adf8eeee24f664eae67d",
+      "subject": "MongoDB",
+      "predicate": "stores",
+      "object": "canonical artifacts",
+      "surface_relation": "stores",
+      "lane": "FACT",
+      "score": 1.0,
+      "evidence_start": 54202,
+      "evidence_end": 54333
+    },
+    {
+      "assertion_id": "openie-assertion:0c16064a2ed8fb4ea9b50b5c",
+      "subject": "MongoDB",
+      "predicate": "stores",
+      "object": "canonical artifacts",
+      "surface_relation": "stores",
+      "lane": "FACT",
+      "score": 1.0,
+      "evidence_start": 45751,
+      "evidence_end": 45881
+    },
+    {
+      "assertion_id": "openie-assertion:71496ea9b4384e2d7c563e63",
+      "subject": "MongoDB",
+      "predicate": "stores",
+      "object": "canonical artifacts",
+      "surface_relation": "stores",
+      "lane": "FACT",
+      "score": 1.0,
+      "evidence_start": 2866,
+      "evidence_end": 2995
+    }
+  ]
+}

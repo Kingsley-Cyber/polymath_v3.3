@@ -125,24 +125,18 @@ def _check_reranker(endpoint: Endpoint, wait_seconds: int) -> None:
     print(f"[ OK ] reranker ready: model={info.get('model')} scores={scores}")
 
 
-def _check_docling(endpoint: Endpoint, wait_seconds: int) -> None:
-    _wait_for(f"{endpoint.base_url}/health", wait_seconds)
-    health = _get_json(f"{endpoint.base_url}/health")
-    if health.get("status") != "ok":
-        raise CheckError(f"{endpoint.name} health is not ok: {health}")
-    print("[ OK ] docling ready")
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Verify Apple MLX sidecars.")
     parser.add_argument("--embedder-url", default="http://localhost:8082")
     parser.add_argument("--reranker-url", default="http://localhost:8081")
-    parser.add_argument("--docling-url", default="http://localhost:8500")
     parser.add_argument("--expected-dim", type=int, default=1024)
     parser.add_argument("--wait", type=int, default=1, help="Seconds to wait for each endpoint.")
     parser.add_argument("--skip-embedder", action="store_true", help="Do not check the embedder sidecar.")
     parser.add_argument("--skip-reranker", action="store_true", help="Do not check the reranker sidecar.")
-    parser.add_argument("--skip-docling", action="store_true", help="Do not check the docling sidecar.")
+    # q9: Docling sidecar removed. Accept-and-ignore legacy flags so older
+    # callers do not break.
+    parser.add_argument("--docling-url", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--skip-docling", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args()
 
 
@@ -158,11 +152,6 @@ def main() -> int:
             print("[SKIP] reranker disabled")
         else:
             _check_reranker(Endpoint("reranker", args.reranker_url.rstrip("/")), args.wait)
-
-        if args.skip_docling:
-            print("[SKIP] docling disabled")
-        else:
-            _check_docling(Endpoint("docling", args.docling_url.rstrip("/")), args.wait)
     except (CheckError, urllib.error.URLError, TimeoutError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1

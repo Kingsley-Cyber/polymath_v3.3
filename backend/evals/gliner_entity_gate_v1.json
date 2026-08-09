@@ -1,0 +1,57 @@
+{
+  "schema_version": "polymath.gliner_entity_gate.v1",
+  "preregistered_at_utc": "2026-07-31T00:00:00Z",
+  "authority": {
+    "owner_decision": "PENDING — thresholds below are a PROPOSAL, not a ruling. The owner sets the entity quality bar; this file records what was proposed BEFORE any sample was scored, so the bar cannot be fitted to the result.",
+    "change_policy": "immutable_after_first_decisive_inference; changes require a new version and a new pre-run hash"
+  },
+  "why_this_exists": {
+    "the_gap": "The entity layer has NEVER been gated. It is the foundation every other organ sits on: relations pair entities, facts attach to entities, facets refine entities, claims reference them. A relation gate scoring 0.8015 measured 'given this entity pair, does the evidence assert this relation' — it never asked whether the entities deserved to be graph nodes. That makes every downstream number CONDITIONAL on an unmeasured layer.",
+    "the_trigger": "Structural artifacts reached the fact and relation lanes as entities ('ch04', 'Page 135', bare 'text'). Those were patched downstream instead of being escalated as evidence that the entity layer itself was unsound. This gate exists so that judgement is made from a measurement rather than from a sample of one."
+  },
+  "population": {
+    "unit": "one emitted entity MENTION as stored in ghost_b_extractions.entities[]",
+    "note": "Mentions, not unique canonical names. A generic noun emitted 400 times does 400x the downstream damage of one emitted once, so the sample must reflect mention frequency."
+  },
+  "judgement_dimensions": {
+    "is_entity": "Does the span denote a specific, nameable thing? A generic bare noun ('market', 'good', 'attributes'), a pronoun, or a sentence fragment is NOT an entity.",
+    "span_correct": "Are the span boundaries right — not truncated, not swallowing adjacent words?",
+    "type_correct": "Is the assigned entity_type right for this span, judged against the type's plain meaning?",
+    "graph_worthy": "Should this become a NODE in a knowledge graph? Strictest dimension and the PRIMARY metric: an entity can be a real span with a correct type and still be useless as a graph node (e.g. 'customer', 'firm'). This is the dimension that decides whether the graph is queryable or noise."
+  },
+  "primary_metric": "graph_worthy",
+  "why_graph_worthy_is_primary": "The graph is the consumer. A node nobody would ever query for, or that matches thousands of unrelated chunks, degrades retrieval whether or not its span and type are technically defensible.",
+  "sampling": {
+    "source": "ghost_b_extractions.entities[] across live corpora",
+    "strata": ["book", "paper", "asr"],
+    "min_per_stratum": 40,
+    "min_total": 120,
+    "selection": "deterministic stride over mentions ordered by (chunk_id, surface_form, entity_type); no RNG, reproducible from the same corpus state",
+    "note": "Sampled by MENTION so frequent generics are represented at their true weight."
+  },
+  "proposed_thresholds": {
+    "OWNER_MUST_RULE": true,
+    "graph_worthy_floor": 0.70,
+    "is_entity_floor": 0.85,
+    "type_correct_floor": 0.80,
+    "wilson_lower_bound_required": 0.60,
+    "rationale": "Deliberately proposed BELOW the relation gate's 0.80, because entity quality is a distribution not a binary and a 0.80 entity bar may be unreachable with a zero-shot tagger at 14+ labels. These are a starting position for the owner to move, not a standard being asserted.",
+    "per_stratum_floor": 0.55
+  },
+  "anti_gaming_rules": [
+    "Thresholds fixed in this file BEFORE any sample is scored, and committed before the sampler runs.",
+    "BORDERLINE counts as NOT graph_worthy. Ambiguity never inflates the score.",
+    "Every judged mention persists with its surface, type, confidence and a one-line reason, so the owner can re-judge any call and rescore.",
+    "Report all four dimensions separately. A high is_entity with a low graph_worthy is the interesting failure and must not be averaged away.",
+    "Report the type-consistency defect separately: the same surface receiving different types across mentions breaks the allowed_pairs gate regardless of whether either type is defensible."
+  ],
+  "known_limitations": [
+    "Single judge, who is also the agent that built the downstream lanes consuming these entities. The per-item worksheet exists so the owner can re-judge independently.",
+    "Precision only. Entity RECALL (what the tagger missed) is not measured here and needs hand-authored gold.",
+    "Judged against the tagger's own emitted type vocabulary, which is WIDER than ontology.yaml. Types outside the ontology are judged on plain meaning and flagged separately, since they fail the allowed_pairs gate regardless."
+  ],
+  "artifacts": {
+    "worksheet": "docs/baselines/ENTITY_GATE_V1_JUDGEMENTS_2026-07-31.jsonl",
+    "result": "docs/baselines/ENTITY_GATE_V1_RESULT_2026-07-31.json"
+  }
+}

@@ -23,9 +23,18 @@ class _AsyncCursor:
 class _Collection:
     def __init__(self, rows):
         self.rows = list(rows)
+        self.find_queries = []
 
-    def find(self, *_args, **_kwargs):
-        return _AsyncCursor(self.rows)
+    def find(self, query=None, *_args, **_kwargs):
+        self.find_queries.append(query)
+        rows = self.rows
+        if query == retrieval_readiness.active_record_clause():
+            rows = [
+                row
+                for row in rows
+                if row.get("status") in (None, "active")
+            ]
+        return _AsyncCursor(rows)
 
     async def find_one(self, query, *_args, **_kwargs):
         cid = query.get("corpus_id")
@@ -123,6 +132,52 @@ async def test_startup_repair_uses_each_corpus_dimension_and_neo4j_once(monkeypa
         ("c2", 1024),
     ]
     assert qdrant_calls[0]["corpus_name"] == "Corpus One"
+
+
+@pytest.mark.asyncio
+async def test_startup_repair_never_recreates_deleted_corpus_collections(monkeypatch):
+    qdrant_calls: list[str] = []
+
+    async def fake_ensure_collections(client, corpus_id, dim=1024, *, corpus_name=None):
+        qdrant_calls.append(corpus_id)
+
+    monkeypatch.setattr(
+        retrieval_readiness,
+        "ensure_collections_for_corpus",
+        fake_ensure_collections,
+    )
+    db = _Db(
+        [
+            {"corpus_id": "legacy-active", "default_ingestion_config": {}},
+            {
+                "corpus_id": "explicit-active",
+                "status": "active",
+                "default_ingestion_config": {},
+            },
+            {
+                "corpus_id": "being-deleted",
+                "status": "deleting",
+                "default_ingestion_config": {},
+            },
+            {
+                "corpus_id": "already-deleted",
+                "status": "deleted",
+                "default_ingestion_config": {},
+            },
+        ]
+    )
+
+    report = await retrieval_readiness.repair_retrieval_readiness_for_all_corpora(
+        db=db,
+        qdrant_client=object(),
+        neo4j_driver=None,
+        neo4j_enabled=False,
+        default_dim=1024,
+    )
+
+    assert db.corpora.find_queries == [retrieval_readiness.active_record_clause()]
+    assert qdrant_calls == ["legacy-active", "explicit-active"]
+    assert report["scanned"] == 2
 
 
 @pytest.mark.asyncio

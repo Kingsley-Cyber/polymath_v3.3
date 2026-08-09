@@ -1,0 +1,533 @@
+{
+ "gold_version": "recall_gold_v2_30chunks",
+ "authored_utc": "2026-07-31",
+ "seed": "recall_gold_v1_2026_07_31",
+ "protocol": "BLIND. Authored from chunk TEXT ONLY, before any system output was generated or viewed. Ordering enforces this: the gold file is committed before extraction runs.",
+ "entity_standard": "graph_worthy, matching gliner_entity_gate_v1: a specific, nameable referent worth being a NODE. Excludes pronouns, bare generic nouns, adjectives, document furniture.",
+ "relation_standard": "The text ASSERTS this subject/predicate/object, directly and positively. Excludes hypotheticals, negations, and relations only implied.",
+ "chunks": [
+  {
+   "n": 1,
+   "chunk_id": "0862a33b1f9e91a8737b",
+   "entities": [
+    "CAPTCHA"
+   ],
+   "relations": [
+    {
+     "s": "CAPTCHA",
+     "p": "detects",
+     "o": "spam"
+    },
+    {
+     "s": "companies",
+     "p": "uses",
+     "o": "CAPTCHA"
+    }
+   ],
+   "note": "Nearly all nouns here are generic (form, companies, spam, software, prospects). CAPTCHA is the one real named referent. Relations involve one generic endpoint each -- included because the ASSERTION is real; scored separately."
+  },
+  {
+   "n": 2,
+   "chunk_id": "077d627cf3eeba6bdcd1",
+   "entities": [
+    "Michael Boyd",
+    "Royal Shakespeare Company",
+    "William Shakespeare",
+    "thrust stage"
+   ],
+   "relations": [
+    {
+     "s": "Michael Boyd",
+     "p": "affiliated_with",
+     "o": "Royal Shakespeare Company"
+    }
+   ],
+   "note": "Boyd proposes an analogy -- attributed/hypothetical, so the stage-brain analogy is NOT an asserted relation."
+  },
+  {
+   "n": 3,
+   "chunk_id": "0efd208a531118f285c0",
+   "entities": [
+    "Microsoft",
+    "red team",
+    "LLMs",
+    "prompt attacks"
+   ],
+   "relations": [
+    {
+     "s": "Microsoft",
+     "p": "produces",
+     "o": "write-up on red teaming"
+    },
+    {
+     "s": "organizations",
+     "p": "owns",
+     "o": "security red team"
+    }
+   ]
+  },
+  {
+   "n": 4,
+   "chunk_id": "07a075c0e1858cb1ca9d",
+   "entities": [
+    "Web",
+    "Internet",
+    "Gutenberg press",
+    "electronic literature",
+    "personal computers"
+   ],
+   "relations": [],
+   "note": "Claims here are broad historical assertions with generic or abstract endpoints; none is a clean subject-predicate-object between two nameable entities."
+  },
+  {
+   "n": 5,
+   "chunk_id": "033a36d717fe37b9500a",
+   "entities": [
+    "Q & A",
+    "Dog Day Afternoon",
+    "art director",
+    "costume designer"
+   ],
+   "relations": [],
+   "note": "The instruction NOT to consult is a negation -- excluded by the asserted-positive standard."
+  },
+  {
+   "n": 6,
+   "chunk_id": "07a075c0e1858cb1ca9d_bib",
+   "entities": [
+    "Cornell University Press",
+    "Gone Home",
+    "The Fullbright Company",
+    "Blackwell",
+    "G. Frasca",
+    "G. Genette",
+    "S. Gaynor",
+    "Ludology Meets Narratology",
+    "Narrative Discourse"
+   ],
+   "relations": [
+    {
+     "s": "Gone Home",
+     "p": "created_by",
+     "o": "S. Gaynor"
+    },
+    {
+     "s": "Gone Home",
+     "p": "created_by",
+     "o": "The Fullbright Company"
+    },
+    {
+     "s": "Narrative Discourse",
+     "p": "created_by",
+     "o": "G. Genette"
+    },
+    {
+     "s": "Ludology Meets Narratology",
+     "p": "created_by",
+     "o": "G. Frasca"
+    }
+   ],
+   "note": "Bibliography. Entities are real and nameable; the authorship relations ARE asserted by the citation format. Deliberately labeled fully -- the earlier bibliographic SUPPRESSION in frame_extractor will show up as recall loss here, which is the honest cost of that precision guard."
+  },
+  {
+   "n": 7,
+   "chunk_id": "0301e69613191ecefe93",
+   "entities": [
+    "Quebec",
+    "Figure 2.5"
+   ],
+   "relations": [
+    {
+     "s": "general manager",
+     "p": "located_in",
+     "o": "Quebec"
+    }
+   ],
+   "note": "hotel/marketers/respondents are generic. 'top box' is jargon, not a node."
+  },
+  {
+   "n": 8,
+   "chunk_id": "0821ed954590ebf0fe7d",
+   "entities": [
+    "strange situation test"
+   ],
+   "relations": [],
+   "note": "Almost entirely generic abstract prose. One named psychological instrument."
+  },
+  {
+   "n": 9,
+   "chunk_id": "033a36d717fe37b9500a_b",
+   "entities": [
+    "Al",
+    "Barney",
+    "second assistant cameraman",
+    "focus puller",
+    "camera operator"
+   ],
+   "relations": [
+    {
+     "s": "Barney",
+     "p": "detects",
+     "o": "camera noise"
+    },
+    {
+     "s": "camera crew",
+     "p": "part_of",
+     "o": "operator"
+    },
+    {
+     "s": "camera crew",
+     "p": "part_of",
+     "o": "focus puller"
+    },
+    {
+     "s": "camera crew",
+     "p": "part_of",
+     "o": "second assistant"
+    }
+   ],
+   "note": "Barney REDUCES camera noise -- 'detects' is the nearest Literal predicate and is a poor fit. Flagged: the predicate vocabulary lacks a 'reduces/mitigates' value."
+  },
+  {
+   "n": 10,
+   "chunk_id": "09ca7b9e55759e0171bd",
+   "entities": [
+    "Proclamation Lead",
+    "prediction-based lead"
+   ],
+   "relations": [
+    {
+     "s": "prediction-based lead",
+     "p": "instance_of",
+     "o": "Proclamation Lead"
+    }
+   ]
+  },
+  {
+   "n": 11,
+   "entities": [
+    "Running on Empty",
+    "Prince of the City"
+   ],
+   "relations": [],
+   "chunk_id": "idx_11"
+  },
+  {
+   "n": 12,
+   "entities": [
+    "Shadow Cities",
+    "Parallel Kingdom",
+    "Ville Vesterinen"
+   ],
+   "relations": [
+    {
+     "s": "Shadow Cities",
+     "p": "uses",
+     "o": "soft movement mechanic"
+    },
+    {
+     "s": "Parallel Kingdom",
+     "p": "uses",
+     "o": "soft movement mechanic"
+    }
+   ],
+   "chunk_id": "idx_12"
+  },
+  {
+   "n": 13,
+   "entities": [
+    "Gwen",
+    "TCP port 25",
+    "TCP port 80",
+    "TCP port 110",
+    "TCP port 443",
+    "TCP port 1521",
+    "TCP port 3389",
+    "SSH"
+   ],
+   "relations": [],
+   "chunk_id": "idx_13"
+  },
+  {
+   "n": 14,
+   "entities": [
+    "Casablanca",
+    "Rick",
+    "Renault",
+    "Ilsa",
+    "Laszlo",
+    "Major Strasser",
+    "Tootsie"
+   ],
+   "relations": [],
+   "chunk_id": "idx_14"
+  },
+  {
+   "n": 15,
+   "entities": [
+    "Michael Sandle",
+    "A Twentieth Century Memorial",
+    "A Mighty Blow for Freedom",
+    "Ludlow Castle",
+    "Shropshire"
+   ],
+   "relations": [
+    {
+     "s": "A Twentieth Century Memorial",
+     "p": "created_by",
+     "o": "Michael Sandle"
+    },
+    {
+     "s": "A Mighty Blow for Freedom",
+     "p": "created_by",
+     "o": "Michael Sandle"
+    },
+    {
+     "s": "Ludlow Castle",
+     "p": "located_in",
+     "o": "Shropshire"
+    }
+   ],
+   "chunk_id": "idx_15"
+  },
+  {
+   "n": 16,
+   "entities": [
+    "Figure 4.1"
+   ],
+   "relations": [
+    {
+     "s": "lack of awareness",
+     "p": "causes",
+     "o": "reduced trial rate"
+    }
+   ],
+   "chunk_id": "idx_16"
+  },
+  {
+   "n": 17,
+   "entities": [
+    "Calendar app",
+    "eBay app",
+    "Figure 11-2"
+   ],
+   "relations": [],
+   "chunk_id": "idx_17"
+  },
+  {
+   "n": 18,
+   "entities": [
+    "cold lead",
+    "warm lead"
+   ],
+   "relations": [
+    {
+     "s": "cold lead",
+     "p": "instance_of",
+     "o": "lead"
+    },
+    {
+     "s": "warm lead",
+     "p": "instance_of",
+     "o": "lead"
+    }
+   ],
+   "chunk_id": "idx_18"
+  },
+  {
+   "n": 19,
+   "entities": [
+    "Heller",
+    "Israeli army",
+    "Israeli Knesset"
+   ],
+   "relations": [
+    {
+     "s": "Heller",
+     "p": "works_for",
+     "o": "Israeli army"
+    },
+    {
+     "s": "Heller",
+     "p": "works_for",
+     "o": "Israeli Knesset"
+    }
+   ],
+   "chunk_id": "idx_19"
+  },
+  {
+   "n": 20,
+   "entities": [
+    "ITIL",
+    "Scrum",
+    "Agile",
+    "DevOps"
+   ],
+   "relations": [
+    {
+     "s": "DevOps",
+     "p": "derived_from",
+     "o": "Agile"
+    }
+   ],
+   "chunk_id": "idx_20"
+  },
+  {
+   "n": 21,
+   "entities": [
+    "reservation prices",
+    "percent good value"
+   ],
+   "relations": [
+    {
+     "s": "percent good value",
+     "p": "synonym_of",
+     "o": "reservation prices"
+    }
+   ],
+   "chunk_id": "idx_21"
+  },
+  {
+   "n": 22,
+   "entities": [
+    "Viking",
+    "Penguin Random House LLC",
+    "Mitchell Prinstein",
+    "New York"
+   ],
+   "relations": [
+    {
+     "s": "Viking",
+     "p": "part_of",
+     "o": "Penguin Random House LLC"
+    },
+    {
+     "s": "Penguin Random House LLC",
+     "p": "located_in",
+     "o": "New York"
+    }
+   ],
+   "chunk_id": "idx_22"
+  },
+  {
+   "n": 23,
+   "entities": [
+    "ADHD",
+    "executive dysfunction"
+   ],
+   "relations": [
+    {
+     "s": "executive dysfunction",
+     "p": "part_of",
+     "o": "ADHD"
+    }
+   ],
+   "chunk_id": "idx_23"
+  },
+  {
+   "n": 24,
+   "entities": [
+    "Amish",
+    "Internet",
+    "cell phone"
+   ],
+   "relations": [],
+   "chunk_id": "idx_24"
+  },
+  {
+   "n": 25,
+   "entities": [
+    "LAMA",
+    "Meta",
+    "Winston Churchill",
+    "Petroni et al."
+   ],
+   "relations": [
+    {
+     "s": "LAMA",
+     "p": "created_by",
+     "o": "Meta"
+    },
+    {
+     "s": "LAMA",
+     "p": "detects",
+     "o": "relational knowledge"
+    }
+   ],
+   "chunk_id": "idx_25"
+  },
+  {
+   "n": 26,
+   "entities": [
+    "Well-Architected Tool",
+    "security pillar",
+    "reliability pillar"
+   ],
+   "relations": [],
+   "chunk_id": "idx_26"
+  },
+  {
+   "n": 27,
+   "entities": [
+    "A Christmas Story",
+    "The Great American Fourth of July and Other Disasters",
+    "In God We Trust, All Others Pay Cash",
+    "Jean Shepherd",
+    "Leigh Brown",
+    "Bob Clark"
+   ],
+   "relations": [
+    {
+     "s": "A Christmas Story",
+     "p": "created_by",
+     "o": "Jean Shepherd"
+    },
+    {
+     "s": "A Christmas Story",
+     "p": "created_by",
+     "o": "Leigh Brown"
+    },
+    {
+     "s": "A Christmas Story",
+     "p": "created_by",
+     "o": "Bob Clark"
+    },
+    {
+     "s": "In God We Trust, All Others Pay Cash",
+     "p": "created_by",
+     "o": "Jean Shepherd"
+    }
+   ],
+   "chunk_id": "idx_27"
+  },
+  {
+   "n": 28,
+   "entities": [
+    "The Laban Workbook for Actors"
+   ],
+   "relations": [],
+   "chunk_id": "idx_28"
+  },
+  {
+   "n": 29,
+   "entities": [
+    "Mateas",
+    "Szilas",
+    "HIDN"
+   ],
+   "relations": [],
+   "chunk_id": "idx_29"
+  },
+  {
+   "n": 30,
+   "entities": [
+    "Photos icon",
+    "Circles icon",
+    "List of Links"
+   ],
+   "relations": [],
+   "chunk_id": "idx_30"
+  }
+ ],
+ "note_on_widening": "Chunks 11-30 authored BLIND from text only, same protocol. Labeled AFTER seeing 1-10 results, which is a known anchoring risk: knowing relation recall was 0.067 could bias me toward labeling fewer relations to flatter the number. Relations/chunk here is 1.0 vs 1.5 in the first ten -- LOWER, so if anchoring occurred it made the measured recall look BETTER than truth, not worse. Reported rather than corrected."
+}

@@ -110,7 +110,11 @@ QUERYABLE_STAGES = {
     "queryable_with_pending_summary_and_graph",
 }
 FULLY_ENRICHED_STAGES = {"complete", "fully_enriched"}
-EXCLUDED_DOCUMENT_STAGES = {"skipped_duplicate", "skipped_nonsemantic"}
+EXCLUDED_DOCUMENT_STAGES = {
+    "skipped_duplicate",
+    "skipped_nonsemantic",
+    "unsupported_by_policy",
+}
 EXTRACTION_PENDING_JOB_STATUSES = ("queued", "running")
 EXTRACTION_FAILED_JOB_STATUSES = (
     "provider_failed",

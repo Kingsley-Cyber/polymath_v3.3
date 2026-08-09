@@ -1,0 +1,79 @@
+{
+  "artifacts": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/e2e_proof.json"
+  ],
+  "checks": {
+    "ambiguous_surface_cross_sense_merge": false,
+    "cpu_only": true,
+    "entity_reducer_conservation": true,
+    "graph_rebuild_match": true,
+    "parse_once": true,
+    "raw_mention_conservation": true,
+    "relation_decision_conservation": true,
+    "retired_runtime_models_loaded": 0,
+    "single_warm_model": true
+  },
+  "counts": {
+    "assertion_decisions": 33,
+    "completed_mentions": 83,
+    "document_entities": 58,
+    "ghost_rows": 6,
+    "raw_mentions": 59,
+    "stage_artifacts": 16,
+    "surface_relations": 29,
+    "windows": 2
+  },
+  "errors": [],
+  "fixture": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_quality_fixture.md",
+  "identity_digest": "4edde033bf87e0f69e7daa6c864f4165a298020b4c16fe556d8ea6d915a7348a",
+  "metrics": {
+    "entity": {
+      "accepted_pronoun_endpoints": 0,
+      "ambiguous_negative_hits": 0,
+      "exact_span_f1": 0.870748299319728,
+      "exact_span_precision": 0.7710843373493976,
+      "exact_span_recall": 1.0,
+      "generic_noun_false_positive_rate": 0.0,
+      "strict_alignment_rate": 1.0,
+      "type_f1": 0.870748299319728
+    },
+    "relation": {
+      "directed_triple_f1": 0.9655172413793104,
+      "directed_triple_precision": 1.0,
+      "directed_triple_recall": 0.9333333333333333,
+      "direction_fixture_accuracy": 1.0,
+      "exact_evidence_alignment": 1.0,
+      "final_pair_recall": 0.9333333333333333,
+      "forced_related_to_fallbacks": 0,
+      "gold_supported_facts": 15,
+      "open_relation_recall": 1.0,
+      "predicted_supported_facts": 14,
+      "qualification_fixture_accuracy": 1.0,
+      "true_positive_facts": 14,
+      "unsupported_canonical_edges": 0
+    },
+    "throughput": {
+      "source_bytes": 3805,
+      "source_bytes_per_second": 341.2057543947544,
+      "windows_per_second": 0.1793459944256265
+    }
+  },
+  "projection_digest": "72a2474513cc1cdd023d76b6f2aeffd89139c1ce7f6634dadfdf6a5893968580",
+  "provider": "graphify_gliner2_cpu",
+  "release_pins": {
+    "fixture_sha256": "adebcd4dfd58b64d7c6f192b210efe7cbf42b6153091a9e97d91911054d062c3",
+    "model_checkpoint_sha256": "845fc4bd93c525b86124c58ab4f56c9eacf8587953086b14c501fab25957c007",
+    "model_id": "fastino/gliner2-base-v1",
+    "model_revision": "f5b2ecedebe4381b088c1cf276f5bf72a52cac54",
+    "pipeline": "graphify-cpu-pipeline-v2",
+    "provider": "graphify-gliner2-cpu-v1",
+    "provider_hash": "980cedfda1250987d592caecc0fb257dfa855db9b187f517839a17b872218ac4"
+  },
+  "run_id": "graphify_e2e_openie_final_v3_e86ab5ba",
+  "stage_timings": {
+    "entity_census_seconds": 8.54931512499752,
+    "total_seconds": 11.151629041982233
+  },
+  "status": "passed",
+  "warnings": []
+}

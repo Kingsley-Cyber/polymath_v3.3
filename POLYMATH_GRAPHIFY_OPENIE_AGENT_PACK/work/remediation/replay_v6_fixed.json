@@ -1,0 +1,194 @@
+{
+ "waterfall": {
+  "raw_propositions": 242,
+  "arguments_aligned": 236,
+  "entity_pairs_resolved": 28,
+  "family_retained": 242,
+  "unresolved_roles": {
+   "object": 1,
+   "subject": 5
+  },
+  "mapping_status_by_prop": {
+   "REVIEW": 69,
+   "STORE_UNMAPPED_SURFACE_RELATION": 124,
+   "MAPPED": 49
+  },
+  "assertion_lane_by_prop": {
+   "REVIEW": 72,
+   "OPEN_RELATION": 86,
+   "REJECT": 11,
+   "FACT": 8,
+   "QUALIFIED_CLAIM": 65
+  },
+  "graph_eligible_props": 1,
+  "conservation_holds": true
+ },
+ "fate_counts": {
+  "REVIEW": 66,
+  "OPEN_RELATION": 86,
+  "REJECT": 11,
+  "FACT:promoted": 1,
+  "QUALIFIED_CLAIM": 65,
+  "FACT:already_promoted_by_syntax_or_duplicate": 5,
+  "REVIEW+ALIGNMENT_FAILURE": 6,
+  "FACT:fact_without_promotable_endpoints": 2
+ },
+ "first_loss_traces": [
+  {
+   "gold": "R1: DeltaGraph -[created_by]-> Mira Solano",
+   "raw_proposition_found": true,
+   "subject_alignment": true,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "STORE_UNMAPPED_SURFACE_RELATION",
+   "assertion_lane": "OPEN_RELATION",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "predicate mapping (got: STORE_UNMAPPED_SURFACE_RELATION)"
+  },
+  {
+   "gold": "R2: DeltaGraph -[uses]-> Orion Benchmark",
+   "raw_proposition_found": true,
+   "subject_alignment": false,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "uses",
+   "assertion_lane": "REVIEW",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "argument alignment"
+  },
+  {
+   "gold": "R3: Raven -[uses]-> Qdrant",
+   "raw_proposition_found": false,
+   "subject_alignment": false,
+   "object_alignment": false,
+   "family_retained": false,
+   "predicate_mapping": null,
+   "assertion_lane": null,
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "upstream: no raw proposition (not a downstream bug)"
+  },
+  {
+   "gold": "R4: Raven -[produces]-> Evidence Packet",
+   "raw_proposition_found": true,
+   "subject_alignment": false,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "produces",
+   "assertion_lane": "REVIEW",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": true,
+   "first_loss": "argument alignment"
+  },
+  {
+   "gold": "R5: Mira Solano -[defines]-> Citation Recall",
+   "raw_proposition_found": true,
+   "subject_alignment": true,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "defines",
+   "assertion_lane": "FACT",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": true,
+   "first_loss": "promotion/merge contract"
+  },
+  {
+   "gold": "R6: Raven -[depends_on]-> Argus",
+   "raw_proposition_found": true,
+   "subject_alignment": true,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "uses",
+   "assertion_lane": "REVIEW",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": true,
+   "first_loss": "predicate mapping (got: uses)"
+  },
+  {
+   "gold": "R7: Argus -[consumes]-> Evidence Packet",
+   "raw_proposition_found": true,
+   "subject_alignment": true,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "causes",
+   "assertion_lane": "REVIEW",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "predicate mapping (got: causes)"
+  },
+  {
+   "gold": "R8: Semantic Cache -[supports]-> Raven",
+   "raw_proposition_found": true,
+   "subject_alignment": false,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "supports",
+   "assertion_lane": "REVIEW",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "argument alignment"
+  },
+  {
+   "gold": "R9: Neo4j -[produces]-> Audit Path Store",
+   "raw_proposition_found": false,
+   "subject_alignment": false,
+   "object_alignment": false,
+   "family_retained": false,
+   "predicate_mapping": null,
+   "assertion_lane": null,
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "upstream: no raw proposition (not a downstream bug)"
+  },
+  {
+   "gold": "R10: Audit Path Store -[references]-> Evidence Packet",
+   "raw_proposition_found": false,
+   "subject_alignment": false,
+   "object_alignment": false,
+   "family_retained": false,
+   "predicate_mapping": null,
+   "assertion_lane": null,
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "upstream: no raw proposition (not a downstream bug)"
+  },
+  {
+   "gold": "R11: DeltaGraph 1.3 -[implements]-> Source Hash Validation",
+   "raw_proposition_found": true,
+   "subject_alignment": false,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "implements",
+   "assertion_lane": "REVIEW",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "argument alignment"
+  },
+  {
+   "gold": "R12: Nikhil Rao -[owns]-> AR-17",
+   "raw_proposition_found": false,
+   "subject_alignment": false,
+   "object_alignment": false,
+   "family_retained": false,
+   "predicate_mapping": null,
+   "assertion_lane": null,
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": false,
+   "first_loss": "upstream: no raw proposition (not a downstream bug)"
+  },
+  {
+   "gold": "R13: DeltaGraph 1.3 -[uses]-> Qdrant",
+   "raw_proposition_found": true,
+   "subject_alignment": true,
+   "object_alignment": true,
+   "family_retained": true,
+   "predicate_mapping": "uses",
+   "assertion_lane": "FACT",
+   "graph_promotion": false,
+   "syntax_lane_promotes_independently": true,
+   "first_loss": "promotion/merge contract"
+  }
+ ]
+}

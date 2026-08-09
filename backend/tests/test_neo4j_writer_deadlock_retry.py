@@ -39,6 +39,40 @@ async def test_write_document_graph_retries_deadlock(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_write_document_graph_retries_memory_pool_oom(monkeypatch):
+    """2026-07-19 regression: Neo4j classifies memory-pool exhaustion as a
+    TransientError, but only deadlocks were retried — OOM raised straight
+    through on attempt 1 and burned outer batch attempts with no damping."""
+    calls = 0
+    sleeps: list[float] = []
+
+    async def fake_write_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise _transient(
+                "Neo.TransientError.General.MemoryPoolOutOfMemoryError"
+            )
+
+    async def fake_sleep(delay: float):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(neo4j_writer, "_write_document_graph_once", fake_write_once)
+    monkeypatch.setattr(neo4j_writer.asyncio, "sleep", fake_sleep)
+
+    await neo4j_writer.write_document_graph(
+        driver=object(),
+        doc_id="doc-1",
+        corpus_id="corpus-1",
+        extraction_results=[],
+    )
+
+    assert calls == 2
+    # Memory pressure backs off longer than a deadlock retry.
+    assert sleeps == [neo4j_writer.GRAPH_WRITE_MEMORY_BACKOFF_SECONDS]
+
+
+@pytest.mark.asyncio
 async def test_write_document_graph_does_not_retry_non_deadlock_transient(monkeypatch):
     calls = 0
 

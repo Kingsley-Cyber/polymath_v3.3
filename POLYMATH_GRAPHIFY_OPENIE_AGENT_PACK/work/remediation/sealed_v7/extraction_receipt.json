@@ -1,0 +1,32 @@
+{
+  "answer_key": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/sealed_v6_placeholder_key.json",
+  "artifact_digest": "b0ecb3a175307d6b942f67d18b12a2f23af7a4b08791ca38c1e0a710629cdfbc",
+  "corpus_id": "780ac1ae-6f4a-5e6b-a388-0354a506ef88",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 169,
+    "qualified_gold": 0,
+    "qualified_retained": 1380
+  },
+  "document_id": "a9b204a0373a64f243771544338f78568ede77891df7ac215050b6e01f2909b8",
+  "elapsed_seconds": 564.3952394999797,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 182,
+      "assertion_support": 182,
+      "mentions": 1600,
+      "nodes": 726,
+      "relations": 169
+    },
+    "digest": "7f424ea55a6af283b4afeee5011933bc38c845013f1de60892a03af24218010f",
+    "repeat_digest": "7f424ea55a6af283b4afeee5011933bc38c845013f1de60892a03af24218010f"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_sealed_qualification_v7_5629e81b",
+  "namespace": "sealed_qualification_v7",
+  "source": "/Users/king/Downloads/s/CPCS_MX_Hierarchical_Motion_Grammar_Research_Paper.md",
+  "status": "unscored"
+}

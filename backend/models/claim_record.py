@@ -215,8 +215,8 @@ class ClaimCompilationV1(StrictModel):
             "claim_count": len(self.claims),
             "typed_claim_count": typed,
             "untyped_claim_count": untyped,
-            "glirel_agree_count": relation_agree,
-            "glirel_conflict_count": len(self.rejected_relation_ids),
+            "relation_agree_count": relation_agree,
+            "relation_conflict_count": len(self.rejected_relation_ids),
             "link_count": len(self.links),
             "links_by_connective_family": {
                 "explicit_result_phrase": dependency_links,

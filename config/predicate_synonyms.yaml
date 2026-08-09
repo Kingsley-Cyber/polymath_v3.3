@@ -1,0 +1,706 @@
+# Predicate Synonym Normalization
+# Maps surface predicate lemmas to Ghost B schema predicates.
+# Values MUST be one of the 31 Predicate Literal values in ghost_b_schemas.py:
+#
+#   Structural:    part_of, member_of, located_in, works_for, created_by, owns, affiliated_with
+#   Canonical:     synonym_of, instance_of
+#   Operational:   uses, runs_on, trained_on, references, implements, depends_on,
+#                  produces, stores, detects, supports
+#   Referential:   defines, represents, maps_to
+#   Temporal:      preceded_by, causes, overlaps
+#   Provenance:    derived_from, contradicts, excepts, overrides
+#   Sentinel:      related_to
+#
+# Cross-ref with config/ontology.yaml allowed_pairs for type gating.
+#
+# RESOLUTION ORDER (4-tier composite resolver in dep_path_extractor.py):
+#   T1: (signature_contains, lemma, subj_type, obj_type) — most specific
+#   T2: (signature_contains, lemma) — signature-aware (copular, passive)
+#   T3: (lemma) — flat synonym dict below, last resort
+#   T4: None — DROP. Never manufacture predicates via lemma.upper().
+#
+# CORPUS-DRIVEN: Top lemmas from 90k claims (10k extraction docs):
+#   be(29.5%) have(6.2%) use(4.8%) make(3.0%) show(2.7%)
+#   create(1.6%) need(1.5%) provide(1.2%) help(1.2%) lead(1.0%)
+#   increase(1.0%) allow(0.8%) include(0.8%) affect(0.7%) require(0.5%)
+#
+# NOISE VERBS (cognitive/perceptual — excluded from graph):
+#   see, want, find, know, feel, think, say, ask, tell, learn, try, keep
+
+# ===========================================================================
+# T1/T2: SIGNATURE-AWARE RULES (checked BEFORE flat synonyms)
+# Structural tiers — ordering within a tier is NOT load-bearing.
+# Ties broken alphabetically by predicate (deterministic).
+#
+# Fields:
+#   signature_contains: substring matched against the compact dep-path
+#     signature (e.g. "nsubj-VERB-dobj", "nsubjpass-VERB-agent-pobj")
+#   lemma: verb lemma (empty = any)
+#   subj_type / obj_type: entity type constraint (empty = any)
+#     Both specified = T1 (most specific). One or zero = T2.
+#   predicate: result, or __DROP__ to suppress the edge
+#   swap: true = grammatical subject is semantic object (passive/agent)
+#
+# Seeded from docs/baselines/DEPENDENCY_PATTERN_MINING_REPORT.json:
+#   nsubj-VERB-dobj            freq=2512
+#   nsubj-VERB-prep-pobj       freq=681
+#   nsubj-VERB-attr            freq=412
+#   nsubj-VERB-xcomp-VERB-dobj freq=384
+#   nsubjpass-VERB-agent-pobj  freq=377
+#   nsubj-VERB-acomp           freq=266
+# ===========================================================================
+signature_rules:
+  # --- Copular: "X is a Y" (nominal complement via attr, freq=412) ---
+  - signature_contains: "attr"
+    lemma: "be"
+    predicate: "instance_of"
+  # --- Copular: "X is fast" (adjectival complement, freq=266) → DROP ---
+  - signature_contains: "acomp"
+    lemma: "be"
+    predicate: "__DROP__"
+  # --- Copular: "X is running" (verbal complement, freq=384) → DROP ---
+  - signature_contains: "xcomp"
+    lemma: "be"
+    predicate: "__DROP__"
+  # --- Copular prepositional: "X is in Y" → located_in ---
+  - signature_contains: "prep:in"
+    lemma: "be"
+    predicate: "located_in"
+  - signature_contains: "prep:at"
+    lemma: "be"
+    predicate: "located_in"
+  # --- Copular prepositional: "X is by Y" → created_by, swap ---
+  - signature_contains: "prep:by"
+    lemma: "be"
+    predicate: "created_by"
+    swap: true
+  # --- Passive with agent: "X was built by Y" → created_by, swap (freq=377) ---
+  - signature_contains: "nsubjpass"
+    lemma: "be"
+    predicate: "created_by"
+    swap: true
+  # --- Passive lexical: "X was acquired by Y" → owns, swap ---
+  - signature_contains: "nsubjpass"
+    lemma: "acquire"
+    predicate: "owns"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "create"
+    predicate: "created_by"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "build"
+    predicate: "created_by"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "develop"
+    predicate: "created_by"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "design"
+    predicate: "created_by"
+    swap: true
+  # --- P2A resolver coverage: creative-authorship passives ---
+  # "X was written by Y" / "X was directed by Y" are unambiguous
+  # creative-authorship assertions. Semantically justified for created_by.
+  - signature_contains: "nsubjpass"
+    lemma: "write"
+    predicate: "created_by"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "direct"
+    predicate: "created_by"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "author"
+    predicate: "created_by"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "publish"
+    predicate: "produces"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "release"
+    predicate: "produces"
+    swap: true
+  - signature_contains: "nsubjpass"
+    lemma: "replace"
+    predicate: "preceded_by"
+    swap: true
+  # --- Causal with type context (T1: both types specified) ---
+  - signature_contains: "dobj"
+    lemma: "lower"
+    predicate: "causes"
+  - signature_contains: "dobj"
+    lemma: "raise"
+    predicate: "causes"
+  - signature_contains: "dobj"
+    lemma: "reduce"
+    predicate: "causes"
+  - signature_contains: "dobj"
+    lemma: "increase"
+    predicate: "causes"
+  - signature_contains: "dobj"
+    lemma: "decrease"
+    predicate: "causes"
+  # --- Prepositional verb patterns (freq=681 family) ---
+  - signature_contains: "prep:on"
+    lemma: "depend"
+    predicate: "depends_on"
+  - signature_contains: "prep:on"
+    lemma: "rely"
+    predicate: "depends_on"
+  - signature_contains: "prep:on"
+    lemma: "run"
+    predicate: "runs_on"
+  - signature_contains: "prep:on"
+    lemma: "train"
+    predicate: "trained_on"
+  - signature_contains: "prep:from"
+    lemma: "derive"
+    predicate: "derived_from"
+  - signature_contains: "prep:from"
+    lemma: "extract"
+    predicate: "derived_from"
+  - signature_contains: "prep:with"
+    lemma: "compare"
+    predicate: "uses"
+  # --- P2B: Verb-plus-preposition constructions ---
+  # Store the complete predicate lemma context. These are high-precision
+  # because the preposition disambiguates the verb's sense.
+  # works_for: T2 rule with obj_type constraint. Without it, "works for hours"
+  # and "works for a living" produce false employment edges. The obj_type is
+  # evaluated against ontology-normalized types (ENTITY_TYPE_ALIASES in
+  # canonical.py folds all upstream variants like "institution", "company",
+  # "agency" into "Organization" before the resolver sees them).
+  - signature_contains: "prep:for"
+    lemma: "work"
+    obj_type: "Organization"
+    predicate: "works_for"
+    feature_group: "p2_verb_prep"
+  - signature_contains: "prep:in"
+    lemma: "serve"
+    predicate: "member_of"
+    feature_group: "p2_verb_prep"
+  # NOTE: "base in" → located_in is NOT here. It resolves via T3 synonym
+  # (line ~471: "base: located_in"). Adding a T2 rule would be redundant
+  # and would NOT add extraction coverage. The passive prep-object frame
+  # ("is based in") is gated behind p2_verb_prep at the frame level.
+  - signature_contains: "prep:of"
+    lemma: "member"
+    predicate: "member_of"
+    feature_group: "p2_verb_prep"
+  - signature_contains: "prep:of"
+    lemma: "part"
+    predicate: "part_of"
+    feature_group: "p2_verb_prep"
+  # --- Purpose-PP guard: object inside prep:for is a purpose/benefactive,
+  #     NOT a direct semantic object of the verb. DROP. ---
+  - signature_contains: "prep:for"
+    lemma: "use"
+    predicate: "__DROP__"
+  - signature_contains: "prep:for"
+    lemma: "depend"
+    predicate: "__DROP__"
+
+synonyms:
+  # --- data-flow verbs (general technical usage; mirrors the independently
+  # frozen Meridian matching lexicon: consumes <- read/reads; uses <- write to) ---
+  read: consumes
+  reads from: consumes
+  read from: consumes
+  write to: uses
+  writes to: uses
+  written to: uses
+  maintain: supports
+  # spec-metadata keys whose wording itself names the canonical relation
+  related framework: related_to
+  related to: related_to
+  # --- transfer-verb policy (owner-delegated decision, 2026-08-07): directed
+  # transfer maps the DESTINATION as uses (same frame as "writes to") and the
+  # SOURCE as consumes (same frame as "reads from"). Phrase keys only — a bare
+  # transfer verb without its complement stays an open relation.
+  send to: uses
+  sends to: uses
+  sent to: uses
+  deliver to: uses
+  delivers to: uses
+  forward to: uses
+  forwards to: uses
+  push to: uses
+  pushes to: uses
+  publish to: uses
+  publishes to: uses
+  stream to: uses
+  streams to: uses
+  ship to: uses
+  ships to: uses
+  transmit to: uses
+  transmits to: uses
+  upload to: uses
+  uploads to: uses
+  route to: uses
+  routes to: uses
+  emit to: uses
+  emits to: uses
+  export to: uses
+  exports to: uses
+  receive from: consumes
+  receives from: consumes
+  received from: consumes
+  pull from: consumes
+  pulls from: consumes
+  fetch from: consumes
+  fetches from: consumes
+  import from: consumes
+  imports from: consumes
+  download from: consumes
+  downloads from: consumes
+  # --- instance_of (be = 29.5% of corpus) ---
+  be: instance_of
+  is a: instance_of
+  is an: instance_of
+  are: instance_of
+  was a: instance_of
+  was an: instance_of
+  refer: instance_of
+  refers to: instance_of
+  refer to: instance_of
+  become: instance_of
+  becomes: instance_of
+  represents: represents
+  represent: represents
+
+  # --- synonym_of ---
+  known as: synonym_of
+  also called: synonym_of
+  aka: synonym_of
+  nicknamed: synonym_of
+  means: synonym_of
+  mean: synonym_of
+  synonymous with: synonym_of
+
+  # --- part_of (have = 6.2%, include = 0.8%) ---
+  # NOTE: "have/has/had" is handled by T2 special case in the resolver
+  # (returns part_of with swap=True, plus quantity-object detection).
+  # has_part is NOT in the Predicate Literal — not emittable.
+  own: owns
+  owns: owns
+  acquire: owns
+  acquires: owns
+  acquired: owns
+  part of: part_of
+  compose: part_of
+  belongs to: part_of
+  belong to: part_of
+  belong: part_of
+
+  # --- member_of ---
+  member of: member_of
+  joined: member_of
+  join: member_of
+  affiliate: affiliated_with
+  affiliated with: affiliated_with
+  works for: works_for
+  work for: works_for
+  employed by: works_for
+  employ: works_for
+  # P2B: verb+preposition compound lemmas
+  serve in: member_of
+  served in: member_of
+  base in: located_in
+
+  # --- uses (use = 4.8% of corpus) ---
+  uses: uses
+  use: uses
+  utilizes: uses
+  utilize: uses
+  employs: uses
+  employ: uses
+  leverages: uses
+  leverage: uses
+  applies: uses
+  apply: uses
+  compare: uses
+  compares: uses
+  adopt: uses
+  adopts: uses
+  consume: consumes
+  consumes: consumes
+  invoke: uses
+  invokes: uses
+
+  # --- depends_on (need = 1.5%, require = 0.5%) ---
+  relies on: depends_on
+  rely on: depends_on
+  rely: depends_on
+  depends on: depends_on
+  depend on: depends_on
+  depend: depends_on
+  requires: depends_on
+  require: depends_on
+  needs: depends_on
+  need: depends_on
+
+  # --- produces / created_by (make = 3.0%, create = 1.6%) ---
+  makes: produces
+  make: produces
+  produces: produces
+  produce: produces
+  generates: produces
+  generate: produces
+  outputs: produces
+  output: produces
+  releases: produces
+  release: produces
+  published: produces
+  publish: produces
+  launched: produces
+  launch: produces
+  creates: created_by
+  create: created_by
+  builds: created_by
+  build: created_by
+  develops: created_by
+  develop: created_by
+  designs: created_by
+  design: created_by
+  created by: created_by
+  built by: created_by
+  authored by: created_by
+  written by: created_by
+  directed by: created_by
+  screenplay by: created_by
+
+  # --- supports (provide = 1.2%, help = 1.2%, allow = 0.8%) ---
+  supports: supports
+  support: supports
+  provides: supports
+  provide: supports
+  offers: supports
+  offer: supports
+  helps: supports
+  help: supports
+  enables: supports
+  enable: supports
+  allows: supports
+  allow: supports
+  lets: supports
+  let: supports
+  facilitates: supports
+  facilitate: supports
+
+  # --- implements ---
+  implements: implements
+  implement: implements
+  encodes: implements
+  encode: implements
+  realizes: implements
+  realize: implements
+  conform: implements
+  conforms to: implements
+  comply: implements
+  complies with: implements
+
+  # --- causes (lead = 1.0%, increase = 1.0%, affect = 0.7%) ---
+  leads: causes
+  lead: causes
+  causes: causes
+  cause: causes
+  leads to: causes
+  results in: causes
+  increases: causes
+  increase: causes
+  decreases: causes
+  decrease: causes
+  reduces: causes
+  reduce: causes
+  affects: causes
+  affect: causes
+  influences: causes
+  influence: causes
+  prevents: causes
+  lower: causes
+  lowers: causes
+  raise: causes
+  raises: causes
+  drive: causes
+  drives: causes
+  trigger: causes
+  triggers: causes
+  induce: causes
+  induces: causes
+  promote: causes
+  promotes: causes
+  inhibit: causes
+  inhibits: causes
+  guarantee: causes
+  guarantees: causes
+  determine: causes
+  determines: causes
+  hypothesize: causes
+  hypothesizes: causes
+  prevent: causes
+  triggers: causes
+  trigger: causes
+
+  # --- references (show = 2.7%) ---
+  shows: references
+  show: references
+  demonstrates: references
+  demonstrate: references
+  indicates: references
+  indicate: references
+  reveals: references
+  reveal: references
+  cites: references
+  cite: references
+  mentions: references
+  mention: references
+  describes: references
+  describe: references
+  discusses: references
+  discuss: references
+  explains: references
+  explain: references
+
+  # --- defines ---
+  defines: defines
+  define: defines
+  specifies: defines
+  specify: defines
+  characterizes: defines
+  characterize: defines
+
+  # --- represents ---
+  represents: represents
+  represent: represents
+  signal: represents
+  signals: represents
+  indicate: represents
+  indicates: represents
+  denote: represents
+  denotes: represents
+  signify: represents
+  signifies: represents
+  encode: represents
+  encodes: represents
+  express: represents
+  expresses: represents
+
+  # --- runs_on (run = 0.6%) ---
+  runs: runs_on
+  run: runs_on
+  runs on: runs_on
+  executes: runs_on
+  execute: runs_on
+  # 'operate' is polysemous (operate a refinery / operate on Linux /
+  # operate in Europe / operate at 3000 RPM) — the bare verb carries no
+  # single canonical frame, so it stays OPEN (owner-ratified 2026-08-07:
+  # abstention beats a deterministic wrong answer). Only the
+  # preposition-inclusive platform frame maps; endpoint type signatures
+  # gate it further downstream.
+  operates on: runs_on
+  performs: runs_on
+  perform: runs_on
+  processes: runs_on
+  process: runs_on
+
+  # --- trained_on ---
+  trains: trained_on
+  train: trained_on
+  trained on: trained_on
+  fine-tunes: trained_on
+  fine_tunes: trained_on
+  finetunes: trained_on
+  teaches: trained_on
+  teach: trained_on
+
+  # --- located_in ---
+  locate: located_in
+  located in: located_in
+  base: located_in
+  based in: located_in
+  headquarter: located_in
+  headquartered in: located_in
+  found: located_in
+  founded in: located_in
+  originate: located_in
+  originated in: located_in
+  live: located_in
+  lives in: located_in
+  deploy: located_in
+  deployed in: located_in
+
+  # --- stores ---
+  stores: stores
+  store: stores
+  caches: stores
+  cache: stores
+  persists: stores
+  persist: stores
+  saves: stores
+  save: stores
+
+  # --- detects ---
+  detects: detects
+  detect: detects
+  identifies: detects
+  identify: detects
+  recognizes: detects
+  recognize: detects
+  finds: detects
+
+  # --- maps_to ---
+  maps to: maps_to
+  map: maps_to
+  maps: maps_to
+  correspond: maps_to
+  corresponds to: maps_to
+  translate: maps_to
+  translates to: maps_to
+  convert: maps_to
+  converts to: maps_to
+
+  # --- derived_from ---
+  derive: derived_from
+  derived from: derived_from
+  based on: derived_from
+  extract: derived_from
+  extracted from: derived_from
+  adapt: derived_from
+  adapted from: derived_from
+  fork: derived_from
+  forked from: derived_from
+
+  # --- preceded_by ---
+  precede: preceded_by
+  preceded by: preceded_by
+  comes after: preceded_by
+  follow: preceded_by
+  follows: preceded_by
+  succeed: preceded_by
+  succeeded: preceded_by
+  revise: preceded_by
+  revises: preceded_by
+  supersede: preceded_by
+  supersedes: preceded_by
+  replace: preceded_by
+  replaces: preceded_by
+
+  # --- contradicts / excepts / overrides ---
+  contradict: contradicts
+  contradicts: contradicts
+  conflict: contradicts
+  conflicts with: contradicts
+  disagree: contradicts
+  disagrees with: contradicts
+  except: excepts
+  excepts: excepts
+  exclude: excepts
+  excludes: excepts
+  override: overrides
+  overrides: overrides
+  supersede: overrides
+  supersedes: overrides
+  replace: overrides
+  replaces: overrides
+
+  # --- overlaps ---
+  overlaps: overlaps
+  overlaps with: overlaps
+  shares: overlaps
+  intersects: overlaps
+
+# --- NOISE VERBS (do NOT map — cognitive/perceptual, no graph edge) ---
+# see, want, find, know, feel, think, say, ask, tell, learn, try, keep,
+# go, come, look, get, do, consider, understand, focus, suggest,
+# choose, examine, start, set, work, click, reach
+
+# ===========================================================================
+# SUPPRESSION CONFIG — false-edge prevention (precision guards)
+# Every suppression increments a named counter. Nothing dropped silently.
+# These are loaded and validated at config load time (fail LOUD).
+# ===========================================================================
+# --- Inverse-direction synonyms ---
+# The surface SUBJECT is the semantic WHOLE/container: "X contains Y",
+# "X includes Y", "X consists of Y" all assert Y part_of X, so resolvers
+# must SWAP endpoints when mapping (canonical part_of direction is
+# member -> whole). Both consumers honor this: the T3 flat-synonym rung
+# returns swap=True, and the fast-path PredicateCompiler tags the mapping
+# rule with :inverse_direction so the compiled relation swaps endpoints.
+# A surface may appear in synonyms OR inverse_synonyms, never both.
+inverse_synonyms:
+  contains: part_of
+  contain: part_of
+  containing: part_of
+  includes: part_of
+  include: part_of
+  comprises: part_of
+  comprise: part_of
+  consist: part_of
+  consists of: part_of
+  composed of: part_of
+
+suppression:
+  # --- Attribution: relations inside ccomp/xcomp of these verbs are
+  #     attributed (someone SAYS/BELIEVES X), not asserted as fact. ---
+  attribution_verbs:
+    - argue
+    - claim
+    - suggest
+    - report
+    - believe
+    - propose
+    - hypothesize
+    - note
+    - observe
+    - find
+    - show
+    - demonstrate
+    - contend
+    - assert
+    - maintain
+    - insist
+    - allege
+    - speculate
+    - theorize
+    - posit
+
+  # --- Conditional/hypothetical: advcl governed by mark in this set
+  #     means relations inside that clause are non-asserted. ---
+  conditional_markers:
+    - if
+    - unless
+    - when
+    - should
+    - were
+    - suppose
+    - assuming
+    - provided
+    - whenever
+
+  # --- Contrast: entities inside these phrases must NOT be bound as
+  #     subject of the main clause predicate. ---
+  contrast_prepositions:
+    - unlike
+    - versus
+    - vs
+  contrast_conjunctions:
+    - whereas
+    - while
+    - although
+    - though
+
+  # --- Light verbs: predicate lemma in this set whose dobj is an
+  #     eventive noun → do NOT map the light verb. ---
+  light_verbs:
+    - make
+    - take
+    - give
+    - do
+    - have
+
+  # --- Low-parse-confidence: ratio of sentence-final punctuation (.!?)
+  #     to token count below this threshold → skip relation extraction. ---
+  low_parse_confidence_threshold: 0.02

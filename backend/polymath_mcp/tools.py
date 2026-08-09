@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import os
 import logging
 import uuid
 from datetime import date, datetime
@@ -240,13 +241,26 @@ async def _find_existing_source_matches(
         ).to_list(length=None)
     }
     matches: list[dict[str, Any]] = []
+    run_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for cid in sorted({d["corpus_id"] for d in docs}):
+        rows = await _run_rows_for_docs(
+            cid, [d.get("doc_id") for d in docs if d.get("corpus_id") == cid]
+        )
+        for did, row in rows.items():
+            run_rows[(cid, did)] = row
     for doc in docs:
         status = _summarize_write_state(doc)
+        run_row = run_rows.get((doc.get("corpus_id"), doc.get("doc_id"))) or {}
         matches.append(
             {
                 "corpus_id": doc.get("corpus_id"),
                 "corpus_name": corpus_lookup.get(doc.get("corpus_id")),
                 "doc_id": doc.get("doc_id"),
+                "run_id": _run_id_for_result(
+                    str(doc.get("corpus_id") or ""), str(doc.get("doc_id") or "")
+                ),
+                "run_status": run_row.get("status"),
+                "certificate_id": run_row.get("certificate_id"),
                 "filename": doc.get("filename"),
                 "source_url": doc.get("source_url"),
                 "source_tier": doc.get("source_tier"),
@@ -364,6 +378,33 @@ def _summary_need_from_profile(profile: str, summary_required: str) -> bool:
 # ── Search tools ───────────────────────────────────────────────────────────
 
 
+async def _search_readiness_relay(
+    corpus_ids: list[str], tier: RetrievalTier
+) -> dict[str, Any]:
+    """Route-aware readiness relay for the MCP search entry (owner §4.2).
+
+    The route follows the retrieval tier: focused (qdrant-only) search is
+    the ``vector_search`` route; anything that adds Mongo lexical recall
+    is the ``hybrid_search`` route. The relay never raises.
+    """
+
+    route = (
+        "vector_search"
+        if tier == RetrievalTier.qdrant_only
+        else "hybrid_search"
+    )
+    db = ingestion_service.db
+    if db is None or not corpus_ids:
+        return {"route": route, "decisions": {}}
+    try:
+        from services.ingestion.route_readiness import route_readiness_payload
+
+        return await route_readiness_payload(db, corpus_ids, route)
+    except Exception as exc:
+        logger.debug("MCP search readiness relay unavailable: %s", exc)
+        return {"route": route, "decisions": {}, "relay_error": type(exc).__name__}
+
+
 async def _run_search(
     *,
     query: str,
@@ -439,12 +480,17 @@ async def _run_search(
             query=query,
             **retrieval_kwargs,
         )
+    # Route-aware readiness relay (owner §4.2): every scoped corpus reports
+    # its per-route artifact verdict. Ordinary retrieval continues — the
+    # decision is a relay here, never a blanket gate.
+    readiness_relay = await _search_readiness_relay(scoped, tier)
     return {
         "chunks": [_json_ready(c) for c in result.chunks],
         "corpus_ids": scoped,
         "requested_tier": _json_ready(result.requested_tier),
         "effective_tier": _json_ready(result.effective_tier),
         "downgrade_reason": result.downgrade_reason,
+        "readiness_decisions": readiness_relay,
         "retrieval": {
             "search_mode": effective_search_mode,
             "requested_search_mode": search_mode,
@@ -1046,6 +1092,47 @@ async def polymath_graph_query(
     if db is None:
         return {"status": "error", "error": "MongoDB is not connected"}
 
+    # Route-aware readiness gate (owner §4.2): graph reads require the
+    # qualified graph projection AND a matching release pin. A corpus that
+    # is vector_ready/hierarchical_ready but graph_not_ready stays fully
+    # usable on ordinary retrieval; only its graph route is refused with
+    # the exact missing conditions (fail-closed, never an exception).
+    try:
+        from services.ingestion.route_readiness import (
+            decide_corpus_route,
+            decision_payload,
+        )
+
+        graph_decisions: dict[str, Any] = {}
+        for cid in scoped:
+            try:
+                graph_decisions[cid] = decision_payload(
+                    await decide_corpus_route(db, cid, "graph_read")
+                )
+            except Exception as exc:  # noqa: BLE001
+                graph_decisions[cid] = {
+                    "corpus_id": cid,
+                    "route": "graph_read",
+                    "allowed": False,
+                    "mode": "blocked",
+                    "required_artifacts": [],
+                    "missing_artifacts": [],
+                    "certificate_id": None,
+                    "reasons": [f"census_error:{type(exc).__name__}"],
+                }
+    except Exception as exc:
+        logger.debug("MCP graph readiness gate unavailable: %s", exc)
+        graph_decisions = {}
+    graph_allowed = [
+        cid for cid, payload in graph_decisions.items() if payload.get("allowed")
+    ]
+    if graph_decisions and not graph_allowed:
+        return {
+            "status": "graph_not_ready",
+            "error": "no scoped corpus satisfies the graph_read route",
+            "readiness_decisions": graph_decisions,
+        }
+
     from services.graph.orchestrator import discover
 
     try:
@@ -1053,7 +1140,7 @@ async def polymath_graph_query(
             qdrant=qdrant,
             neo4j_driver=ingestion_service.neo4j_driver,
             db=db,
-            corpus_ids=scoped,
+            corpus_ids=graph_allowed or scoped,
             query=query,
             mode=mode,
             synthesis_mode=synthesis_mode,
@@ -1080,7 +1167,7 @@ async def polymath_graph_query(
         include_graph=include_graph,
         include_trace=include_trace,
         max_items=max_items,
-    ) | {"synthesis_mode": synthesis_mode}
+    ) | {"synthesis_mode": synthesis_mode, "readiness_decisions": graph_decisions}
 
 
 async def polymath_graph_map_query(
@@ -1591,6 +1678,14 @@ async def polymath_mcp_status(
         "scope": {
             "accessible_corpus_count": len(accessible),
         },
+        "control_plane": {
+            "enabled": bool(
+                getattr(settings, "CONTROL_PLANE_V2_ENABLED", True)
+            ),
+            "proof_contract": "certificate.v1",
+            "readiness_rule": _READINESS_RELAY_RULE,
+            "run_endpoint": "GET /api/runs/{run_id}",
+        },
         "toolsets": _json_ready(MCP_TOOLSETS),
         "ingestion": {
             "max_upload_bytes": settings.MCP_INGEST_MAX_BYTES,
@@ -1676,7 +1771,10 @@ async def polymath_plan_ingestion(
             post_ingest_actions.append(
                 {
                     "tool": "polymath_backfill_summaries",
-                    "when": "after polymath_get_ingest_status reports complete",
+                    "when": (
+                        "after polymath_get_ingest_status readiness proof "
+                        "reports query_ready true"
+                    ),
                     "why": "existing corpus does not generate parent summaries during ingest",
                 }
             )
@@ -1754,7 +1852,11 @@ async def polymath_plan_ingestion(
         "polymath_list_corpora",
         corpus_action["tool"] if corpus_action["action"] == "create_corpus" else "reuse existing corpus",
         ingest_tool,
-        "polymath_get_ingest_status until complete",
+        (
+            "polymath_get_ingest_status until readiness.query_ready is true "
+            "(relay the readiness proof verbatim; never report completion "
+            "from status or write_state)"
+        ),
         *(a["tool"] for a in post_ingest_actions),
         "polymath_search verification",
         "polymath_chat_query final summary if requested",
@@ -1793,6 +1895,7 @@ async def polymath_plan_ingestion(
         "call_sequence": call_sequence,
         "post_ingest_actions": post_ingest_actions,
         "verification": verification,
+        "readiness_rule": _READINESS_RELAY_RULE,
         "warnings": warnings,
     }
 
@@ -1919,8 +2022,13 @@ async def polymath_list_documents(
         offset: pagination offset.
 
     Returns:
-        {"documents": [{doc_id, filename, source_tier, chunk_count,
-                        parent_count, write_state, ingested_at}, ...]}
+        {"documents": [{doc_id, run_id, run_status, certificate_id, proof,
+                        filename, source_tier, chunk_count, parent_count,
+                        write_state, ingested_at}, ...], "agent_rule"}
+
+    run_status/proof come from the Control Plane V2 run ledger (projected
+    from certificate-backed proofs). For an authoritative live proof call
+    polymath_get_ingest_status on the specific doc.
     """
     from .auth import SYSTEM_USER_ID, get_current_user_id
 
@@ -1935,10 +2043,25 @@ async def polymath_list_documents(
     docs = await ingestion_service.list_documents(
         corpus_id, user_id=list_uid, limit=limit, offset=offset
     )
+    run_rows = await _run_rows_for_docs(
+        corpus_id, [d.get("doc_id") for d in docs]
+    )
     return {
         "documents": [
             {
                 "doc_id": d.get("doc_id"),
+                "run_id": _run_id_for_result(
+                    corpus_id, str(d.get("doc_id") or "")
+                ),
+                "run_status": (run_rows.get(str(d.get("doc_id") or "")) or {}).get(
+                    "status"
+                ),
+                "certificate_id": (
+                    run_rows.get(str(d.get("doc_id") or "")) or {}
+                ).get("certificate_id"),
+                "proof": _json_ready(
+                    (run_rows.get(str(d.get("doc_id") or "")) or {}).get("proof")
+                ),
                 "filename": d.get("filename"),
                 "source_tier": d.get("source_tier"),
                 "source_url": d.get("source_url"),
@@ -1959,7 +2082,8 @@ async def polymath_list_documents(
                                 if d.get("ingested_at") else None),
             }
             for d in docs
-        ]
+        ],
+        "agent_rule": _READINESS_RELAY_RULE,
     }
 
 
@@ -2275,6 +2399,97 @@ async def polymath_create_corpus(
     }
 
 
+def _run_id_for_result(corpus_id: str, doc_id: str) -> str | None:
+    """Deterministic Control Plane V2 run id for an intake response.
+
+    The run row itself is created inside ingestion_service.ingest() via the
+    on_doc_id hook; this only derives the id so agents can poll
+    GET /api/runs/{run_id} without a second lookup.
+    """
+    if not doc_id:
+        return None
+    try:
+        from services.control_plane.ledger import run_id_for
+
+        return run_id_for(corpus_id=corpus_id, doc_id=str(doc_id))
+    except Exception:  # noqa: BLE001 — intake response must not fail on this
+        return None
+
+
+_READINESS_RELAY_RULE = (
+    "Relay the `readiness` proof verbatim. query_ready is certificate-backed "
+    "(readiness_source certificate.v1); never infer completion from "
+    "write_state, ingest_stage, counts, or any other field. "
+    "readiness_source 'unavailable' means unknown — unknown is never ready."
+)
+
+
+async def _doc_readiness_payload(corpus_id: str, doc_id: str) -> dict[str, Any]:
+    """Live certificate-backed readiness proof for one document.
+
+    Never raises and never falls back to legacy flags: any lookup failure
+    yields readiness_source 'unavailable' with query_ready false.
+    """
+    base: dict[str, Any] = {
+        "schema_version": "certificate.v1",
+        "readiness_source": "unavailable",
+        "corpus_id": corpus_id,
+        "doc_id": doc_id,
+        "query_ready": False,
+        "certificate_id": None,
+        "missing": {},
+        "missing_counts": {},
+        "blocking": [],
+        "recovery": {"jobs_created": 0, "next_retry_at": None},
+        "observation_errors": [],
+    }
+    db = ingestion_service.db
+    if db is None:
+        base["observation_errors"] = ["database not attached"]
+        return base
+    try:
+        from services.control_plane.certificate import doc_readiness_proof
+
+        return _json_ready(
+            await doc_readiness_proof(
+                db,
+                ingestion_service._qdrant,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — unknown is never healthy
+        base["observation_errors"] = [f"{type(exc).__name__}: {exc}"]
+        return base
+
+
+async def _run_rows_for_docs(
+    corpus_id: str, doc_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Bulk run-ledger lookup for list/duplicate surfaces (no live census)."""
+    db = ingestion_service.db
+    if db is None or not doc_ids:
+        return {}
+    try:
+        rows = await db["ingestion_runs"].find(
+            {
+                "corpus_id": corpus_id,
+                "doc_id": {"$in": [str(d) for d in doc_ids if d]},
+            },
+            {
+                "_id": 0,
+                "run_id": 1,
+                "doc_id": 1,
+                "status": 1,
+                "certificate_id": 1,
+                "proof": 1,
+            },
+        ).to_list(length=None)
+    except Exception:  # noqa: BLE001 — ledger lookup is additive metadata
+        return {}
+    return {str(r.get("doc_id") or ""): r for r in rows}
+
+
 async def _ingest_bytes(
     *,
     data: bytes,
@@ -2316,11 +2531,8 @@ async def _ingest_bytes(
         raise ValueError(f"corpus_id {corpus_id!r} not found")
     base_cfg_dict = corpus.get("default_ingestion_config") or {}
     cfg = IngestionConfig(**base_cfg_dict)
-    if cfg.chunk_summarization and summary_cost_authority_usd is None:
-        raise ValueError(
-            "summary_cost_authority_usd is required because this corpus has "
-            "parent summary generation enabled"
-        )
+    # Authority is optional. Absent → deterministic_summary.v1 baseline;
+    # present → deprecated llm_summary_enrichment.v1 only.
 
     source_identity = source_identity or build_source_identity(
         filename=filename,
@@ -2379,6 +2591,7 @@ async def _ingest_bytes(
         return {
             "status": "queued",
             "doc_id": result.doc_id,
+            "run_id": _run_id_for_result(corpus_id, result.doc_id),
             "job_id": result.job_id,
             "corpus_id": corpus_id,
             "filename": result.filename,
@@ -2436,7 +2649,7 @@ async def polymath_ingest_from_url(
             corpus has parent summary generation enabled.
 
     Returns:
-        {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
+        {"status": "queued", "doc_id", "run_id", "job_id", "corpus_id", "filename",
          "source_tier", "size_bytes"}
     """
     import httpx
@@ -2546,7 +2759,7 @@ async def polymath_upload_document(
             corpus has parent summary generation enabled.
 
     Returns:
-        {"status": "queued", "doc_id", "job_id", "corpus_id", "filename",
+        {"status": "queued", "doc_id", "run_id", "job_id", "corpus_id", "filename",
          "source_tier", "size_bytes"}
     """
     import base64
@@ -2598,6 +2811,11 @@ async def polymath_get_ingest_status(
                             consistency check tripped)
       - "not_found"       — no document row with this doc_id
 
+    The `readiness` field is the authoritative certificate-backed proof
+    (Control Plane V2). Relay it verbatim: `readiness.query_ready` is the
+    ONLY completion claim; status/write_state above are transport receipts
+    and must never be reported as completion.
+
     Args:
         doc_id: Document id returned by polymath_ingest_from_url /
             polymath_upload_document.
@@ -2605,9 +2823,9 @@ async def polymath_get_ingest_status(
             user-accessible.
 
     Returns:
-        {"doc_id", "corpus_id", "filename", "status", "chunk_count",
-         "parent_count", "write_state", "error", "ingested_at",
-         "source_tier", "warnings"}
+        {"doc_id", "run_id", "corpus_id", "filename", "status",
+         "chunk_count", "parent_count", "write_state", "error",
+         "ingested_at", "source_tier", "readiness", "agent_rule"}
     """
     if corpus_id:
         await assert_corpus_allowed(corpus_id)
@@ -2631,11 +2849,25 @@ async def polymath_get_ingest_status(
             "corpus_id": corpus_id,
             "status": "not_found",
             "error": "no document with that doc_id",
+            "readiness": {
+                "schema_version": "certificate.v1",
+                "readiness_source": "unavailable",
+                "query_ready": False,
+                "certificate_id": None,
+            },
+            "next_action": "Confirm the doc_id; do not report ingestion success.",
         }
 
     ws = doc.get("write_state") or {}
+    resolved_corpus_id = str(doc.get("corpus_id") or corpus_id or "")
+    readiness = await _doc_readiness_payload(
+        resolved_corpus_id, str(doc.get("doc_id") or doc_id)
+    )
     return {
         "doc_id": doc.get("doc_id", doc_id),
+        "run_id": _run_id_for_result(
+            resolved_corpus_id, str(doc.get("doc_id") or doc_id)
+        ),
         "corpus_id": doc.get("corpus_id"),
         "filename": doc.get("filename"),
         "status": _summarize_write_state(doc),
@@ -2659,6 +2891,509 @@ async def polymath_get_ingest_status(
             if hasattr(doc.get("ingested_at"), "isoformat")
             else doc.get("ingested_at")
         ),
+        "readiness": readiness,
+        "agent_rule": _READINESS_RELAY_RULE,
+    }
+
+
+def _execution_location(receipt: dict[str, Any]) -> str:
+    explicit = str(receipt.get("execution_location") or "").strip()
+    if explicit:
+        return explicit
+    wire_contract = str(receipt.get("wire_contract") or "")
+    if receipt.get("endpoint") and wire_contract.startswith("polymath.runpod"):
+        return "remote_runpod_serverless"
+    local_compute = receipt.get("local_compute")
+    if local_compute is True:
+        return "local"
+    if local_compute is False:
+        return "external_api"
+    return "unknown"
+
+
+def _unique_receipts(receipts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for receipt in receipts:
+        key = json.dumps(_json_ready(receipt), sort_keys=True, separators=(",", ":"))
+        if key not in seen:
+            seen.add(key)
+            unique.append(_json_ready(receipt))
+    return unique
+
+
+def _compile_ingestion_evidence(
+    bundle: dict[str, Any], readiness: dict[str, Any]
+) -> dict[str, Any]:
+    doc = bundle["document"]
+    ws = doc.get("write_state") or {}
+    config = doc.get("ingestion_config") or {}
+    status = _summarize_write_state(doc)
+    graph_required = bool(config.get("use_neo4j"))
+    summary_required = bool(config.get("chunk_summarization"))
+
+    extraction_receipts: list[dict[str, Any]] = []
+    successful_extractions = 0
+    for row in bundle.get("ghost_rows") or []:
+        if str(row.get("status") or "ok").lower() == "ok":
+            successful_extractions += 1
+        card = dict(row.get("provider_card") or {})
+        receipt = {
+            "provider": card.get("provider") or row.get("provider"),
+            "model": card.get("model") or row.get("model"),
+            "endpoint": card.get("endpoint"),
+            "account": card.get("account"),
+            "wire_contract": card.get("wire_contract"),
+            "transport_mode": card.get("transport_mode"),
+            "schema_mode": row.get("schema_mode"),
+            "output_mode": row.get("output_mode"),
+            "execution_location": _execution_location(card),
+            "evidence_source": "ghost_b_extractions.provider_card",
+        }
+        extraction_receipts.append(
+            {key: value for key, value in receipt.items() if value is not None}
+        )
+    extraction_receipts = _unique_receipts(extraction_receipts)
+
+    summary_receipts: list[dict[str, Any]] = []
+    for row in bundle.get("parent_rows") or []:
+        receipt = dict(row.get("summary_receipt") or row.get("summary_metadata") or {})
+        provider = row.get("summary_provider") or receipt.get("provider")
+        model = row.get("summary_model") or receipt.get("model")
+        if provider or model or receipt.get("local_compute") is not None:
+            summary_receipts.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "execution_location": _execution_location(receipt),
+                    "evidence_source": "parent_chunks.summary_receipt",
+                }
+            )
+    for row in bundle.get("provider_metrics") or []:
+        if str(row.get("phase") or "").lower() not in {
+            "summary",
+            "parent_summary",
+            "document_summary",
+        }:
+            continue
+        summary_receipts.append(
+            {
+                "provider": row.get("provider_family"),
+                "model": row.get("model"),
+                "execution_location": _execution_location(row),
+                "billable_provider": row.get("billable_provider"),
+                "evidence_source": "ingest_provider_call_metrics",
+            }
+        )
+    summary_receipts = _unique_receipts(summary_receipts)
+
+    stores = {
+        "mongo": {
+            "required": True,
+            "written": bool(ws.get("mongo_written")),
+            "evidence_source": "documents.write_state.mongo_written",
+        },
+        "qdrant": {
+            "required": True,
+            "written": bool(ws.get("qdrant_written")),
+            "evidence_source": "documents.write_state.qdrant_written",
+        },
+        "summaries": {
+            "required": summary_required,
+            "written": bool(ws.get("summaries_indexed")),
+            "evidence_source": "documents.write_state.summaries_indexed",
+        },
+        "neo4j": {
+            "required": graph_required,
+            "written": bool(ws.get("neo4j_written")),
+            "evidence_source": "documents.write_state.neo4j_written",
+        },
+    }
+    # Control Plane V2: query_ready comes ONLY from the certificate-backed
+    # proof. The write_state flags above stay as store receipts, but they
+    # can no longer produce a completion claim (Hermes false-green fix).
+    query_ready = bool(readiness.get("query_ready"))
+
+    safe_claims = [
+        f"Mongo write: {stores['mongo']['written']}",
+        f"Qdrant write: {stores['qdrant']['written']}",
+        f"Neo4j write: {stores['neo4j']['written']} (required={graph_required})",
+        (
+            f"Summary vectors: {stores['summaries']['written']} "
+            f"(required={summary_required})"
+        ),
+        f"Post-write verification: {ws.get('verified') is True}",
+        (
+            f"Query ready: {query_ready} "
+            f"(readiness_source={readiness.get('readiness_source')}, "
+            f"certificate_id={readiness.get('certificate_id')})"
+        ),
+    ]
+    blocked_claims: list[str] = []
+    if not extraction_receipts:
+        blocked_claims.append(
+            "Extraction provider/location is unknown: no document-scoped provider receipt."
+        )
+    if summary_required and not summary_receipts:
+        blocked_claims.append(
+            "Summary provider/location is unknown: no document-scoped summary receipt."
+        )
+    blocked_claims.append(
+        "Embedding execution location is unknown unless a document-scoped "
+        "embedding receipt is added; Qdrant storage location is not compute proof."
+    )
+    if not query_ready:
+        missing_counts = readiness.get("missing_counts") or {}
+        blocked_claims.append(
+            "Do not report query-ready completion: no valid certificate for "
+            f"the current contract (readiness_source="
+            f"{readiness.get('readiness_source')}, missing_counts="
+            f"{ {k: v for k, v in missing_counts.items() if v} })."
+        )
+
+    return {
+        "contract_version": "polymath.ingestion_evidence.v1",
+        "doc_id": doc.get("doc_id"),
+        "run_id": _run_id_for_result(
+            str(doc.get("corpus_id") or ""), str(doc.get("doc_id") or "")
+        ),
+        "corpus_id": doc.get("corpus_id"),
+        "filename": doc.get("filename"),
+        "status": status,
+        "ingest_stage": doc.get("ingest_stage"),
+        "query_ready": query_ready,
+        "readiness": readiness,
+        "chunk_count": int(doc.get("chunk_count") or 0),
+        "parent_count": int(
+            doc.get("parent_count") or len(doc.get("parent_chunks") or [])
+        ),
+        "stores": stores,
+        "write_verification": {
+            "verified": ws.get("verified"),
+            "warnings": ws.get("warnings") or [],
+            "verify_errors": ws.get("verify_errors") or [],
+        },
+        "execution": {
+            "extraction": {
+                "successful_chunk_receipts": successful_extractions,
+                "routes": extraction_receipts,
+            },
+            "summaries": {"routes": summary_receipts},
+            "embeddings": {
+                "execution_location": "unknown",
+                "artifact_written_to_qdrant": bool(ws.get("qdrant_written")),
+                "evidence_source": "documents.write_state.qdrant_written",
+            },
+        },
+        "graph_promotion": _json_ready(bundle.get("graph_job")),
+        "safe_claims": safe_claims,
+        "blocked_claims": blocked_claims,
+        "agent_rule": (
+            "Report only safe_claims. Never infer compute location from names "
+            "such as local_extraction, storage hostnames, or corpus-wide counts. "
+            + _READINESS_RELAY_RULE
+        ),
+    }
+
+
+async def polymath_verify_ingestion(
+    doc_id: str,
+    corpus_id: str | None = None,
+) -> dict[str, Any]:
+    """Verify one ingestion using document-scoped persisted receipts.
+
+    This is the mandatory final gate before an agent claims a document is
+    query-ready, graph-complete, summarized by a named provider, or processed
+    on a particular machine. It performs identity joins, never count matching.
+    """
+    if corpus_id:
+        await assert_corpus_allowed(corpus_id)
+
+    uid = get_current_user_id()
+    if uid is None and get_settings().MCP_REQUIRE_AUTH:
+        raise AuthError("Authentication required to verify ingestion")
+
+    from .auth import SYSTEM_USER_ID
+    scoped_uid = uid if uid not in (None, SYSTEM_USER_ID) else None
+    bundle = await ingestion_service.get_ingestion_evidence(
+        doc_id,
+        corpus_id=corpus_id,
+        user_id=scoped_uid,
+    )
+    if not bundle:
+        return {
+            "contract_version": "polymath.ingestion_evidence.v1",
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "status": "not_found",
+            "query_ready": False,
+            "readiness": {
+                "schema_version": "certificate.v1",
+                "readiness_source": "unavailable",
+                "query_ready": False,
+                "certificate_id": None,
+            },
+            "safe_claims": [],
+            "blocked_claims": [
+                "No document-scoped ingestion receipt exists for this identity."
+            ],
+        }
+    readiness = await _doc_readiness_payload(
+        str(bundle["document"].get("corpus_id") or corpus_id or ""),
+        str(bundle["document"].get("doc_id") or doc_id),
+    )
+    evidence = _compile_ingestion_evidence(bundle, readiness)
+    # Vector-omission conservation (O4): every active chunk is either an
+    # eligible child vector or carries an explicit BY_DESIGN receipt.
+    db = ingestion_service.db
+    if db is not None:
+        from services.ingestion.section_classifier import NOISY_KINDS
+        from services.storage.record_status import with_active_records
+
+        vcid = str(bundle["document"].get("corpus_id") or corpus_id or "")
+        vdoc = str(bundle["document"].get("doc_id") or doc_id)
+        base = {"doc_id": vdoc, "corpus_id": vcid}
+        active = int(await db["chunks"].count_documents(with_active_records(dict(base))))
+        eligible = int(await db["chunks"].count_documents(with_active_records({
+            **base,
+            "$or": [
+                {"chunk_kind": {"$exists": False}},
+                {"chunk_kind": {"$nin": sorted(NOISY_KINDS)}},
+            ],
+        })))
+        stamped = int(await db["chunks"].count_documents(with_active_records({
+            **base, "vector_omitted_by_design.by_design": True,
+        })))
+        evidence["vector_conservation"] = {
+            "active_chunks": active,
+            "eligible_children": eligible,
+            "by_design_omissions": stamped,
+            "holds": eligible + stamped == active,
+        }
+    return evidence
+
+
+async def polymath_extraction_engine() -> dict[str, Any]:
+    """Report the semantic extraction engine: which sidecar serves it, its
+    release pins, device, health, and current load.
+
+    The encoder (GLiNER-Relex-large) runs behind ONE seam — the sidecar URL.
+    Production may serve it from the host GPU (MPS) or a LAN CUDA
+    workstation; the model id, revision, weights sha256, thresholds, and
+    output contract are release-pinned and identical either way. Agents
+    should call this before planning heavy ingestion: `busy=true` means the
+    engine queue is occupied and large submissions will drain slowly.
+
+    Returns release pins (the determinism guarantee), reachability, device,
+    engine load (running/queued batch items), and the deployment seam docs.
+    """
+    import urllib.request as _rq
+
+    settings = get_settings()
+    url = (os.environ.get("RELEX_SIDECAR_URL") or "http://host.docker.internal:8737").rstrip("/")
+    expected = os.environ.get("RELEX_EXPECT_RELEASE", "").strip() or None
+    health: dict[str, Any] = {}
+    reachable = False
+    try:
+        with _rq.urlopen(url + "/health", timeout=5) as resp:
+            health = json.loads(resp.read())
+            reachable = True
+    except Exception as exc:  # noqa: BLE001 — reachability is the datum
+        health = {"error": f"{type(exc).__name__}: {exc}"[:200]}
+    load = {"running_items": 0, "queued_items": 0}
+    db = ingestion_service.db
+    if db is not None:
+        load["running_items"] = int(
+            await db["ingest_batch_items"].count_documents({"status": "running"})
+        )
+        load["queued_items"] = int(
+            await db["ingest_batch_items"].count_documents({"status": "queued"})
+        )
+    return {
+        "contract_version": "polymath.extraction_engine.v1",
+        "sidecar_url": url,
+        "reachable": reachable,
+        "release": health.get("release"),
+        "expected_release_pin": expected,
+        "release_pin_enforced": bool(expected),
+        "device": health.get("device"),
+        "model": health.get("model"),
+        "thresholds": health.get("thresholds"),
+        "contract": health.get("contract"),
+        "busy": load["running_items"] > 0 or load["queued_items"] > 0,
+        "engine_load": load,
+        "throughput_rules_of_thumb": {
+            "mps_m1_max": "~8-12 min per MB of dense text; ~1h per 3MB book",
+            "small_doc_floor_seconds": "2-4s fixed pipeline cost per document",
+            "cuda_workstation": "~10-30x MPS once qualified (battery + digest gate)",
+        },
+        "deployment_seam": {
+            "switch": "RELEX_SIDECAR_URL env on the ingest worker — one URL, no code",
+            "pin_enforcement": "set RELEX_EXPECT_RELEASE to refuse any other build",
+            "fail_closed": "sidecar unavailable => items park failed_recoverable and auto-resume; never a silent fallback model",
+            "qualification_gate": "a new device/build becomes production only after the burned battery + digest comparison passes",
+        },
+    }
+
+
+async def polymath_wake_extraction_engine(
+    mac_address: str = "",
+    sidecar_url: str = "",
+    wait_seconds: int = 180,
+) -> dict[str, Any]:
+    """Wake the GPU workstation (Wake-on-LAN) and wait for its sidecar to
+    come healthy — the on-demand half of RunPod-style GPU access with no
+    human in the middle.
+
+    With no arguments, uses the wake config stored on the engine-routing
+    control document (fields wake.mac_address / wake.sidecar_url, set once
+    by ops). Sends the magic packet, then polls /health until the pinned
+    sidecar responds or the wait expires. Typical cold path: BIOS boot +
+    WSL + model load ~1-3 min. Follow with polymath_set_extraction_engine
+    to route to it; the determinism gates apply there as always.
+    """
+    import socket
+    import urllib.request as _rq
+
+    from services.extraction import engine_routing
+
+    _require_user_id_for_write()
+    route = None
+    if not mac_address or not sidecar_url:
+        db = ingestion_service.db
+        if db is not None:
+            route = await db[engine_routing.ROUTING_COLLECTION].find_one(
+                {"_id": engine_routing.ROUTING_DOC_ID}
+            )
+        wake = (route or {}).get("wake") or {}
+        mac_address = mac_address or str(wake.get("mac_address") or "")
+        sidecar_url = sidecar_url or str(wake.get("sidecar_url") or "")
+    if not mac_address:
+        return {"status": "refused",
+                "reason": "no MAC address given and none stored on the routing "
+                          "document (wake.mac_address) — ops must record it once"}
+    mac = mac_address.replace(":", "").replace("-", "").lower()
+    if len(mac) != 12:
+        return {"status": "refused", "reason": f"invalid MAC address: {mac_address!r}"}
+    packet = b"\xff" * 6 + bytes.fromhex(mac) * 16
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    for port in (9, 7):
+        sock.sendto(packet, ("255.255.255.255", port))
+    sock.close()
+    result: dict[str, Any] = {"status": "magic_packet_sent", "mac": mac_address,
+                              "healthy": False, "sidecar_url": sidecar_url or None}
+    if sidecar_url:
+        import asyncio
+        deadline = asyncio.get_event_loop().time() + max(10, int(wait_seconds))
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                with _rq.urlopen(sidecar_url.rstrip("/") + "/health", timeout=4) as resp:
+                    health = json.loads(resp.read())
+                result.update(status="awake_and_healthy", healthy=True,
+                              release=health.get("release"), device=health.get("device"))
+                break
+            except Exception:  # noqa: BLE001 — still booting
+                await asyncio.sleep(5)
+        else:
+            result["status"] = "magic_packet_sent_but_not_healthy_in_time"
+        if result["healthy"]:
+            result["next"] = ("polymath_set_extraction_engine(sidecar_url=...) — "
+                              "the qualification gate applies there")
+    return result
+
+
+async def polymath_set_extraction_engine(
+    sidecar_url: str,
+    mode: Literal["production", "qualification"] = "production",
+    note: str = "",
+) -> dict[str, Any]:
+    """Route the extraction engine to a sidecar (e.g. enable the LAN CUDA
+    workstation to accelerate the Mac) — with determinism enforced at flip
+    time.
+
+    The flip only succeeds when the target's /health proves the FROZEN
+    release identity: exact model id, revision, and weights sha256. In
+    "production" mode the target's release must additionally be in the
+    qualified set (its burned-battery + digest comparison passed);
+    "qualification" mode routes an unqualified-but-pin-correct build so the
+    qualification harness itself can run against it. Takes effect within
+    ~30s (route cache TTL); in-flight items finish on their current engine.
+    Clear the route by flipping back to the MPS sidecar URL.
+    """
+    import urllib.request as _rq
+
+    from services.extraction import engine_routing
+
+    uid = _require_user_id_for_write()
+    if mode not in ("production", "qualification"):
+        raise ValueError("mode must be 'production' or 'qualification'")
+    url = sidecar_url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("sidecar_url must be an http(s) URL")
+
+    try:
+        with _rq.urlopen(url + "/health", timeout=8) as resp:
+            health = json.loads(resp.read())
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "refused",
+            "reason": f"target unreachable: {type(exc).__name__}: {exc}"[:200],
+            "routed": False,
+        }
+
+    model = health.get("model") or {}
+    pin = engine_routing.PINNED_MODEL
+    mismatches = [
+        f"{key}: sidecar={model.get(key)!r} pinned={value!r}"
+        for key, value in pin.items()
+        if model.get(key) != value
+    ]
+    if health.get("contract") != "relex-infer-v1":
+        mismatches.append(f"contract: {health.get('contract')!r}")
+    if mismatches:
+        return {
+            "status": "refused",
+            "reason": "release-pin mismatch — refusing non-identical weights",
+            "mismatches": mismatches,
+            "routed": False,
+        }
+
+    release = str(health.get("release") or "")
+    db = ingestion_service.db
+    if db is None:
+        return {"status": "refused", "reason": "control-plane db unavailable", "routed": False}
+    route_row = await db[engine_routing.ROUTING_COLLECTION].find_one(
+        {"_id": engine_routing.ROUTING_DOC_ID}
+    )
+    qualified = engine_routing.qualified_releases(route_row or {})
+    if mode == "production" and release not in qualified:
+        return {
+            "status": "refused",
+            "reason": (
+                f"release {release!r} is not production-qualified. Run the "
+                "burned battery + digest comparison against it, record the "
+                "release via engine_routing.record_qualified_release, then "
+                "flip. Use mode='qualification' to route harness runs now."
+            ),
+            "qualified_releases": list(qualified),
+            "routed": False,
+        }
+
+    doc = await engine_routing.write_route(
+        db,
+        sidecar_url=url,
+        expected_release=release,
+        mode=mode,
+        updated_by=str(uid),
+        note=note,
+    )
+    return {
+        "status": "routed",
+        "routed": True,
+        "route": {k: _json_ready(v) for k, v in doc.items() if k != "_id"},
+        "target": {"release": release, "device": health.get("device")},
+        "takes_effect": "within ~30s (route cache TTL); in-flight items finish on their current engine",
     }
 
 
@@ -2761,6 +3496,10 @@ ALL_TOOLS = (
     polymath_ingest_from_url,
     polymath_upload_document,
     polymath_get_ingest_status,
+    polymath_verify_ingestion,
+    polymath_extraction_engine,
+    polymath_wake_extraction_engine,
+    polymath_set_extraction_engine,
     polymath_delete_document,
     polymath_backfill_summaries,
 )
@@ -2791,6 +3530,7 @@ __all__ = [
     "polymath_ingest_from_url",
     "polymath_upload_document",
     "polymath_get_ingest_status",
+    "polymath_verify_ingestion",
     "polymath_delete_document",
     "polymath_backfill_summaries",
     "AuthError",

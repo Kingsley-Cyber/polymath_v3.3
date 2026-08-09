@@ -1,0 +1,118 @@
+{
+  "family": "10_structured_metadata",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_10_cea021c586",
+    "corpus_id": "e32c7ff5-b749-5cf0-bc41-9c13ecd0c38e",
+    "elapsed_seconds": 0.5,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 9,
+    "failed": 0,
+    "optional_failed": 0,
+    "total": 9
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "gullwing runtime",
+      "kelpgate module",
+      "mooring ledger",
+      "moorline dispatch",
+      "shoal report",
+      "skerry inspection suite",
+      "tidal window feed"
+    ],
+    "promoted_edge_count": 6
+  },
+  "extracted_entities": [
+    "Gullwing Runtime",
+    "Kelpgate Module",
+    "Mooring Ledger",
+    "Moorline Dispatch",
+    "SKY-2027-04",
+    "Shoal Report",
+    "Skerry\nInspection Suite",
+    "Skerry Inspection Suite",
+    "Tidal Window Feed",
+    "aerial pier inspections"
+  ],
+  "item_results": [
+    {
+      "id": "SM01",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "requires: Gullwing Runtime"
+    },
+    {
+      "id": "SM02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "provides: Moorline Dispatch"
+    },
+    {
+      "id": "SM03",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "outputs: Shoal Report"
+    },
+    {
+      "id": "SM04",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "contains: Kelpgate Module"
+    },
+    {
+      "id": "SM05",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "document_id: TIS-SKY-2027-04"
+    },
+    {
+      "id": "SM06",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "format: Vellumscript"
+    },
+    {
+      "id": "SM07",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Skerry Inspection Suite consumes the Tidal Window Feed."
+    },
+    {
+      "id": "SM08",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Kelpgate Module produces the Mooring Ledger."
+    },
+    {
+      "id": "SM09",
+      "check": "junk_negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "inspection_interval: fourteen days"
+    }
+  ]
+}

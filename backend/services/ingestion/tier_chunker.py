@@ -46,7 +46,7 @@ PARENT_TARGET_TOKENS = 1200
 # 128-token children (was 350): higher vector-retrieval precision on
 # cross-domain corpora — recall is preserved by small-to-big (the retriever
 # dedupes by parent_id and hydrates parent text) — and it's the band the
-# local GLiNER/GLiREL extraction stack was validated on. Mirrors the
+# local deterministic Relex extraction lane was validated on. Mirrors the
 # ChildTokenBudget defaults in models/_schemas_legacy.py; corpus config wins
 # when present.
 CHILD_TARGET_TOKENS = 128
@@ -62,6 +62,25 @@ _SEMANTIC_FRAGMENT_FLOOR = 24
 # TARGET without losing structure-awareness.
 MIN_PARENT_TOKENS = 400
 MAX_PARENT_TOKENS = int(PARENT_TARGET_TOKENS * 1.5)  # = 1800
+
+# Mixed-content book lane — fence language tags that carry a program's
+# OUTPUT rather than source code. They become OUTPUT-kind blocks: retrievable
+# evidence for debugging questions, but never routed through the AST packer.
+OUTPUT_LANGS = frozenset({"output", "text", "console", "pycon", "none"})
+
+
+def _strip_fence(text: str) -> str:
+    """Drop the opening/closing ``` lines of a fenced block (output fences).
+
+    CODE blocks keep their fences verbatim (the AST round-trip needs the
+    language tag); OUTPUT blocks are stored as plain console text.
+    """
+    lines = text.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 @dataclass(frozen=True)
@@ -998,9 +1017,27 @@ def _sections_to_parent_blocks(parse_sections) -> list[_Block]:
         elif sec.element_type == "code_block":
             # Code lane: emit the fenced block as its own CODE-kind block
             # under the active heading path. Don't fold into BODY.
+            # Mixed-content book lane: fences tagged with an output-style
+            # language carry console output, not source — they become OUTPUT
+            # blocks (fences stripped) and skip the AST packer.
             flush_body()
             code_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
-            blocks.append((code_path, sec.text, ChunkKind.CODE, sec.language, getattr(sec, "metadata", None) or {}))
+            if (sec.language or "") in OUTPUT_LANGS:
+                blocks.append((code_path, _strip_fence(sec.text), ChunkKind.OUTPUT, sec.language, getattr(sec, "metadata", None) or {}))
+            else:
+                blocks.append((code_path, sec.text, ChunkKind.CODE, sec.language, getattr(sec, "metadata", None) or {}))
+        elif sec.element_type == "output_block":
+            # Mixed-content book lane: indented console run following a code
+            # block (emitted by the markdown walker). Own OUTPUT block.
+            flush_body()
+            out_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
+            blocks.append((out_path, sec.text, ChunkKind.OUTPUT, None, getattr(sec, "metadata", None) or {}))
+        elif sec.element_type == "caption":
+            # Mixed-content book lane: figure/table/listing caption line —
+            # its own CAPTION block so it stays retrievable evidence.
+            flush_body()
+            cap_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
+            blocks.append((cap_path, sec.text, ChunkKind.CAPTION, None, getattr(sec, "metadata", None) or {}))
         elif sec.element_type == "table":
             flush_body(drop_heading_only=True)
             table_path = _clean_heading_path(list(current_path) if current_path else list(sec.heading_path or []))
@@ -1285,8 +1322,22 @@ def describe_chunking(parse_result, config=None) -> dict:
     return {k: v for k, v in details.items() if v is not None}
 
 
+def _is_heading_only_body(text: str) -> bool:
+    """True when a BODY block carries nothing but its rendered heading line.
+
+    The heading-bound lanes render the section heading as the first line of
+    the next BODY block. When a code fence follows the heading directly, the
+    flushed block is heading-only — it introduces the example but doesn't
+    explain it, so the EXPLAINS adjacency pass skips it.
+    """
+    stripped = (text or "").strip()
+    if not stripped or "\n" in stripped:
+        return False
+    return re.match(r"^#{1,6}\s+\S", stripped) is not None
+
+
 def _emit_code_parents(
-    blocks: list[_Block],
+    blocks: list[tuple[int, _Block]],
     *,
     doc_id: str,
     corpus_id: str,
@@ -1294,9 +1345,13 @@ def _emit_code_parents(
     parent_idx: int,
     child_idx: int,
     file_path: str | None,
-) -> tuple[list[ParentChunk], list[ChildChunk], int, int]:
+) -> tuple[list[ParentChunk], list[ChildChunk], int, int, dict[int, str]]:
     """Build ParentChunk + ChildChunk for every CODE-kind block via
-    code_splitter.pack(). Returns (parents, children, parent_idx, child_idx).
+    code_splitter.pack(). Input is (orig_block_idx, block) pairs; returns
+    (parents, children, parent_idx, child_idx, first_parent_by_block_idx)
+    where the mapping records the FIRST emitted parent id per input block
+    (a block may split into several slice-parents). The mapping lets the
+    mixed-content lane attach deterministic EXPLAINS adjacency rows.
 
     Embedder-safety contract: every emitted ChildChunk.text fits
     EMBEDDER_SAFE_MAX_TOKENS cl100k tokens. When pack() can't meet the cap
@@ -1307,8 +1362,9 @@ def _emit_code_parents(
     safe_cap = _embedder_safe_max_tokens()
     parents: list[ParentChunk] = []
     children: list[ChildChunk] = []
+    first_parent_by_block: dict[int, str] = {}
 
-    for heading_path, text, kind, language, _metadata in blocks:
+    for orig_idx, (heading_path, text, kind, language, _metadata) in blocks:
         if kind != ChunkKind.CODE:
             continue
         if not text or not text.strip():
@@ -1368,8 +1424,9 @@ def _emit_code_parents(
             children.append(child)
             parent_idx += 1
             child_idx += 1
+            first_parent_by_block.setdefault(orig_idx, parent_id)
 
-    return parents, children, parent_idx, child_idx
+    return parents, children, parent_idx, child_idx, first_parent_by_block
 
 
 def chunk(
@@ -1416,8 +1473,8 @@ def chunk(
                 sec.language or getattr(parse_result, "language", None),
                 getattr(sec, "metadata", None) or {},
             ))
-        code_parents, code_children, parent_idx, child_idx = _emit_code_parents(
-            code_blocks,
+        code_parents, code_children, parent_idx, child_idx, _code_map = _emit_code_parents(
+            list(enumerate(code_blocks)),
             doc_id=doc_id,
             corpus_id=corpus_id,
             tier_value=tier_value,
@@ -1505,8 +1562,8 @@ def chunk(
 
         # Code lane: split CODE blocks out first and run them through the
         # AST packer. Whatever remains is prose handled by the existing path.
-        code_parents, code_children, parent_idx, child_idx = _emit_code_parents(
-            [b for b in blocks if b[2] == ChunkKind.CODE],
+        code_parents, code_children, parent_idx, child_idx, code_first_parent = _emit_code_parents(
+            [(i, b) for i, b in enumerate(blocks) if b[2] == ChunkKind.CODE],
             doc_id=doc_id,
             corpus_id=corpus_id,
             tier_value=tier_value,
@@ -1517,7 +1574,11 @@ def chunk(
         parents.extend(code_parents)
         all_children.extend(code_children)
 
-        for heading_path, section_text, block_kind, _block_lang, block_meta in blocks:
+        # Mixed-content book lane — parent ids emitted per source block so the
+        # EXPLAINS adjacency pass can resolve prose blocks to their parents.
+        body_parents_by_block: dict[int, list[str]] = {}
+
+        for block_pos, (heading_path, section_text, block_kind, _block_lang, block_meta) in enumerate(blocks):
             if block_kind == ChunkKind.CODE:
                 continue  # already handled by _emit_code_parents above
             if not section_text.strip():
@@ -1542,10 +1603,14 @@ def chunk(
             # Heading-bound tiers normally classify by heading text alone —
             # passing sub_text lets content-fallback fire when the heading
             # itself is missing (rare but possible on malformed inputs).
+            # OUTPUT/CAPTION blocks keep their block-level kind verbatim:
+            # they were already classified structurally by the walker.
             sub_texts_for_classify = [text for text, _meta in sub_texts_with_meta]
             kind = (
                 ChunkKind.TABLE
                 if block_kind == ChunkKind.TABLE
+                else block_kind
+                if block_kind in (ChunkKind.OUTPUT, ChunkKind.CAPTION)
                 else classify_chunk(
                     heading_path,
                     " ".join(sub_texts_for_classify) if sub_texts_for_classify else None,
@@ -1587,6 +1652,81 @@ def chunk(
                     )
                 )
                 all_children.extend(p_children)
+                body_parents_by_block.setdefault(block_pos, []).append(parent_id)
+
+        # Mixed-content book lane — deterministic EXPLAINS adjacency. A prose
+        # block immediately before/after a CODE block under the same heading
+        # explains that example. Rows ride the code parent's metadata so the
+        # worker's Mongo checkpoint carries them to the graph writer without
+        # changing chunk()'s return shape. Parser-owned code facts are never
+        # re-derived here: this is pure document-order structure.
+        adjacency: list[tuple[int, int, str]] = []
+        for idx, (_hp, _txt, block_kind, _lang, _meta) in enumerate(blocks):
+            if block_kind != ChunkKind.CODE:
+                continue
+            hp = blocks[idx][0]
+            if (
+                idx > 0
+                and blocks[idx - 1][2] == ChunkKind.BODY
+                and blocks[idx - 1][0] == hp
+                and not _is_heading_only_body(blocks[idx - 1][1])
+            ):
+                adjacency.append((idx - 1, idx, "before"))
+            if (
+                idx + 1 < len(blocks)
+                and blocks[idx + 1][2] == ChunkKind.BODY
+                and blocks[idx + 1][0] == hp
+                and not _is_heading_only_body(blocks[idx + 1][1])
+            ):
+                adjacency.append((idx + 1, idx, "after"))
+        if adjacency:
+            parent_by_id = {p.parent_id: p for p in parents}
+            for prose_idx, code_idx, side in adjacency:
+                code_parent_id = code_first_parent.get(code_idx)
+                prose_parent_ids = body_parents_by_block.get(prose_idx) or []
+                if not code_parent_id or not prose_parent_ids:
+                    continue
+                prose_parent_id = (
+                    prose_parent_ids[-1] if side == "before" else prose_parent_ids[0]
+                )
+                code_parent = parent_by_id.get(code_parent_id)
+                prose_parent = parent_by_id.get(prose_parent_id)
+                if not (
+                    code_parent
+                    and prose_parent
+                    and code_parent.children
+                    and prose_parent.children
+                ):
+                    continue
+                code_parent.metadata.setdefault("explains_links", []).append(
+                    {
+                        "relation": "EXPLAINS",
+                        "basis": "adjacency",
+                        "explains_chunk_id": prose_parent.children[0].chunk_id,
+                        "code_chunk_id": code_parent.children[0].chunk_id,
+                        "prose_parent_id": prose_parent_id,
+                        "code_parent_id": code_parent_id,
+                    }
+                )
+            # OUTPUT blocks adjacent to a CODE block carry that example's
+            # console run — tag them with the code chunk they belong to.
+            for idx, (_hp, _txt, block_kind, _lang, _meta) in enumerate(blocks):
+                if block_kind != ChunkKind.OUTPUT or idx == 0:
+                    continue
+                if blocks[idx - 1][2] != ChunkKind.CODE:
+                    continue
+                code_parent_id = code_first_parent.get(idx - 1)
+                code_parent = (
+                    parent_by_id.get(code_parent_id) if code_parent_id else None
+                )
+                if not (code_parent and code_parent.children):
+                    continue
+                for out_parent_id in body_parents_by_block.get(idx) or []:
+                    out_parent = parent_by_id.get(out_parent_id)
+                    if out_parent is not None:
+                        out_parent.metadata["output_of"] = (
+                            code_parent.children[0].chunk_id
+                        )
 
     else:  # tier_c — pure token budget over the docling text/markdown fallback
         # Scrub markup noise on the markdown blob before token-budget splitting.

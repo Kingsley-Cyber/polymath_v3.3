@@ -34,11 +34,12 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from motor.motor_asyncio import AsyncIOMotorClient
-from neo4j import AsyncGraphDatabase
-from qdrant_client import AsyncQdrantClient
 
 from config import get_settings
-from services.ingestion.graph_backfill import backfill_failed_graph_chunks
+from services.ingestion.graph_promotion_jobs import (
+    cli_operator_identity,
+    evaluate_cli_graph_write_gate,
+)
 
 log = logging.getLogger("polymath_failed_chunk_backfill")
 
@@ -63,24 +64,28 @@ def _mongo_db() -> tuple[AsyncIOMotorClient, Any]:
     return client, db
 
 
-def _qdrant_client() -> AsyncQdrantClient:
-    settings = get_settings()
-    return AsyncQdrantClient(
-        url=settings.QDRANT_URL,
-        timeout=settings.QDRANT_TIMEOUT_SECONDS,
-    )
+async def _write_service(db: Any) -> Any:
+    """The gated ingestion service singleton owns every graph write.
 
+    Operator scripts never import the low-level writers directly; writes go
+    through ``backfill_graph_failures``, which routes through the shared
+    canonical graph-write authorization seam. Outside the FastAPI lifespan
+    we drive the singleton's own connect() so client configuration cannot
+    drift from the service.
+    """
 
-def _neo4j_driver() -> Any:
-    settings = get_settings()
-    if not settings.NEO4J_ENABLED:
-        raise RuntimeError("NEO4J_ENABLED is false")
-    if not settings.NEO4J_PASSWORD:
-        raise RuntimeError("NEO4J_PASSWORD is not configured")
-    return AsyncGraphDatabase.driver(
-        settings.NEO4J_URI,
-        auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
-    )
+    import services.ingestion_service as isvc
+
+    service = isvc.ingestion_service
+    if service._db is None:
+        await service.connect(db)
+    if service._db is None:
+        raise RuntimeError("ingestion_service failed to connect")
+    if service._neo4j is None:
+        raise RuntimeError(
+            "Neo4j driver is not connected — NEO4J_ENABLED must be true to repair the graph"
+        )
+    return service
 
 
 async def _active_batches(db: Any) -> list[dict[str, Any]]:
@@ -257,9 +262,20 @@ async def _run(args: argparse.Namespace) -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # Deny-by-default release gate, evaluated BEFORE any client connection,
+    # state mutation, counter update, or Neo4j call. Authority resolves
+    # once per run through the shared authorization seam.
+    gate = evaluate_cli_graph_write_gate(
+        script_name="polymath_failed_chunk_backfill",
+        operator=cli_operator_identity(),
+    )
+    if gate["blocked"]:
+        # Release-policy block: not a graph failure. Exit with the frozen
+        # blocked_no_release payload and a distinct policy exit code.
+        print(json.dumps(gate["payload"], default=_json_default, indent=2))
+        return int(gate["exit_code"])
+
     mongo_client, db = _mongo_db()
-    qdrant = None
-    neo4j = None
     run_id = (
         args.run_id
         or f"failed_chunk_retry_{datetime.utcnow():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}"
@@ -286,6 +302,9 @@ async def _run(args: argparse.Namespace) -> int:
             "run_id": run_id,
             "apply": args.apply,
             "corpus_id": args.corpus_id,
+            "release_gate": gate["release_gate"],
+            "release_gate_caller": gate["script"],
+            "release_gate_operator": gate["operator"],
             "planned_docs": len(plan),
             "planned_failed_chunks": sum(
                 int(row.get("ghost_b_failure_count") or 0) for row in plan
@@ -303,7 +322,12 @@ async def _run(args: argparse.Namespace) -> int:
                 corpus_id=args.corpus_id,
                 plan=plan,
                 apply=False,
-                extra={"active_batches_at_plan": active},
+                extra={
+                    "active_batches_at_plan": active,
+                    "release_gate": gate["release_gate"],
+                    "release_gate_caller": gate["script"],
+                    "release_gate_operator": gate["operator"],
+                },
             )
             return 0
 
@@ -315,7 +339,10 @@ async def _run(args: argparse.Namespace) -> int:
                 corpus_id=args.corpus_id,
                 plan=[],
                 apply=True,
-                extra={"active_batches_at_start": active},
+                extra={
+                    "active_batches_at_start": active,
+                    "release_gate": gate["release_gate"],
+                },
             )
             return 0
 
@@ -326,10 +353,12 @@ async def _run(args: argparse.Namespace) -> int:
             corpus_id=args.corpus_id,
             plan=plan,
             apply=True,
-            extra={"active_batches_at_start": active},
+            extra={
+                "active_batches_at_start": active,
+                "release_gate": gate["release_gate"],
+            },
         )
-        qdrant = _qdrant_client()
-        neo4j = _neo4j_driver()
+        service = await _write_service(db)
 
         counts = {
             "planned": len(plan),
@@ -356,10 +385,7 @@ async def _run(args: argparse.Namespace) -> int:
                 db, run_id=run_id, counts=counts, current=current
             )
             try:
-                result = await backfill_failed_graph_chunks(
-                    db=db,
-                    qdrant_client=qdrant,
-                    neo4j_driver=neo4j,
+                result = await service.backfill_graph_failures(
                     corpus_id=args.corpus_id,
                     doc_id=row["doc_id"],
                     user_id=str(row.get("user_id") or ""),
@@ -412,10 +438,6 @@ async def _run(args: argparse.Namespace) -> int:
         print(json.dumps({"run_id": run_id, "status": final_status, "counts": counts}, indent=2))
         return 0 if counts["failed"] == 0 else 1
     finally:
-        if qdrant is not None:
-            await qdrant.close()
-        if neo4j is not None:
-            await neo4j.close()
         mongo_client.close()
 
 

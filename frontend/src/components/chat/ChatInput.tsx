@@ -15,6 +15,7 @@ import {
   Wrench,
   Sparkles,
   SlidersHorizontal,
+  Telescope,
 } from "lucide-react";
 import { ToggleBar } from "./ToggleBar";
 import { ModelSelector } from "./ModelSelector";
@@ -67,7 +68,11 @@ async function walkEntry(entry: FileSystemEntry, out: File[]): Promise<void> {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, attachments?: File[]) => void;
+  onSend: (
+    message: string,
+    attachments?: File[],
+    opts?: { research?: boolean },
+  ) => void;
   isLoading?: boolean;
   placeholder?: string;
   tokenCount?: { current: number; max: number };
@@ -112,6 +117,12 @@ export function ChatInput({
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
+  // Deep Research is a ONE-SHOT composer mode: arming it redirects the next
+  // submission to the durable research pipeline, then auto-disarms. It is
+  // intentionally local state (not settingsStore) so it never survives a
+  // reload or leaks into another conversation.
+  const [researchArmed, setResearchArmed] = useState(false);
+  const [researchWarning, setResearchWarning] = useState<string | null>(null);
 
   // Phase 29 — vision-model guardrail. If the user has attached at least
   // one image and the selected model can't process images, we surface a
@@ -262,6 +273,7 @@ export function ChatInput({
   ];
 
   const activeModeChips = [
+    researchArmed ? "Research" : null,
     hydeEnabled ? "HyDE" : null,
     reasoningCascadeEnabled ? "Reason" : null,
     webSearchEnabled ? "Web" : null,
@@ -317,8 +329,20 @@ export function ChatInput({
   const handleSubmit = useCallback(() => {
     if (!input.trim() && attachments.length === 0) return;
     if (isLoading) return;
-
-    onSend(input.trim(), attachments.length > 0 ? attachments : undefined);
+    // Deep Research is corpus-only in v1: staged attachments would be silently
+    // dropped, so block the turn and tell the user instead.
+    if (researchArmed && attachments.length > 0) {
+      setResearchWarning(
+        "Deep Research is corpus-only — remove attachments to research, or send them as a normal chat turn.",
+      );
+      return;
+    }
+    setResearchWarning(null);
+    onSend(input.trim(), attachments.length > 0 ? attachments : undefined, {
+      research: researchArmed,
+    });
+    // One-shot: disarm the moment the submission fires.
+    setResearchArmed(false);
     setInput("");
     setAttachments([]);
 
@@ -326,7 +350,7 @@ export function ChatInput({
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-  }, [input, attachments, isLoading, onSend]);
+  }, [input, attachments, isLoading, onSend, researchArmed]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     // Phase 24 — slash popover keyboard control. When the popover is open,
@@ -473,6 +497,60 @@ export function ChatInput({
                 {activeFeatureCount} active
               </span>
             </div>
+
+            {/* Core modes — one-shot submission redirects, distinct from the
+                persistent query enhancements in ToggleBar below. */}
+            <div className="mb-2 rounded-xl bg-black/15 p-2">
+              <div className="mb-1.5 px-1 text-[9px] font-bold uppercase tracking-[0.22em] text-content-tertiary">
+                Core Modes
+              </div>
+              <button
+                type="button"
+                data-testid="composer-research-toggle"
+                onClick={() => {
+                  setResearchArmed((armed) => !armed);
+                  setResearchWarning(null);
+                }}
+                aria-pressed={researchArmed}
+                className={`flex w-full items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left !transition-colors !duration-150 ${
+                  researchArmed
+                    ? "border-sky-400/40 bg-sky-400/10"
+                    : "border-white/10 bg-transparent hover:border-white/25"
+                }`}
+              >
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span
+                    className={`text-[11px] font-bold uppercase tracking-widest ${
+                      researchArmed ? "text-sky-200" : "text-content-primary"
+                    }`}
+                  >
+                    Deep Research
+                  </span>
+                  <span className="text-[10px] text-content-tertiary">
+                    Build a cited report from your corpus — next message only
+                  </span>
+                </span>
+                <span
+                  className={`flex h-5 w-9 shrink-0 items-center rounded-full border px-0.5 !transition-colors !duration-150 ${
+                    researchArmed
+                      ? "justify-end border-sky-400/50 bg-sky-400/30"
+                      : "justify-start border-white/20 bg-black/30"
+                  }`}
+                >
+                  <span
+                    className={`h-3.5 w-3.5 rounded-full !transition-colors !duration-150 ${
+                      researchArmed ? "bg-sky-300" : "bg-content-tertiary"
+                    }`}
+                  />
+                </span>
+              </button>
+              {researchArmed && (
+                <div className="mt-1.5 px-1 text-[9px] font-bold uppercase tracking-widest text-sky-300">
+                  Armed — next message becomes a research job
+                </div>
+              )}
+            </div>
+
             <ToggleBar className="rounded-xl bg-black/15 p-2" />
           </div>
         )}
@@ -514,6 +592,23 @@ export function ChatInput({
               <p className="text-[10px] font-bold tracking-widest text-accent-main uppercase">
                 [ INJECT_CONTEXT_FILES ]
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Deep Research armed warning — e.g. attachments staged while
+            the one-shot research mode is active. Rendered alongside the
+            vision-mismatch warning so the user sees the block reason. */}
+        {researchWarning && (
+          <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2 rounded-none border border-sky-700/50 bg-sky-900/15 text-sky-300">
+            <StatusTag tag="WRN" tone="wrn" />
+            <div className="text-[10px] font-mono tracking-wider leading-snug">
+              <div className="font-bold uppercase mb-0.5">
+                Deep Research
+              </div>
+              <div className="normal-case font-normal text-sky-200/80">
+                {researchWarning}
+              </div>
             </div>
           </div>
         )}
@@ -686,7 +781,11 @@ export function ChatInput({
                 setInput(e.target.value)
               }
               onKeyDown={handleKeyDown}
-              placeholder={placeholder}
+              placeholder={
+                researchArmed
+                  ? "Describe your research question..."
+                  : placeholder
+              }
               disabled={isLoading}
               rows={1}
               className="
@@ -730,12 +829,23 @@ export function ChatInput({
                 }
                 disabled:opacity-50 disabled:cursor-not-allowed
               `}
-              title={hasContent ? "Execute Query" : "Awaiting Input..."}
+              title={
+                researchArmed
+                  ? "Launch Deep Research job"
+                  : hasContent
+                    ? "Execute Query"
+                    : "Awaiting Input..."
+              }
             >
               {isLoading ? (
                 <>
                   <StatusTag tag="GEN" tone="gen" />
                   <span className="hidden sm:inline">PROCESS...</span>
+                </>
+              ) : researchArmed ? (
+                <>
+                  <Telescope className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">RESEARCH</span>
                 </>
               ) : (
                 <>

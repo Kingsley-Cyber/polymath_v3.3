@@ -7,7 +7,8 @@ services:
     command: ["mongod", "--wiredTigerCacheSizeGB", "1.5"]
 
   qdrant:
-    mem_limit: 4g
+    # q9 10-file pressure (books) needs headroom; host is 32GB (step 10 baseline).
+    mem_limit: ${QDRANT_MEM_LIMIT:-8g}
 
   neo4j:
     mem_limit: 3g

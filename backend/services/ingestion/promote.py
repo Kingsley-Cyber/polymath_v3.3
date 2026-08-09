@@ -14,6 +14,7 @@ from typing import Any, Callable
 import unicodedata
 
 from models.claim_record import ClaimArgumentV1, ClaimRecordV1
+from models.release_stamp import copy_stamp
 from pydantic import ValidationError
 from services.graph.neo4j_writer import (
     GRAPH_WRITE_ROW_BATCH_SIZE,
@@ -99,7 +100,7 @@ def promote(
                 related.add(eid(object_name))
     related.discard("")
 
-    return {
+    payload = {
         "concepts": sorted(concepts),
         "entity_ids": sorted(entity_ids),
         "entity_families": sorted(families),
@@ -132,6 +133,14 @@ def promote(
         ),
         "promote_version": PROMOTE_VERSION,
     }
+    # Step 3 — propagate the extraction's release stamp verbatim onto the
+    # promoted payload (Qdrant + Mongo mirror). Copied WITHOUT
+    # reinterpretation; historical rows without a stamp contribute no key
+    # (unknown stays unknown). Descriptive only — nothing gates on it.
+    stamp = copy_stamp(extraction.get("release_stamp"))
+    if stamp is not None:
+        payload["release_stamp"] = stamp
+    return payload
 
 
 def promoted_index_fields() -> list[tuple[str, str]]:
@@ -435,6 +444,8 @@ async def _write_edge_rows(
                 r.eligible_for_synthesis = coalesce(r.eligible_for_synthesis, true),
                 r.promoted_by = 'claim_record.v1',
                 r.promote_version = row.promote_version,
+                r.projection_kind = 'claim_promoted',
+                r.authority = 'canonical_candidate',
                 r.extract_schema_version = coalesce(
                     r.extract_schema_version,
                     row.schema_version
@@ -760,3 +771,120 @@ async def promote_claims_to_graph(
             _skip(total, reason, int(count or 0))
     total["status"] = "done" if total["docs"] else "noop"
     return total
+
+
+# ── promote_doc: at-ingest writer (Gap 2 fix) ─────────────────────────────
+import logging  # noqa: E402
+
+_promote_logger = logging.getLogger(__name__)
+
+# Per-corpus index-creation cache so we don't re-issue idempotent index
+# commands on every document ingest.
+_indexes_created_for: set[str] = set()
+
+
+def _graph_entity_id_fn(name: str) -> str:
+    """Resolve entity_id using the Neo4j writer's canonical function."""
+    try:
+        return entity_id_from_name(name)
+    except Exception:
+        return _default_entity_id(name)
+
+
+async def promote_doc(
+    db: Any,
+    *,
+    corpus_id: str,
+    doc_id: str,
+) -> dict[str, Any]:
+    """Promote extraction metadata onto Qdrant child payloads for one document.
+
+    Called at ingest time (worker.py) after Qdrant upserts complete. Reads
+    ghost_b_extractions for the document, computes the payload delta via
+    promote(), and writes it to Qdrant + Mongo. Purely additive; never
+    deletes or replaces existing payload keys.
+
+    Returns a receipt dict: {status, promoted, skipped, collections}.
+    """
+    from qdrant_client import AsyncQdrantClient
+    from qdrant_client import models as qm
+
+    from config import get_settings
+    from services.storage import qdrant_writer as qw
+
+    settings = get_settings()
+
+    # 1) Read extraction rows for this document.
+    rows = await db["ghost_b_extractions"].find(
+        {"corpus_id": corpus_id, "doc_id": doc_id, "status": "ok"}
+    ).to_list(length=None)
+    if not rows:
+        return {"status": "no_extractions", "promoted": 0, "skipped": 0, "collections": []}
+
+    # 2) Resolve Qdrant collections for this corpus.
+    client = AsyncQdrantClient(url=settings.QDRANT_URL, timeout=30)
+    cols: list[str] = []
+    try:
+        for kind in ("naive", "hrag", "graph"):
+            name = qw._col_for_corpus(corpus_id, kind)
+            if await client.collection_exists(name):
+                cols.append(name)
+    except Exception as exc:
+        _promote_logger.warning("promote_doc: collection lookup failed corpus=%s: %s", corpus_id[:8], exc)
+        return {"status": "collection_error", "promoted": 0, "skipped": 0, "collections": []}
+
+    if not cols:
+        return {"status": "no_collections", "promoted": 0, "skipped": 0, "collections": []}
+
+    # 3) Ensure payload indexes exist (idempotent, cached per corpus).
+    if corpus_id not in _indexes_created_for:
+        for col in cols:
+            for field, ftype in promoted_index_fields():
+                try:
+                    await client.create_payload_index(
+                        collection_name=col,
+                        field_name=field,
+                        field_schema={
+                            "keyword": qm.PayloadSchemaType.KEYWORD,
+                            "bool": qm.PayloadSchemaType.BOOL,
+                            "integer": qm.PayloadSchemaType.INTEGER,
+                        }[ftype],
+                    )
+                except Exception:
+                    pass  # already exists
+        _indexes_created_for.add(corpus_id)
+
+    # 4) Promote each extraction row.
+    promoted_count = 0
+    skipped_count = 0
+    for row in rows:
+        chunk_id = str(row.get("chunk_id") or "")
+        if not chunk_id:
+            skipped_count += 1
+            continue
+        delta = promote(row, entity_id_fn=_graph_entity_id_fn)
+        pid = qw._uuid_from_str(chunk_id)
+        # Write to Qdrant (best-effort per collection).
+        for col in cols:
+            try:
+                await client.set_payload(
+                    collection_name=col, payload=delta, points=[pid]
+                )
+            except Exception:
+                pass  # point may not exist in this collection kind
+        # Mirror onto Mongo child record.
+        try:
+            await db["chunks"].update_one(
+                {"corpus_id": corpus_id, "chunk_id": chunk_id}, {"$set": delta}
+            )
+        except Exception as exc:
+            _promote_logger.debug("promote_doc: mongo mirror failed chunk=%s: %s", chunk_id[:12], exc)
+        promoted_count += 1
+
+    await client.close()
+    return {
+        "status": "ok",
+        "promoted": promoted_count,
+        "skipped": skipped_count,
+        "collections": cols,
+    }

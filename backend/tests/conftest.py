@@ -3,7 +3,20 @@ Registers the `integration` marker and auto-skips integration tests unless
 the user opts in with `pytest -m integration`.
 """
 
+import os
+from pathlib import Path
+
 import pytest
+
+# Load the repo-root .env BEFORE any Settings import.  config.py uses
+# env_file="../.env" (relative to CWD), which only resolves when pytest is
+# invoked from backend/.  Loading explicitly makes the suite CWD-independent.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_REPO_ROOT / ".env", override=False)
+except ImportError:
+    pass  # dotenv not installed; rely on ambient env vars
 
 
 def pytest_configure(config: pytest.Config) -> None:

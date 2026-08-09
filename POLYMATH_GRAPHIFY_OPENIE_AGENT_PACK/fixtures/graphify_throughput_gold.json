@@ -1,0 +1,1498 @@
+{
+  "entities": [
+    {
+      "end": 10,
+      "id": "t-ent:181",
+      "label": "Process",
+      "start": 2,
+      "text": "Graphify"
+    },
+    {
+      "end": 52,
+      "id": "t-ent:182",
+      "label": "Process",
+      "start": 44,
+      "text": "Graphify"
+    },
+    {
+      "end": 162,
+      "id": "t-ent:1",
+      "label": "Software",
+      "start": 155,
+      "text": "MongoDB"
+    },
+    {
+      "end": 202,
+      "id": "t-ent:31",
+      "label": "Service",
+      "start": 196,
+      "text": "Qdrant"
+    },
+    {
+      "end": 231,
+      "id": "t-ent:61",
+      "label": "Software",
+      "start": 226,
+      "text": "Neo4j"
+    },
+    {
+      "end": 269,
+      "id": "t-ent:91",
+      "label": "Software",
+      "start": 262,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 309,
+      "id": "t-ent:121",
+      "label": "Library",
+      "start": 294,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 356,
+      "id": "t-ent:151",
+      "label": "Process",
+      "start": 338,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 452,
+      "id": "t-ent:183",
+      "label": "Process",
+      "start": 444,
+      "text": "Graphify"
+    },
+    {
+      "end": 495,
+      "id": "t-ent:184",
+      "label": "Process",
+      "start": 487,
+      "text": "Graphify"
+    },
+    {
+      "end": 605,
+      "id": "t-ent:2",
+      "label": "Software",
+      "start": 598,
+      "text": "MongoDB"
+    },
+    {
+      "end": 645,
+      "id": "t-ent:32",
+      "label": "Service",
+      "start": 639,
+      "text": "Qdrant"
+    },
+    {
+      "end": 674,
+      "id": "t-ent:62",
+      "label": "Software",
+      "start": 669,
+      "text": "Neo4j"
+    },
+    {
+      "end": 712,
+      "id": "t-ent:92",
+      "label": "Software",
+      "start": 705,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 752,
+      "id": "t-ent:122",
+      "label": "Library",
+      "start": 737,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 799,
+      "id": "t-ent:152",
+      "label": "Process",
+      "start": 781,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 895,
+      "id": "t-ent:185",
+      "label": "Process",
+      "start": 887,
+      "text": "Graphify"
+    },
+    {
+      "end": 938,
+      "id": "t-ent:186",
+      "label": "Process",
+      "start": 930,
+      "text": "Graphify"
+    },
+    {
+      "end": 1048,
+      "id": "t-ent:3",
+      "label": "Software",
+      "start": 1041,
+      "text": "MongoDB"
+    },
+    {
+      "end": 1088,
+      "id": "t-ent:33",
+      "label": "Service",
+      "start": 1082,
+      "text": "Qdrant"
+    },
+    {
+      "end": 1117,
+      "id": "t-ent:63",
+      "label": "Software",
+      "start": 1112,
+      "text": "Neo4j"
+    },
+    {
+      "end": 1155,
+      "id": "t-ent:93",
+      "label": "Software",
+      "start": 1148,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 1195,
+      "id": "t-ent:123",
+      "label": "Library",
+      "start": 1180,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 1242,
+      "id": "t-ent:153",
+      "label": "Process",
+      "start": 1224,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 1338,
+      "id": "t-ent:187",
+      "label": "Process",
+      "start": 1330,
+      "text": "Graphify"
+    },
+    {
+      "end": 1381,
+      "id": "t-ent:188",
+      "label": "Process",
+      "start": 1373,
+      "text": "Graphify"
+    },
+    {
+      "end": 1491,
+      "id": "t-ent:4",
+      "label": "Software",
+      "start": 1484,
+      "text": "MongoDB"
+    },
+    {
+      "end": 1531,
+      "id": "t-ent:34",
+      "label": "Service",
+      "start": 1525,
+      "text": "Qdrant"
+    },
+    {
+      "end": 1560,
+      "id": "t-ent:64",
+      "label": "Software",
+      "start": 1555,
+      "text": "Neo4j"
+    },
+    {
+      "end": 1598,
+      "id": "t-ent:94",
+      "label": "Software",
+      "start": 1591,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 1638,
+      "id": "t-ent:124",
+      "label": "Library",
+      "start": 1623,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 1685,
+      "id": "t-ent:154",
+      "label": "Process",
+      "start": 1667,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 1781,
+      "id": "t-ent:189",
+      "label": "Process",
+      "start": 1773,
+      "text": "Graphify"
+    },
+    {
+      "end": 1824,
+      "id": "t-ent:190",
+      "label": "Process",
+      "start": 1816,
+      "text": "Graphify"
+    },
+    {
+      "end": 1934,
+      "id": "t-ent:5",
+      "label": "Software",
+      "start": 1927,
+      "text": "MongoDB"
+    },
+    {
+      "end": 1974,
+      "id": "t-ent:35",
+      "label": "Service",
+      "start": 1968,
+      "text": "Qdrant"
+    },
+    {
+      "end": 2003,
+      "id": "t-ent:65",
+      "label": "Software",
+      "start": 1998,
+      "text": "Neo4j"
+    },
+    {
+      "end": 2041,
+      "id": "t-ent:95",
+      "label": "Software",
+      "start": 2034,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 2081,
+      "id": "t-ent:125",
+      "label": "Library",
+      "start": 2066,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 2128,
+      "id": "t-ent:155",
+      "label": "Process",
+      "start": 2110,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 2224,
+      "id": "t-ent:191",
+      "label": "Process",
+      "start": 2216,
+      "text": "Graphify"
+    },
+    {
+      "end": 2283,
+      "id": "t-ent:6",
+      "label": "Software",
+      "start": 2276,
+      "text": "MongoDB"
+    },
+    {
+      "end": 2305,
+      "id": "t-ent:66",
+      "label": "Software",
+      "start": 2300,
+      "text": "Neo4j"
+    },
+    {
+      "end": 2343,
+      "id": "t-ent:192",
+      "label": "Process",
+      "start": 2335,
+      "text": "Graphify"
+    },
+    {
+      "end": 2453,
+      "id": "t-ent:7",
+      "label": "Software",
+      "start": 2446,
+      "text": "MongoDB"
+    },
+    {
+      "end": 2493,
+      "id": "t-ent:36",
+      "label": "Service",
+      "start": 2487,
+      "text": "Qdrant"
+    },
+    {
+      "end": 2522,
+      "id": "t-ent:67",
+      "label": "Software",
+      "start": 2517,
+      "text": "Neo4j"
+    },
+    {
+      "end": 2560,
+      "id": "t-ent:96",
+      "label": "Software",
+      "start": 2553,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 2600,
+      "id": "t-ent:126",
+      "label": "Library",
+      "start": 2585,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 2647,
+      "id": "t-ent:156",
+      "label": "Process",
+      "start": 2629,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 2743,
+      "id": "t-ent:193",
+      "label": "Process",
+      "start": 2735,
+      "text": "Graphify"
+    },
+    {
+      "end": 2786,
+      "id": "t-ent:194",
+      "label": "Process",
+      "start": 2778,
+      "text": "Graphify"
+    },
+    {
+      "end": 2896,
+      "id": "t-ent:8",
+      "label": "Software",
+      "start": 2889,
+      "text": "MongoDB"
+    },
+    {
+      "end": 2936,
+      "id": "t-ent:37",
+      "label": "Service",
+      "start": 2930,
+      "text": "Qdrant"
+    },
+    {
+      "end": 2965,
+      "id": "t-ent:68",
+      "label": "Software",
+      "start": 2960,
+      "text": "Neo4j"
+    },
+    {
+      "end": 3003,
+      "id": "t-ent:97",
+      "label": "Software",
+      "start": 2996,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 3043,
+      "id": "t-ent:127",
+      "label": "Library",
+      "start": 3028,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 3090,
+      "id": "t-ent:157",
+      "label": "Process",
+      "start": 3072,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 3186,
+      "id": "t-ent:195",
+      "label": "Process",
+      "start": 3178,
+      "text": "Graphify"
+    },
+    {
+      "end": 3345,
+      "id": "t-ent:196",
+      "label": "Process",
+      "start": 3337,
+      "text": "Graphify"
+    },
+    {
+      "end": 3455,
+      "id": "t-ent:9",
+      "label": "Software",
+      "start": 3448,
+      "text": "MongoDB"
+    },
+    {
+      "end": 3495,
+      "id": "t-ent:38",
+      "label": "Service",
+      "start": 3489,
+      "text": "Qdrant"
+    },
+    {
+      "end": 3524,
+      "id": "t-ent:69",
+      "label": "Software",
+      "start": 3519,
+      "text": "Neo4j"
+    },
+    {
+      "end": 3562,
+      "id": "t-ent:98",
+      "label": "Software",
+      "start": 3555,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 3602,
+      "id": "t-ent:128",
+      "label": "Library",
+      "start": 3587,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 3649,
+      "id": "t-ent:158",
+      "label": "Process",
+      "start": 3631,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 3745,
+      "id": "t-ent:197",
+      "label": "Process",
+      "start": 3737,
+      "text": "Graphify"
+    },
+    {
+      "end": 3788,
+      "id": "t-ent:198",
+      "label": "Process",
+      "start": 3780,
+      "text": "Graphify"
+    },
+    {
+      "end": 3898,
+      "id": "t-ent:10",
+      "label": "Software",
+      "start": 3891,
+      "text": "MongoDB"
+    },
+    {
+      "end": 3938,
+      "id": "t-ent:39",
+      "label": "Service",
+      "start": 3932,
+      "text": "Qdrant"
+    },
+    {
+      "end": 3967,
+      "id": "t-ent:70",
+      "label": "Software",
+      "start": 3962,
+      "text": "Neo4j"
+    },
+    {
+      "end": 4005,
+      "id": "t-ent:99",
+      "label": "Software",
+      "start": 3998,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 4045,
+      "id": "t-ent:129",
+      "label": "Library",
+      "start": 4030,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 4092,
+      "id": "t-ent:159",
+      "label": "Process",
+      "start": 4074,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 4188,
+      "id": "t-ent:199",
+      "label": "Process",
+      "start": 4180,
+      "text": "Graphify"
+    },
+    {
+      "end": 4232,
+      "id": "t-ent:200",
+      "label": "Process",
+      "start": 4224,
+      "text": "Graphify"
+    },
+    {
+      "end": 4343,
+      "id": "t-ent:11",
+      "label": "Software",
+      "start": 4336,
+      "text": "MongoDB"
+    },
+    {
+      "end": 4383,
+      "id": "t-ent:40",
+      "label": "Service",
+      "start": 4377,
+      "text": "Qdrant"
+    },
+    {
+      "end": 4412,
+      "id": "t-ent:71",
+      "label": "Software",
+      "start": 4407,
+      "text": "Neo4j"
+    },
+    {
+      "end": 4450,
+      "id": "t-ent:100",
+      "label": "Software",
+      "start": 4443,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 4490,
+      "id": "t-ent:130",
+      "label": "Library",
+      "start": 4475,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 4537,
+      "id": "t-ent:160",
+      "label": "Process",
+      "start": 4519,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 4634,
+      "id": "t-ent:201",
+      "label": "Process",
+      "start": 4626,
+      "text": "Graphify"
+    },
+    {
+      "end": 4693,
+      "id": "t-ent:12",
+      "label": "Software",
+      "start": 4686,
+      "text": "MongoDB"
+    },
+    {
+      "end": 4715,
+      "id": "t-ent:72",
+      "label": "Software",
+      "start": 4710,
+      "text": "Neo4j"
+    },
+    {
+      "end": 4853,
+      "id": "t-ent:202",
+      "label": "Process",
+      "start": 4845,
+      "text": "Graphify"
+    },
+    {
+      "end": 4964,
+      "id": "t-ent:13",
+      "label": "Software",
+      "start": 4957,
+      "text": "MongoDB"
+    },
+    {
+      "end": 5004,
+      "id": "t-ent:41",
+      "label": "Service",
+      "start": 4998,
+      "text": "Qdrant"
+    },
+    {
+      "end": 5033,
+      "id": "t-ent:73",
+      "label": "Software",
+      "start": 5028,
+      "text": "Neo4j"
+    },
+    {
+      "end": 5071,
+      "id": "t-ent:101",
+      "label": "Software",
+      "start": 5064,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 5111,
+      "id": "t-ent:131",
+      "label": "Library",
+      "start": 5096,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 5158,
+      "id": "t-ent:161",
+      "label": "Process",
+      "start": 5140,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 5255,
+      "id": "t-ent:203",
+      "label": "Process",
+      "start": 5247,
+      "text": "Graphify"
+    },
+    {
+      "end": 5299,
+      "id": "t-ent:204",
+      "label": "Process",
+      "start": 5291,
+      "text": "Graphify"
+    },
+    {
+      "end": 5410,
+      "id": "t-ent:14",
+      "label": "Software",
+      "start": 5403,
+      "text": "MongoDB"
+    },
+    {
+      "end": 5450,
+      "id": "t-ent:42",
+      "label": "Service",
+      "start": 5444,
+      "text": "Qdrant"
+    },
+    {
+      "end": 5479,
+      "id": "t-ent:74",
+      "label": "Software",
+      "start": 5474,
+      "text": "Neo4j"
+    },
+    {
+      "end": 5517,
+      "id": "t-ent:102",
+      "label": "Software",
+      "start": 5510,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 5557,
+      "id": "t-ent:132",
+      "label": "Library",
+      "start": 5542,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 5604,
+      "id": "t-ent:162",
+      "label": "Process",
+      "start": 5586,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 5701,
+      "id": "t-ent:205",
+      "label": "Process",
+      "start": 5693,
+      "text": "Graphify"
+    },
+    {
+      "end": 5745,
+      "id": "t-ent:206",
+      "label": "Process",
+      "start": 5737,
+      "text": "Graphify"
+    },
+    {
+      "end": 5856,
+      "id": "t-ent:15",
+      "label": "Software",
+      "start": 5849,
+      "text": "MongoDB"
+    },
+    {
+      "end": 5896,
+      "id": "t-ent:43",
+      "label": "Service",
+      "start": 5890,
+      "text": "Qdrant"
+    },
+    {
+      "end": 5925,
+      "id": "t-ent:75",
+      "label": "Software",
+      "start": 5920,
+      "text": "Neo4j"
+    },
+    {
+      "end": 5963,
+      "id": "t-ent:103",
+      "label": "Software",
+      "start": 5956,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 6003,
+      "id": "t-ent:133",
+      "label": "Library",
+      "start": 5988,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 6050,
+      "id": "t-ent:163",
+      "label": "Process",
+      "start": 6032,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 6147,
+      "id": "t-ent:207",
+      "label": "Process",
+      "start": 6139,
+      "text": "Graphify"
+    },
+    {
+      "end": 6176,
+      "id": "t-ent:16",
+      "label": "Software",
+      "start": 6169,
+      "text": "MongoDB"
+    },
+    {
+      "end": 6184,
+      "id": "t-ent:44",
+      "label": "Service",
+      "start": 6178,
+      "text": "Qdrant"
+    },
+    {
+      "end": 6191,
+      "id": "t-ent:76",
+      "label": "Software",
+      "start": 6186,
+      "text": "Neo4j"
+    },
+    {
+      "end": 6200,
+      "id": "t-ent:104",
+      "label": "Software",
+      "start": 6193,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 6217,
+      "id": "t-ent:134",
+      "label": "Library",
+      "start": 6202,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 6250,
+      "id": "t-ent:208",
+      "label": "Process",
+      "start": 6242,
+      "text": "Graphify"
+    },
+    {
+      "end": 6274,
+      "id": "t-ent:164",
+      "label": "Process",
+      "start": 6256,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 6500,
+      "id": "t-ent:209",
+      "label": "Process",
+      "start": 6492,
+      "text": "Graphify"
+    },
+    {
+      "end": 6611,
+      "id": "t-ent:17",
+      "label": "Software",
+      "start": 6604,
+      "text": "MongoDB"
+    },
+    {
+      "end": 6651,
+      "id": "t-ent:45",
+      "label": "Service",
+      "start": 6645,
+      "text": "Qdrant"
+    },
+    {
+      "end": 6680,
+      "id": "t-ent:77",
+      "label": "Software",
+      "start": 6675,
+      "text": "Neo4j"
+    },
+    {
+      "end": 6718,
+      "id": "t-ent:105",
+      "label": "Software",
+      "start": 6711,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 6758,
+      "id": "t-ent:135",
+      "label": "Library",
+      "start": 6743,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 6805,
+      "id": "t-ent:165",
+      "label": "Process",
+      "start": 6787,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 6902,
+      "id": "t-ent:210",
+      "label": "Process",
+      "start": 6894,
+      "text": "Graphify"
+    },
+    {
+      "end": 7173,
+      "id": "t-ent:18",
+      "label": "Software",
+      "start": 7166,
+      "text": "MongoDB"
+    },
+    {
+      "end": 7213,
+      "id": "t-ent:46",
+      "label": "Service",
+      "start": 7207,
+      "text": "Qdrant"
+    },
+    {
+      "end": 7242,
+      "id": "t-ent:78",
+      "label": "Software",
+      "start": 7237,
+      "text": "Neo4j"
+    },
+    {
+      "end": 7280,
+      "id": "t-ent:106",
+      "label": "Software",
+      "start": 7273,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 7320,
+      "id": "t-ent:136",
+      "label": "Library",
+      "start": 7305,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 7367,
+      "id": "t-ent:166",
+      "label": "Process",
+      "start": 7349,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 7523,
+      "id": "t-ent:19",
+      "label": "Software",
+      "start": 7516,
+      "text": "MongoDB"
+    },
+    {
+      "end": 7545,
+      "id": "t-ent:79",
+      "label": "Software",
+      "start": 7540,
+      "text": "Neo4j"
+    },
+    {
+      "end": 7695,
+      "id": "t-ent:20",
+      "label": "Software",
+      "start": 7688,
+      "text": "MongoDB"
+    },
+    {
+      "end": 7735,
+      "id": "t-ent:47",
+      "label": "Service",
+      "start": 7729,
+      "text": "Qdrant"
+    },
+    {
+      "end": 7764,
+      "id": "t-ent:80",
+      "label": "Software",
+      "start": 7759,
+      "text": "Neo4j"
+    },
+    {
+      "end": 7802,
+      "id": "t-ent:107",
+      "label": "Software",
+      "start": 7795,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 7842,
+      "id": "t-ent:137",
+      "label": "Library",
+      "start": 7827,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 7889,
+      "id": "t-ent:167",
+      "label": "Process",
+      "start": 7871,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 8141,
+      "id": "t-ent:21",
+      "label": "Software",
+      "start": 8134,
+      "text": "MongoDB"
+    },
+    {
+      "end": 8181,
+      "id": "t-ent:48",
+      "label": "Service",
+      "start": 8175,
+      "text": "Qdrant"
+    },
+    {
+      "end": 8210,
+      "id": "t-ent:81",
+      "label": "Software",
+      "start": 8205,
+      "text": "Neo4j"
+    },
+    {
+      "end": 8248,
+      "id": "t-ent:108",
+      "label": "Software",
+      "start": 8241,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 8288,
+      "id": "t-ent:138",
+      "label": "Library",
+      "start": 8273,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 8335,
+      "id": "t-ent:168",
+      "label": "Process",
+      "start": 8317,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 8587,
+      "id": "t-ent:22",
+      "label": "Software",
+      "start": 8580,
+      "text": "MongoDB"
+    },
+    {
+      "end": 8627,
+      "id": "t-ent:49",
+      "label": "Service",
+      "start": 8621,
+      "text": "Qdrant"
+    },
+    {
+      "end": 8656,
+      "id": "t-ent:82",
+      "label": "Software",
+      "start": 8651,
+      "text": "Neo4j"
+    },
+    {
+      "end": 8694,
+      "id": "t-ent:109",
+      "label": "Software",
+      "start": 8687,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 8734,
+      "id": "t-ent:139",
+      "label": "Library",
+      "start": 8719,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 8781,
+      "id": "t-ent:169",
+      "label": "Process",
+      "start": 8763,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 9033,
+      "id": "t-ent:23",
+      "label": "Software",
+      "start": 9026,
+      "text": "MongoDB"
+    },
+    {
+      "end": 9073,
+      "id": "t-ent:50",
+      "label": "Service",
+      "start": 9067,
+      "text": "Qdrant"
+    },
+    {
+      "end": 9102,
+      "id": "t-ent:83",
+      "label": "Software",
+      "start": 9097,
+      "text": "Neo4j"
+    },
+    {
+      "end": 9140,
+      "id": "t-ent:110",
+      "label": "Software",
+      "start": 9133,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 9180,
+      "id": "t-ent:140",
+      "label": "Library",
+      "start": 9165,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 9227,
+      "id": "t-ent:170",
+      "label": "Process",
+      "start": 9209,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 9479,
+      "id": "t-ent:24",
+      "label": "Software",
+      "start": 9472,
+      "text": "MongoDB"
+    },
+    {
+      "end": 9519,
+      "id": "t-ent:51",
+      "label": "Service",
+      "start": 9513,
+      "text": "Qdrant"
+    },
+    {
+      "end": 9548,
+      "id": "t-ent:84",
+      "label": "Software",
+      "start": 9543,
+      "text": "Neo4j"
+    },
+    {
+      "end": 9586,
+      "id": "t-ent:111",
+      "label": "Software",
+      "start": 9579,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 9626,
+      "id": "t-ent:141",
+      "label": "Library",
+      "start": 9611,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 9673,
+      "id": "t-ent:171",
+      "label": "Process",
+      "start": 9655,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 9829,
+      "id": "t-ent:25",
+      "label": "Software",
+      "start": 9822,
+      "text": "MongoDB"
+    },
+    {
+      "end": 9851,
+      "id": "t-ent:85",
+      "label": "Software",
+      "start": 9846,
+      "text": "Neo4j"
+    },
+    {
+      "end": 10100,
+      "id": "t-ent:26",
+      "label": "Software",
+      "start": 10093,
+      "text": "MongoDB"
+    },
+    {
+      "end": 10140,
+      "id": "t-ent:52",
+      "label": "Service",
+      "start": 10134,
+      "text": "Qdrant"
+    },
+    {
+      "end": 10169,
+      "id": "t-ent:86",
+      "label": "Software",
+      "start": 10164,
+      "text": "Neo4j"
+    },
+    {
+      "end": 10207,
+      "id": "t-ent:112",
+      "label": "Software",
+      "start": 10200,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 10247,
+      "id": "t-ent:142",
+      "label": "Library",
+      "start": 10232,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 10294,
+      "id": "t-ent:172",
+      "label": "Process",
+      "start": 10276,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 10662,
+      "id": "t-ent:27",
+      "label": "Software",
+      "start": 10655,
+      "text": "MongoDB"
+    },
+    {
+      "end": 10702,
+      "id": "t-ent:53",
+      "label": "Service",
+      "start": 10696,
+      "text": "Qdrant"
+    },
+    {
+      "end": 10731,
+      "id": "t-ent:87",
+      "label": "Software",
+      "start": 10726,
+      "text": "Neo4j"
+    },
+    {
+      "end": 10769,
+      "id": "t-ent:113",
+      "label": "Software",
+      "start": 10762,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 10809,
+      "id": "t-ent:143",
+      "label": "Library",
+      "start": 10794,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 10856,
+      "id": "t-ent:173",
+      "label": "Process",
+      "start": 10838,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 11108,
+      "id": "t-ent:28",
+      "label": "Software",
+      "start": 11101,
+      "text": "MongoDB"
+    },
+    {
+      "end": 11148,
+      "id": "t-ent:54",
+      "label": "Service",
+      "start": 11142,
+      "text": "Qdrant"
+    },
+    {
+      "end": 11177,
+      "id": "t-ent:88",
+      "label": "Software",
+      "start": 11172,
+      "text": "Neo4j"
+    },
+    {
+      "end": 11215,
+      "id": "t-ent:114",
+      "label": "Software",
+      "start": 11208,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 11255,
+      "id": "t-ent:144",
+      "label": "Library",
+      "start": 11240,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 11302,
+      "id": "t-ent:174",
+      "label": "Process",
+      "start": 11284,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 11554,
+      "id": "t-ent:29",
+      "label": "Software",
+      "start": 11547,
+      "text": "MongoDB"
+    },
+    {
+      "end": 11594,
+      "id": "t-ent:55",
+      "label": "Service",
+      "start": 11588,
+      "text": "Qdrant"
+    },
+    {
+      "end": 11623,
+      "id": "t-ent:89",
+      "label": "Software",
+      "start": 11618,
+      "text": "Neo4j"
+    },
+    {
+      "end": 11661,
+      "id": "t-ent:115",
+      "label": "Software",
+      "start": 11654,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 11701,
+      "id": "t-ent:145",
+      "label": "Library",
+      "start": 11686,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 11748,
+      "id": "t-ent:175",
+      "label": "Process",
+      "start": 11730,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 12000,
+      "id": "t-ent:30",
+      "label": "Software",
+      "start": 11993,
+      "text": "MongoDB"
+    },
+    {
+      "end": 12040,
+      "id": "t-ent:56",
+      "label": "Service",
+      "start": 12034,
+      "text": "Qdrant"
+    },
+    {
+      "end": 12069,
+      "id": "t-ent:90",
+      "label": "Software",
+      "start": 12064,
+      "text": "Neo4j"
+    },
+    {
+      "end": 12107,
+      "id": "t-ent:116",
+      "label": "Software",
+      "start": 12100,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 12147,
+      "id": "t-ent:146",
+      "label": "Library",
+      "start": 12132,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 12194,
+      "id": "t-ent:176",
+      "label": "Process",
+      "start": 12176,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 12562,
+      "id": "t-ent:57",
+      "label": "Service",
+      "start": 12556,
+      "text": "Qdrant"
+    },
+    {
+      "end": 12629,
+      "id": "t-ent:117",
+      "label": "Software",
+      "start": 12622,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 12669,
+      "id": "t-ent:147",
+      "label": "Library",
+      "start": 12654,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 12716,
+      "id": "t-ent:177",
+      "label": "Process",
+      "start": 12698,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 12850,
+      "id": "t-ent:58",
+      "label": "Service",
+      "start": 12844,
+      "text": "Qdrant"
+    },
+    {
+      "end": 12866,
+      "id": "t-ent:118",
+      "label": "Software",
+      "start": 12859,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 12883,
+      "id": "t-ent:148",
+      "label": "Library",
+      "start": 12868,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 12940,
+      "id": "t-ent:178",
+      "label": "Process",
+      "start": 12922,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 13317,
+      "id": "t-ent:59",
+      "label": "Service",
+      "start": 13311,
+      "text": "Qdrant"
+    },
+    {
+      "end": 13384,
+      "id": "t-ent:119",
+      "label": "Software",
+      "start": 13377,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 13424,
+      "id": "t-ent:149",
+      "label": "Library",
+      "start": 13409,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 13471,
+      "id": "t-ent:179",
+      "label": "Process",
+      "start": 13453,
+      "text": "Predicate Compiler"
+    },
+    {
+      "end": 13763,
+      "id": "t-ent:60",
+      "label": "Service",
+      "start": 13757,
+      "text": "Qdrant"
+    },
+    {
+      "end": 13830,
+      "id": "t-ent:120",
+      "label": "Software",
+      "start": 13823,
+      "text": "GLiNER2"
+    },
+    {
+      "end": 13870,
+      "id": "t-ent:150",
+      "label": "Library",
+      "start": 13855,
+      "text": "triplet-extract"
+    },
+    {
+      "end": 13917,
+      "id": "t-ent:180",
+      "label": "Process",
+      "start": 13899,
+      "text": "Predicate Compiler"
+    }
+  ],
+  "expected_structural_classifications": {
+    "bibliography_blocks_min": 15,
+    "code_blocks_min": 20,
+    "repeated_furniture_phrase": "CONFIDENTIAL FOOTER GRAPHIFY OPENIE PACK REPEATED FURNITURE",
+    "tables_min": 30
+  },
+  "fixture": "graphify_throughput_fixture.md",
+  "sample_relations": [
+    {
+      "decision": "FACT",
+      "object": "canonical artifacts",
+      "predicate": "stores",
+      "subject": "MongoDB"
+    },
+    {
+      "decision": "FACT",
+      "object": "accepted assertions",
+      "predicate": "projects",
+      "subject": "Neo4j"
+    }
+  ],
+  "throughput_targets": {
+    "minimum_extraction_windows_after_segmentation": 200
+  }
+}

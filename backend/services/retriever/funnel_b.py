@@ -10,6 +10,33 @@ from qdrant_client import AsyncQdrantClient, models
 logger = logging.getLogger(__name__)
 
 
+def _with_route_eligibility(
+    base: models.Filter, collection_name: str
+) -> models.Filter:
+    """q8 (owner directive 2026-08-04) — when this fan-out leg reads the
+    candidate one-point-per-child evidence collection, add the current
+    route's eligibility flag as a hard must-condition so the lane sees
+    exactly the points the equivalent legacy collection held. Legacy
+    collections pass through untouched (byte-identical behavior).
+    """
+    from services.retriever.shadow_read import (
+        FUNNEL_B_ELIGIBILITY,
+        is_evidence_collection,
+    )
+
+    if not is_evidence_collection(collection_name):
+        return base
+    flag = FUNNEL_B_ELIGIBILITY.get() or "eligible_focused"
+    return models.Filter(
+        must=[
+            *(base.must or []),
+            models.FieldCondition(key=flag, match=models.MatchValue(value=True)),
+        ],
+        must_not=base.must_not,
+        should=base.should,
+    )
+
+
 class FunnelB:
     """
     FUNNEL B - Child Precision
@@ -133,7 +160,7 @@ class FunnelB:
                 self._search_collection(
                     collection_name,
                     query_vector,
-                    flt,
+                    _with_route_eligibility(flt, collection_name),
                     top_k,
                     query_text=query_text,
                 )

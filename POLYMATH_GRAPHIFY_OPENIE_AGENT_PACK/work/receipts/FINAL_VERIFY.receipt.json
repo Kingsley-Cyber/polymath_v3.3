@@ -1,0 +1,27 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/reachability.json",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/reports/final_status.json",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/reports/final_status.md"
+  ],
+  "finished_at": "2026-08-07T03:05:33.111974+00:00",
+  "inputs_hash": "d34226376b71444b23cec9b7c72748cb105f257f43693120615fedbce63679cd",
+  "metrics": {
+    "gold_total": 66,
+    "matched_gold": 61,
+    "passed_gates": 9,
+    "production_graph_write_promotion": "pending",
+    "total_gates": 9
+  },
+  "outputs_hash": "99f64ad5017bcccb8ed292b81404b4ad7d26ffa62e0863c6a1656a3aa5491cdc",
+  "stage": "FINAL_VERIFY",
+  "started_at": "2026-08-07T03:05:33.109908+00:00",
+  "status": "PASSED",
+  "tests": [
+    "live path reachability",
+    "all controller acceptance artifacts",
+    "frozen 66-assertion held-out qualification"
+  ],
+  "warnings": []
+}

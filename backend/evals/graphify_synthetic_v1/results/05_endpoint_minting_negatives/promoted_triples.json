@@ -1,0 +1,12 @@
+[
+  {
+    "subject": "glowline metrics",
+    "predicate": "defines",
+    "object": "p50 intake latency"
+  },
+  {
+    "subject": "quartzline analytics",
+    "predicate": "owns",
+    "object": "redlark"
+  }
+]

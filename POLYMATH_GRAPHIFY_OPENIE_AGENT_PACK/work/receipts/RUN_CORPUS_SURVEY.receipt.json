@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "files_changed": [],
+  "finished_at": "2026-08-06T23:38:20.065612+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "candidate_terms": 58,
+    "fixture_blocks": 725
+  },
+  "outputs_hash": "",
+  "stage": "RUN_CORPUS_SURVEY",
+  "started_at": "2026-08-06T23:38:20.056674+00:00",
+  "status": "PASSED",
+  "tests": [],
+  "warnings": []
+}

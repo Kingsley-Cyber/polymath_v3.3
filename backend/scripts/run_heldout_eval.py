@@ -51,16 +51,32 @@ from services.chat_cost_meter import (  # noqa: E402
 API = os.environ.get("POLYMATH_API", "http://127.0.0.1:8000")
 QUESTIONS = REPO / "backend" / "evals" / "heldout_questions.jsonl"
 REFUSAL_RE = re.compile(
-    # Refusals AND honest absence acknowledgments both count as fail-closed
-    # behavior for negative controls (scorer v2, 2026-07-13: the v1 pattern
-    # under-credited honest "sources don't cover X" answers).
+    # Hard refusals: system-generated template text that is ALWAYS a refusal.
     r"i cannot answer|did not find source evidence|"
-    r"cannot answer that as a source-backed|"
+    r"cannot answer that as a source-backed",
+    re.IGNORECASE,
+)
+# Soft negation: "does not contain/cover/establish..." — only counts as refusal
+# when the answer is short (a substantive multi-paragraph answer that mentions
+# a gap in passing is NOT a refusal).
+_NEGATION_RE = re.compile(
     r"(?:do(?:es)?(?: not|n't)|is not|are not)\s+(?:\w+\s+){0,2}?"
     r"(?:address|cover|contain|mention|name|state|establish|detail|describe|"
     r"include|provide|specify|recommend)",
     re.IGNORECASE,
 )
+_SOFT_NEGATION_MAX_CHARS = 300
+
+
+def _is_refusal(answer: str) -> bool:
+    """Detect refusal: hard patterns always fire; soft negation only on short answers."""
+    if not answer:
+        return True
+    if REFUSAL_RE.search(answer):
+        return True
+    if len(answer) < _SOFT_NEGATION_MAX_CHARS and _NEGATION_RE.search(answer):
+        return True
+    return False
 
 
 def _corpus_ids_by_name() -> dict[str, str]:
@@ -86,7 +102,8 @@ def _corpus_ids_by_name() -> dict[str, str]:
 
 
 def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
-          conversation_id: str | None = None) -> dict:
+          conversation_id: str | None = None,
+          model: str | None = None) -> dict:
     body: dict = {
         "message": message,
         "corpus_ids": corpus_ids,
@@ -94,6 +111,11 @@ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
     }
     if conversation_id:
         body["conversation_id"] = conversation_id
+    if model:
+        # Pin the answer-synthesis model so the A/B holds the LLM constant and
+        # bypasses the user's query-model-pool routing (which may point at a
+        # lapsed provider). Routed through LiteLLM by model string.
+        body["overrides"] = {"model": model}
     req = urllib.request.Request(
         f"{API}/api/chat",
         data=json.dumps(body).encode(),
@@ -194,7 +216,7 @@ def _chat(token: str, message: str, corpus_ids: list[str], tier: str,
     return result
 
 
-def score(row: dict, run: dict) -> dict:
+def score(row: dict, run: dict, selected_corpus_ids: list[str] | None = None) -> dict:
     expected = list(row.get("expected_doc_ids") or [])
     returned_docs = {s["doc_id"] for s in run["sources"] if s.get("doc_id")}
     returned_corpora = {s["corpus_id"] for s in run["sources"] if s.get("corpus_id")}
@@ -207,7 +229,7 @@ def score(row: dict, run: dict) -> dict:
     answer_lower = (run["answer"] or "").lower()
     concepts = [c.lower() for c in row.get("expected_concepts") or []]
     concept_hits = [c for c in concepts if c in answer_lower]
-    refused = bool(REFUSAL_RE.search(run["answer"] or ""))
+    refused = _is_refusal(run["answer"] or "")
     answerable_expected = bool(row.get("answerable"))
     answerability_ok = (not refused) if answerable_expected else refused
     out = {
@@ -223,6 +245,22 @@ def score(row: dict, run: dict) -> dict:
     }
     if row.get("shape") in {"cross_corpus"}:
         out["corpus_diversity_ok"] = len(returned_corpora) >= 2
+        # MRR cross-corpus: for each selected corpus, find the rank of its
+        # first source; MRR = mean(1/rank). Missing corpus scores 0.
+        sel = selected_corpus_ids or []
+        if sel:
+            reciprocals: list[float] = []
+            for cid in sel:
+                rank = next(
+                    (i + 1 for i, s in enumerate(run["sources"])
+                     if s.get("corpus_id") == cid),
+                    None,
+                )
+                reciprocals.append(1.0 / rank if rank else 0.0)
+            out["corpus_mrr"] = round(sum(reciprocals) / len(reciprocals), 3)
+            out["corpus_coverage"] = round(
+                sum(1 for r in reciprocals if r > 0) / len(sel), 3
+            )
     return out
 
 
@@ -232,6 +270,16 @@ def main() -> int:
                     choices=["qdrant_only", "qdrant_mongo", "qdrant_mongo_graph"])
     ap.add_argument("--ids", nargs="*", help="run only these question ids")
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument(
+        "--model",
+        default=None,
+        help="pin answer-synthesis model via overrides.model (e.g. longcat/LongCat-2.0)",
+    )
+    ap.add_argument(
+        "--questions",
+        default=None,
+        help="path to questions JSONL (default: backend/evals/heldout_questions.jsonl)",
+    )
     ap.add_argument(
         "--out-suffix",
         default="",
@@ -245,7 +293,8 @@ def main() -> int:
         print("ERROR: set TOKEN")
         return 1
     by_name = _corpus_ids_by_name()
-    rows = [json.loads(line) for line in QUESTIONS.read_text().splitlines() if line.strip()]
+    questions_path = Path(args.questions) if args.questions else QUESTIONS
+    rows = [json.loads(line) for line in questions_path.read_text().splitlines() if line.strip()]
     if args.ids:
         rows = [r for r in rows if r["id"] in set(args.ids)]
     if args.limit:
@@ -257,15 +306,16 @@ def main() -> int:
         conversation_id = None
         question_cost_ledgers: list[dict] = []
         for turn in row.get("history") or []:
-            prior = _chat(token, turn, cids, args.tier)
+            prior = _chat(token, turn, cids, args.tier, model=args.model)
             conversation_id = prior.get("conversation_id") or conversation_id
             if isinstance(prior.get("chat_cost_ledger"), dict):
                 question_cost_ledgers.append(prior["chat_cost_ledger"])
-        run = _chat(token, row["question"], cids, args.tier, conversation_id)
+        run = _chat(token, row["question"], cids, args.tier, conversation_id,
+                    model=args.model)
         if isinstance(run.get("chat_cost_ledger"), dict):
             question_cost_ledgers.append(run["chat_cost_ledger"])
         request_cost_ledgers.extend(question_cost_ledgers)
-        scored = score(row, run)
+        scored = score(row, run, selected_corpus_ids=cids)
         results.append(
             {
                 "id": row["id"],
@@ -297,6 +347,8 @@ def main() -> int:
     summary["doc_recall_mean"] = _avg("doc_recall")
     summary["concept_recall_mean"] = _avg("concept_recall")
     summary["answerability_ok_rate"] = _avg("answerability_ok")
+    summary["corpus_mrr_mean"] = _avg("corpus_mrr")
+    summary["corpus_coverage_mean"] = _avg("corpus_coverage")
     summary["latency_mean_s"] = _avg("total_s")
     summary["errors"] = len(results) - len(scored_rows)
     by_shape: dict = {}

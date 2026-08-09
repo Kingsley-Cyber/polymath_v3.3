@@ -1,0 +1,137 @@
+{
+  "family": "06_direction_passive_nominal",
+  "status": "FAIL",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_06_9d418c895a",
+    "corpus_id": "863c43b9-b7de-500a-baf6-9f8c80291136",
+    "elapsed_seconds": 0.76,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 8,
+    "failed": 1,
+    "optional_failed": 2,
+    "total": 11
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [
+    "glowline metrics | defines | redlark"
+  ],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "falcon cache",
+      "glowline metrics",
+      "pinion api",
+      "quartzline analytics",
+      "redlark",
+      "sable index"
+    ],
+    "promoted_edge_count": 4
+  },
+  "extracted_entities": [
+    "Falcon Cache",
+    "Glowline Metrics",
+    "Nightly Snapshot Feed",
+    "Pinion API",
+    "Quartzline",
+    "Quartzline Analytics",
+    "Redlark",
+    "Rollups",
+    "Sable Index",
+    "Vaultstone",
+    "partner deck",
+    "peak load"
+  ],
+  "item_results": [
+    {
+      "id": "D01",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Pinion API depends on the Falcon Cache."
+    },
+    {
+      "id": "D02",
+      "check": "passive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Falcon Cache is relied on by the Pinion API during peak load."
+    },
+    {
+      "id": "D03",
+      "check": "direction_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Falcon Cache is a dependency of the Pinion API."
+    },
+    {
+      "id": "D04",
+      "check": "passive",
+      "verdict": "FAIL",
+      "optional": false,
+      "detail": "no positive edge for pair",
+      "evidence": "The Nightly Snapshot Feed is produced by Vaultstone."
+    },
+    {
+      "id": "D05",
+      "check": "nominalized",
+      "verdict": "FAIL",
+      "optional": true,
+      "detail": "no positive edge for pair",
+      "evidence": "Quartzline's acquisition of the Redlark database closed in 2029."
+    },
+    {
+      "id": "D06",
+      "check": "passive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Glowline Metrics dashboard is derived from the Redlark database."
+    },
+    {
+      "id": "D07",
+      "check": "direction_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Redlark database is the source from which Glowline Metrics is derived."
+    },
+    {
+      "id": "D08",
+      "check": "passive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Sable Index is owned and operated by Quartzline Analytics."
+    },
+    {
+      "id": "D09",
+      "check": "paraphrase",
+      "verdict": "FAIL",
+      "optional": true,
+      "detail": "pair promoted with wrong predicate",
+      "evidence": "Rollups flow from Redlark into the Glowline Metrics dashboard."
+    },
+    {
+      "id": "D10",
+      "check": "negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "The Falcon Cache does not depend on the Sable Index."
+    },
+    {
+      "id": "D11",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "A partner deck claimed the Falcon Cache is a dependency of the Sable Index, but the ledger shows no "
+    }
+  ]
+}

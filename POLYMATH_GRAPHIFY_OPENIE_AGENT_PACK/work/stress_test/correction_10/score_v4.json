@@ -1,0 +1,65 @@
+{
+  "counts": {
+    "gold_positive": 66,
+    "matched_positive": 52,
+    "neo4j_promoted_all_predicates": 59,
+    "neo4j_promoted_in_gold_ontology": 57,
+    "neo4j_promoted_out_of_gold_ontology": 2,
+    "qualified_gold": 5,
+    "qualified_leaked_to_positive": 0,
+    "qualified_retained": 1,
+    "unmatched_gold": 14,
+    "unmatched_promoted": 5
+  },
+  "failure_taxonomy_counts": {
+    "ARGUMENT_ALIGNMENT": 0,
+    "ATTRIBUTION": 0,
+    "CONDITIONAL_SCOPE": 0,
+    "DIRECTION": 1,
+    "ENTITY_TYPE": 3,
+    "GATE_POLICY": 3,
+    "MISSING_PAIR": 7,
+    "MODALITY": 0,
+    "POLARITY": 0,
+    "PREDICATE_MAPPING": 0
+  },
+  "freeze_id": "technical-book-66-v1",
+  "match_class_counts": {
+    "DECLARED_ALIAS": 0,
+    "DECLARED_SUBSUMPTION": 0,
+    "EXACT": 0,
+    "NORMALIZED_VARIANT": 52,
+    "NO_MATCH": 14
+  },
+  "matching_policy_sha256": "9de099dbec4053be29fd0113b55759c4d186b68783b9cc68098b4ea04298b393",
+  "matching_policy_version": "technical-book-66-matching-v2",
+  "metrics": {
+    "f1": 0.8455284552845528,
+    "precision": 0.9122807017543859,
+    "recall": 0.7878787878787878
+  },
+  "namespace": "technical_book_stress_v1",
+  "out_of_ontology_promoted_predicates": {
+    "stores": 2
+  },
+  "prohibited_matchers_used": [],
+  "qualified": {
+    "leaked_ids": [],
+    "retained_ids": [
+      "Q001"
+    ]
+  },
+  "recall_checkpoints": {
+    "correct_canonical_assertion_promoted": 52,
+    "correct_surface_proposition_generated": 55,
+    "endpoint_pair_generated": 56,
+    "gold_total": 66,
+    "recall": {
+      "correct_canonical_assertion_promoted": 0.7878787878787878,
+      "correct_surface_proposition_generated": 0.8333333333333334,
+      "endpoint_pair_generated": 0.8484848484848485
+    }
+  },
+  "scorer_version": "stress-answer-key-scorer-v4-qualified-taxonomy",
+  "status": "failed"
+}

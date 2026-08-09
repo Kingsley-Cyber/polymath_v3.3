@@ -1,0 +1,106 @@
+{
+  "family": "08_hard_frames",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_08_00e13b034d",
+    "corpus_id": "fcdfd018-a799-5fb7-b91d-fce69eb1f318",
+    "elapsed_seconds": 0.62,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 6,
+    "failed": 0,
+    "optional_failed": 1,
+    "total": 7
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "crane scheduler",
+      "draft survey",
+      "february grounding event",
+      "gate controller",
+      "pier nine",
+      "spring audit window",
+      "yard stack"
+    ],
+    "promoted_edge_count": 5
+  },
+  "extracted_entities": [
+    "Berth K-7",
+    "Crane Scheduler",
+    "Draft Survey",
+    "February Grounding Event",
+    "Gate Controller",
+    "Halveron South Basin",
+    "Norvale Group",
+    "Pier Nine",
+    "Spring\nAudit Window",
+    "Spring Audit Window",
+    "Wavemark",
+    "Yard Stack",
+    "routing platform",
+    "sailing plans"
+  ],
+  "item_results": [
+    {
+      "id": "HF01",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Gate Controller is part of the Yard Stack, and so is the Crane Scheduler."
+    },
+    {
+      "id": "HF02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Gate Controller is part of the Yard Stack, and so is the Crane Scheduler."
+    },
+    {
+      "id": "HF03",
+      "check": "positive",
+      "verdict": "FAIL",
+      "optional": true,
+      "detail": "no positive edge for pair",
+      "evidence": "Berth K-7, the newest berth in the Halveron South Basin, opened last spring."
+    },
+    {
+      "id": "HF04",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Wavemark, the routing platform operated by the Norvale Group, publishes sailing plans."
+    },
+    {
+      "id": "HF05",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The February Grounding Event occurred at Pier Nine."
+    },
+    {
+      "id": "HF06",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Draft Survey occurred during the Spring Audit Window."
+    },
+    {
+      "id": "HF07",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Yard Stack depends on the Gate Controller."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/metrics/idempotency.json"
+  ],
+  "finished_at": "2026-08-07T03:05:32.895907+00:00",
+  "inputs_hash": "744581e60801c1e93b860049d0a1cfa0b1d685bc51f9c384e6b50a93bf54463e",
+  "metrics": {
+    "passed_gates": 3,
+    "total_gates": 3
+  },
+  "outputs_hash": "01f8411dc27df7c6713c6c82712febadb2ed1e1638b1ed977bc1372b80662eaa",
+  "stage": "RUN_IDEMPOTENCY_TEST",
+  "started_at": "2026-08-07T03:05:32.895307+00:00",
+  "status": "PASSED",
+  "tests": [
+    "repeat canonical ingest",
+    "compare projection identities and counts",
+    "verify zero duplicate delta"
+  ],
+  "warnings": []
+}

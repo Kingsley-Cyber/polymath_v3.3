@@ -112,15 +112,31 @@ model_list:
       api_base: "https://token-plan-sgp.xiaomimimo.com/v1"
       api_key: os.environ/MIMO_API_KEY
 
+  # LongCat (Meituan) — OpenAI-compatible. Models: LongCat-2.0 (1M ctx, 128K out,
+  # agentic reasoning model that emits reasoning_content). Requires LONGCAT_API_KEY.
+  - model_name: "longcat/*"
+    litellm_params:
+      model: "openai/*"
+      api_base: "https://api.longcat.chat/openai/v1"
+      api_key: os.environ/LONGCAT_API_KEY
+
+  # Concrete LongCat fallback target. litellm resolves default_fallbacks by exact
+  # model_name, not wildcard (same rationale as deepseek-chat-fallback above).
+  - model_name: "longcat-chat-fallback"
+    litellm_params:
+      model: "openai/LongCat-2.0"
+      api_base: "https://api.longcat.chat/openai/v1"
+      api_key: os.environ/LONGCAT_API_KEY
+
 litellm_settings:
   drop_params: True
   set_verbose: False
   num_retries: 3
   # Cross-model fallback: if the primary chat/synthesis model fails (e.g. a
   # lapsed Ollama Cloud model returns 500), litellm retries on a known-good
-  # backup so the streamed answer is never blank. Requires a valid
-  # DEEPSEEK_API_KEY (set in .env, never committed).
-  default_fallbacks: ["deepseek-chat-fallback"]
+  # backup so the streamed answer is never blank. Prefers LongCat-2.0 (valid
+  # key) then the deepseek concrete group. Keys set in .env, never committed.
+  default_fallbacks: ["longcat-chat-fallback", "deepseek-chat-fallback"]
   request_timeout: 600
   cache: True
   cache_params:
@@ -150,9 +166,9 @@ general_settings:
 router_settings:
   # The litellm PROXY reads cross-model fallbacks from router_settings (not
   # litellm_settings). On any model failure (e.g. lapsed Ollama Cloud 500), the
-  # router retries on the concrete deepseek-chat-fallback group so the streamed
-  # answer is never blank. Requires DEEPSEEK_API_KEY in .env.
-  default_fallbacks: ["deepseek-chat-fallback"]
+  # router retries on the concrete fallback groups so the streamed answer is
+  # never blank. Prefers LongCat-2.0 then deepseek. Keys set in .env.
+  default_fallbacks: ["longcat-chat-fallback", "deepseek-chat-fallback"]
 
 environment: &default
   completion_model: "ollama/llama3.2:3b"

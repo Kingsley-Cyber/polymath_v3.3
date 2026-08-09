@@ -1,0 +1,160 @@
+{
+  "family": "04_identity_mechanics",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_04_d84d9e7387",
+    "corpus_id": "8e2e9378-c702-5be7-a884-1af41af9751c",
+    "elapsed_seconds": 0.77,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 12,
+    "failed": 0,
+    "optional_failed": 0,
+    "total": 12
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "cold 7",
+      "cold 7 rollout plan",
+      "dr imani reyes",
+      "falcon cache",
+      "pinion",
+      "pinion 3 1",
+      "pinion 3 2",
+      "quartzline retrieval layer",
+      "recovery desk",
+      "report q 9",
+      "sable index",
+      "sensor k 12",
+      "telemetry group"
+    ],
+    "promoted_edge_count": 9
+  },
+  "extracted_entities": [
+    "COLD-7",
+    "COLD-7 Rollout Plan",
+    "Dr. Imani Reyes",
+    "Falcon Cache",
+    "Imani Reyes",
+    "Monday",
+    "Pinion",
+    "Pinion 3.1",
+    "Pinion 3.2",
+    "Quartzline Retrieval Layer",
+    "Recovery Desk",
+    "Report",
+    "Report Q-9",
+    "Rollout Plan",
+    "Sable Index",
+    "Sensor K-12",
+    "Telemetry Group",
+    "dependency ledger",
+    "draft note",
+    "hourly schedule",
+    "within ten minutes",
+    "without pause"
+  ],
+  "item_results": [
+    {
+      "id": "I01",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Sensor K-12 produces Report Q-9."
+    },
+    {
+      "id": "I02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Recovery Desk consumes Report Q-9 within ten minutes of publication."
+    },
+    {
+      "id": "I03",
+      "check": "passive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Report Q-9 is produced by Sensor K-12 on an hourly schedule."
+    },
+    {
+      "id": "I04",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Pinion 3.1 depends on the COLD-7 protocol."
+    },
+    {
+      "id": "I05",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Pinion 3.2 depends on the Sable Index."
+    },
+    {
+      "id": "I06",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Pinion is maintained by the Telemetry Group."
+    },
+    {
+      "id": "I07",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "A draft note claimed that Pinion 3.1 depends on the Sable Index, but the dependency ledger disagrees"
+    },
+    {
+      "id": "I08",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Telemetry Group supports Dr. Imani Reyes."
+    },
+    {
+      "id": "I09",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Dr. Reyes owns the COLD-7 Rollout Plan."
+    },
+    {
+      "id": "I10",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Quartzline Retrieval Layer (QRL) uses the Falcon Cache."
+    },
+    {
+      "id": "I11",
+      "check": "paraphrase",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "QRL is part of Pinion 3.2."
+    },
+    {
+      "id": "I12",
+      "check": "negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The pipeline processes readings (e.g. Sensor K-12 output) without pause."
+    }
+  ]
+}

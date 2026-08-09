@@ -149,22 +149,73 @@ def _valid_abbr(short: str, long_form: str) -> bool:
     return True
 
 
-_SH_LONG_PAREN = re.compile(r"([A-Za-z][\w-]*(?:\s+[\w-]+){0,5})\s*\(([A-Za-z][A-Za-z0-9\-]{1,9})\)")
-_SH_PAREN_LONG = re.compile(r"\b([A-Z][A-Za-z0-9\-]{1,9})\s*\(([A-Za-z][\w\s-]{2,60}?)\)")
+# Long-form may not cross newlines — `\s` previously let markdown headings
+# glue into the next definition (e.g. "explicit aliases\n\nRetrieval-… (RAG)").
+_SH_LONG_PAREN = re.compile(
+    r"([A-Za-z][\w-]*(?:[ \t]+[\w-]+){0,5})[ \t]*\(([A-Za-z][A-Za-z0-9\-]{1,9})\)"
+)
+_SH_PAREN_LONG = re.compile(
+    r"\b([A-Z][A-Za-z0-9\-]{1,9})[ \t]*\(([A-Za-z][\w \t-]{2,60}?)\)"
+)
+
+
+def schwartz_hearst_matches(text: str) -> list[dict]:
+    """Return Schwartz-Hearst pairs with source offsets (alias pipeline Phase 2).
+
+    Each dict: short, long_form, short_start, short_end, long_start, long_end,
+    evidence_text, match_start, match_end.
+    """
+    source = text or ""
+    out: list[dict] = []
+    seen: set[tuple[str, str, int, int]] = set()
+
+    def _add(short: str, long_form: str, short_span: tuple[int, int], long_span: tuple[int, int], m: re.Match) -> None:
+        key = (short.lower(), long_form.lower(), short_span[0], long_span[0])
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(
+            {
+                "short": short,
+                "long_form": long_form,
+                "short_start": short_span[0],
+                "short_end": short_span[1],
+                "long_start": long_span[0],
+                "long_end": long_span[1],
+                "evidence_text": source[m.start() : m.end()],
+                "match_start": m.start(),
+                "match_end": m.end(),
+            }
+        )
+
+    for m in _SH_LONG_PAREN.finditer(source):
+        long_form, short = norm(m.group(1)), norm(m.group(2))
+        if not _valid_abbr(short, long_form):
+            continue
+        _add(
+            short,
+            long_form,
+            (m.start(2), m.end(2)),
+            (m.start(1), m.end(1)),
+            m,
+        )
+    for m in _SH_PAREN_LONG.finditer(source):
+        short, long_form = norm(m.group(1)), norm(m.group(2))
+        if not _valid_abbr(short, long_form):
+            continue
+        _add(
+            short,
+            long_form,
+            (m.start(1), m.end(1)),
+            (m.start(2), m.end(2)),
+            m,
+        )
+    return out
 
 
 def schwartz_hearst(text: str) -> list[tuple[str, str]]:
     """Return (short, long_form) abbreviation pairs found in the text."""
-    out = []
-    for m in _SH_LONG_PAREN.finditer(text):
-        long_form, short = norm(m.group(1)), norm(m.group(2))
-        if _valid_abbr(short, long_form):
-            out.append((short, long_form))
-    for m in _SH_PAREN_LONG.finditer(text):
-        short, long_form = norm(m.group(1)), norm(m.group(2))
-        if _valid_abbr(short, long_form):
-            out.append((short, long_form))
-    return out
+    return [(row["short"], row["long_form"]) for row in schwartz_hearst_matches(text)]
 
 
 def _casing_variants(name: str) -> list[str]:

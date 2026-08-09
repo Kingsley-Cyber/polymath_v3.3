@@ -1,0 +1,23 @@
+{
+  "errors": [],
+  "files_changed": [
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/completed_mentions.jsonl",
+    "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/artifacts/completion_report.json"
+  ],
+  "finished_at": "2026-08-06T23:43:37.474775+00:00",
+  "inputs_hash": "",
+  "metrics": {
+    "completed_mentions": 2889,
+    "exact_span_f1": 0.8088235294117647,
+    "strict_offset_rate": 1.0,
+    "type_f1": 0.573529411764706
+  },
+  "outputs_hash": "",
+  "stage": "IMPLEMENT_MENTION_COMPLETION",
+  "started_at": "2026-08-06T23:43:37.462924+00:00",
+  "status": "PASSED",
+  "tests": [
+    "backend/tests/extraction/test_graphify_completion.py"
+  ],
+  "warnings": []
+}

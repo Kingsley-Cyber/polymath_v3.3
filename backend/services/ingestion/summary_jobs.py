@@ -49,7 +49,11 @@ MISSING_PARENT_SUMMARY_CLAUSE: dict[str, Any] = {
     "$or": [{"summary": {"$exists": False}}, {"summary": None}, {"summary": ""}]
 }
 SUMMARY_RUNNABLE_STATUSES = ("queued",)
-TERMINAL_SKIP_INGEST_STAGES = {"skipped_duplicate", "skipped_nonsemantic"}
+TERMINAL_SKIP_INGEST_STAGES = {
+    "skipped_duplicate",
+    "skipped_nonsemantic",
+    "unsupported_by_policy",
+}
 STAGE_IDENTITY_MISSING_CLAUSE: dict[str, Any] = {
     "$or": [
         {"stage_identity": {"$exists": False}},
@@ -737,6 +741,118 @@ async def _reconcile_claimed_summary_jobs(
     return {"counts": counts, "jobs": previews[:50]}
 
 
+BLOCKED_REEVALUATION_STATUSES: tuple[str, ...] = (
+    "blocked_empty_source",
+    "blocked_no_parent_summaries",
+    "blocked_parent_summaries_incomplete",
+)
+
+
+async def reevaluate_blocked_summary_jobs(
+    db: Any,
+    *,
+    corpus_id: str,
+    limit: int = 500,
+    doc_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Reclassify blocked summary jobs whose precondition has been satisfied.
+
+    Blocked jobs are durable: a document job planned before its parent
+    summaries existed would otherwise stay blocked forever even after the
+    deterministic parent lane completes. Re-evaluation is bounded and derives
+    status strictly from Mongo artifacts.
+    """
+
+    limit = max(1, min(int(limit or 500), 10000))
+    query: dict[str, Any] = {
+        "corpus_id": corpus_id,
+        "status": {"$in": list(BLOCKED_REEVALUATION_STATUSES)},
+    }
+    if doc_ids is not None:
+        query["doc_id"] = {
+            "$in": sorted({str(doc_id) for doc_id in doc_ids if str(doc_id)})
+        }
+    rows = (
+        await db["summary_jobs"]
+        .find(
+            query,
+            {"_id": 0, "job_id": 1, "kind": 1, "doc_id": 1, "parent_id": 1, "status": 1},
+        )
+        .limit(limit)
+        .to_list(length=limit)
+    )
+    if not rows:
+        return {"reevaluated": 0, "requeued": 0, "still_blocked": 0}
+
+    now = datetime.utcnow()
+    parent_clause = parent_summary_required_clause()
+    ops: list[Any] = []
+    requeued = 0
+    for row in rows:
+        kind = str(row.get("kind") or "")
+        new_status: str | None = None
+        new_reason: str | None = None
+        extra: dict[str, Any] = {}
+        if kind == "retrieval_parent_summary":
+            parent_id = str(row.get("parent_id") or "")
+            parent = await db["parent_chunks"].find_one(
+                {"corpus_id": corpus_id, "parent_id": parent_id},
+                {"_id": 0, "text": 1},
+            )
+            if parent is not None and str(parent.get("text") or "").strip():
+                new_status, new_reason = "queued", "missing_parent_summary"
+        elif kind == "document_summary":
+            doc_id = str(row.get("doc_id") or "")
+            if not doc_id:
+                continue
+            required_parent_count = await _count(
+                db,
+                "parent_chunks",
+                {"corpus_id": corpus_id, "doc_id": doc_id, "$and": [parent_clause]},
+            )
+            summarized_parent_count = await _count(
+                db,
+                "parent_chunks",
+                {
+                    "corpus_id": corpus_id,
+                    "doc_id": doc_id,
+                    "$and": [parent_clause, SUMMARY_TEXT_CLAUSE],
+                },
+            )
+            new_status, new_reason = classify_document_summary_status(
+                required_parent_count=required_parent_count,
+                summarized_parent_count=summarized_parent_count,
+            )
+            extra["missing_parent_count"] = max(
+                required_parent_count - summarized_parent_count, 0
+            )
+        if not new_status or new_status == str(row.get("status") or ""):
+            continue
+        if new_status == "queued":
+            requeued += 1
+        ops.append(
+            UpdateOne(
+                {"job_id": str(row.get("job_id") or "")},
+                {
+                    "$set": {
+                        "status": new_status,
+                        "reason": new_reason,
+                        "updated_at": now,
+                        "last_reclassified_at": now,
+                        **extra,
+                    }
+                },
+            )
+        )
+    if ops:
+        await bulk_upsert_durable_jobs(db["summary_jobs"], ops)
+    return {
+        "reevaluated": len(rows),
+        "requeued": requeued,
+        "still_blocked": len(rows) - requeued,
+    }
+
+
 async def plan_summary_jobs(
     db: Any,
     *,
@@ -771,6 +887,16 @@ async def plan_summary_jobs(
         )
         if apply
         else 0
+    )
+    blocked_reevaluation = (
+        await reevaluate_blocked_summary_jobs(
+            db,
+            corpus_id=corpus_id,
+            limit=max(limit, 500),
+            doc_ids=doc_ids,
+        )
+        if apply
+        else {"reevaluated": 0, "requeued": 0, "still_blocked": 0}
     )
     jobs: list[dict[str, Any]] = []
     remaining = limit
@@ -909,6 +1035,7 @@ async def plan_summary_jobs(
         "kind_counts": kind_counts,
         "jobs": jobs[:50],
         "artifact_reconciled": artifact_reconciled,
+        "blocked_reevaluation": blocked_reevaluation,
         "protected_dead_letters": protected_dead_letters,
     }
     if not apply or not jobs:

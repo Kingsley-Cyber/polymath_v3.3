@@ -1,0 +1,150 @@
+{
+  "family": "03_claim_scope_discourse",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_03_f723b9bf00",
+    "corpus_id": "e6ceded5-05e0-5b67-9414-6e4321c67ddb",
+    "elapsed_seconds": 1.33,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 13,
+    "failed": 0,
+    "optional_failed": 0,
+    "total": 13
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "harrier gateway",
+      "onyx ledger"
+    ],
+    "promoted_edge_count": 1
+  },
+  "extracted_entities": [
+    "Cobalt Vault",
+    "Cobalt Vault.",
+    "Dr. Wen Castillo",
+    "Engineers",
+    "Harrier Gateway",
+    "Northgale Group",
+    "Onyx Ledger",
+    "Wen Castillo",
+    "alert storm",
+    "deployment region",
+    "early memo",
+    "early review",
+    "every deployment region",
+    "next year",
+    "review board"
+  ],
+  "item_results": [
+    {
+      "id": "C01",
+      "check": "control",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Harrier Gateway uses the Onyx Ledger."
+    },
+    {
+      "id": "C02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The audit confirmed that the Harrier Gateway uses the Onyx Ledger in every deployment region."
+    },
+    {
+      "id": "C03",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "An early memo claimed that the Harrier Gateway uses the Cobalt Vault."
+    },
+    {
+      "id": "C04",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "The review board rejected the statement that the Harrier Gateway uses the Cobalt Vault."
+    },
+    {
+      "id": "C05",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "The incorrect claim that Northgale Group owns the Onyx Ledger passed an early review before it was r"
+    },
+    {
+      "id": "C06",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "It was incorrectly reported that Dr. Wen Castillo owns the Harrier Gateway."
+    },
+    {
+      "id": "C07",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "Analysts alleged that Northgale Group owns the Cobalt Vault, though no filing supports this."
+    },
+    {
+      "id": "C08",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "Northgale Group retracted its statement that the Onyx Ledger depends on the Cobalt Vault."
+    },
+    {
+      "id": "C09",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "The vendor walked back the assertion that the Cobalt Vault supports the Harrier Gateway."
+    },
+    {
+      "id": "C10",
+      "check": "negative",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "The Harrier Gateway does not use the Cobalt Vault."
+    },
+    {
+      "id": "C11",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "The Harrier Gateway may adopt the Cobalt Vault next year."
+    },
+    {
+      "id": "C12",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "If the Onyx Ledger fails, the Harrier Gateway causes an alert storm."
+    },
+    {
+      "id": "C13",
+      "check": "false_claim_trap",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "contained in non-positive lane",
+      "evidence": "Engineers once believed the Onyx Ledger was derived from the Cobalt Vault, but later evidence reject"
+    }
+  ]
+}

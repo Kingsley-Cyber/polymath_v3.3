@@ -1,0 +1,107 @@
+{
+  "family": "07_acronym_coreference",
+  "status": "PASS",
+  "runtime": {
+    "pipeline_release": "graphify-cpu-pipeline-v15",
+    "mongo_database": "graphify_eval_syn_07_583a0f6ef7",
+    "corpus_id": "8239d804-f2c5-5216-9b23-fd71cb783b2b",
+    "elapsed_seconds": 0.75,
+    "interpreter": "/Users/king/polymath_v3.3/backend/../local_ghost_b/.venv/bin/python"
+  },
+  "items": {
+    "passed": 7,
+    "failed": 0,
+    "optional_failed": 0,
+    "total": 7
+  },
+  "negative_entities_in_graph": [],
+  "unexpected_promoted_triples": [],
+  "duplicate_promoted_edges": {},
+  "graph": {
+    "nodes": [
+      "berth allocation and utilization engine",
+      "berth fairness charter",
+      "cargo manifest reconciliation service",
+      "daily berth ledger",
+      "dr nadia osei",
+      "quay analytics group",
+      "registry of vessel identities",
+      "tide forecast feed",
+      "tidewatch systems"
+    ],
+    "promoted_edge_count": 6
+  },
+  "extracted_entities": [
+    "Berth Allocation and Utilization Engine",
+    "Berth Fairness Charter",
+    "Cargo Manifest Reconciliation Service",
+    "Daily Berth Ledger",
+    "Dr. Nadia Osei",
+    "Port Halveron",
+    "Quay Analytics Group",
+    "Registry of Vessel Identities",
+    "Tide Forecast Feed",
+    "Tidewatch Systems",
+    "arrival windows",
+    "berth scheduling stack",
+    "incoming manifests"
+  ],
+  "item_results": [
+    {
+      "id": "AC01",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The BAUE consumes the Tide Forecast Feed."
+    },
+    {
+      "id": "AC02",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The BAUE produces the Daily Berth Ledger."
+    },
+    {
+      "id": "AC03",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The CMRS depends on the Registry of Vessel Identities."
+    },
+    {
+      "id": "AC04",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Tidewatch Systems owns the CMRS."
+    },
+    {
+      "id": "AC05",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Dr. Osei owns the Berth Fairness Charter."
+    },
+    {
+      "id": "AC06",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "The Quay Analytics Group supports Dr. Nadia Osei with two reviewers."
+    },
+    {
+      "id": "AC07",
+      "check": "positive",
+      "verdict": "PASS",
+      "optional": false,
+      "detail": "",
+      "evidence": "Dr. Nadia Osei leads the Quay Analytics Group."
+    }
+  ]
+}

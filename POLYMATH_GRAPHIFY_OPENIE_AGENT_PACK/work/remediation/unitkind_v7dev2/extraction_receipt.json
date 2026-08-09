@@ -1,0 +1,33 @@
+{
+  "answer_key": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/remediation/sealed_v6_placeholder_key.json",
+  "artifact_digest": "241eb109586f5d6a520a869cc2e91272bc97b0db7e2d46387d633542ef3cdac5",
+  "corpus_id": "22c219b6-69d5-51b1-8cb0-0b78dcba79ee",
+  "counts": {
+    "gold_positive": 0,
+    "neo4j_promoted_positive": 157,
+    "qualified_gold": 0,
+    "qualified_retained": 1323
+  },
+  "document_id": "a9b204a0373a64f243771544338f78568ede77891df7ac215050b6e01f2909b8",
+  "elapsed_seconds": 350.9234592920111,
+  "gates": {
+    "projection_idempotent": true
+  },
+  "graph": {
+    "counts": {
+      "assertion_edges": 162,
+      "assertion_support": 162,
+      "mentions": 1712,
+      "nodes": 706,
+      "relations": 157
+    },
+    "digest": "807da714feb8d8033595e5d98693de57d81a9f7a650d82a60b0fccfe42f0372f",
+    "repeat_digest": "807da714feb8d8033595e5d98693de57d81a9f7a650d82a60b0fccfe42f0372f"
+  },
+  "metrics": {},
+  "mongo_database": "graphify_e2e_v7dev_unitkind2_5655c630_e3724a08",
+  "namespace": "v7dev_unitkind2_5655c630_20260807T145842",
+  "requested_namespace": "v7dev_unitkind2",
+  "source": "/Users/king/Downloads/s/CPCS_MX_Hierarchical_Motion_Grammar_Research_Paper.md",
+  "status": "unscored"
+}

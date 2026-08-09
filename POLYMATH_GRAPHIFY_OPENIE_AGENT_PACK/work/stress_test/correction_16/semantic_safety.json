@@ -1,0 +1,92 @@
+{
+  "counts": {
+    "gold_positive": 66,
+    "matched_positive": 61,
+    "neo4j_promoted_all_predicates": 68,
+    "neo4j_promoted_in_gold_ontology": 66,
+    "neo4j_promoted_out_of_gold_ontology": 2,
+    "qualified_gold": 5,
+    "qualified_leaked_to_positive": 0,
+    "qualified_retained": 1,
+    "unmatched_gold": 5,
+    "unmatched_promoted": 5
+  },
+  "failure_taxonomy_counts": {
+    "ARGUMENT_ALIGNMENT": 0,
+    "ATTRIBUTION": 0,
+    "CONDITIONAL_SCOPE": 0,
+    "DIRECTION": 0,
+    "ENTITY_TYPE": 2,
+    "GATE_POLICY": 1,
+    "MISSING_PAIR": 2,
+    "MODALITY": 0,
+    "POLARITY": 0,
+    "PREDICATE_MAPPING": 0
+  },
+  "freeze_id": "technical-book-66-strict-v2",
+  "gates": {
+    "all_five_match_classes_reported": true,
+    "all_ten_failure_classes_reported": true,
+    "answer_key_sha256": true,
+    "canonical_checkpoint_at_least_0_90": true,
+    "canonical_recall_at_least_0_90": true,
+    "fixture_bytes": true,
+    "fixture_sha256": true,
+    "frozen_corpus_id": true,
+    "frozen_document_id": true,
+    "frozen_mongo_database": true,
+    "frozen_namespace": true,
+    "matching_policy_digest_reported": true,
+    "matching_policy_documentation_sha256": true,
+    "matching_policy_sha256": true,
+    "matching_policy_version": true,
+    "neo4j_entities_present": true,
+    "neo4j_wildcard_entities_zero": true,
+    "openie_wildcard_fact_zero": true,
+    "openie_wildcard_qualified_zero": true,
+    "openie_wildcard_review_zero": true,
+    "pair_checkpoint_at_least_0_90": true,
+    "precision_at_least_0_90": true,
+    "production_writes_unauthorized": true,
+    "prohibited_matchers_zero": true,
+    "projection_idempotent": true,
+    "qualified_positive_leakage_zero": true,
+    "scorer_sha256": true,
+    "scorer_version": true,
+    "semantic_error_classes_zero": true,
+    "surface_checkpoint_at_least_0_90": true,
+    "syntax_wildcard_accepted_zero": true,
+    "syntax_wildcard_qualified_zero": true,
+    "syntax_wildcard_review_zero": true
+  },
+  "match_class_counts": {
+    "DECLARED_ALIAS": 0,
+    "DECLARED_SUBSUMPTION": 0,
+    "EXACT": 0,
+    "NORMALIZED_VARIANT": 61,
+    "NO_MATCH": 5
+  },
+  "metrics": {
+    "f1": 0.9242424242424242,
+    "precision": 0.9242424242424242,
+    "recall": 0.9242424242424242
+  },
+  "neo4j_entity_count": 103,
+  "recall_checkpoints": {
+    "correct_canonical_assertion_promoted": 61,
+    "correct_surface_proposition_generated": 60,
+    "endpoint_pair_generated": 62,
+    "gold_total": 66,
+    "recall": {
+      "correct_canonical_assertion_promoted": 0.9242424242424242,
+      "correct_surface_proposition_generated": 0.9090909090909091,
+      "endpoint_pair_generated": 0.9393939393939394
+    }
+  },
+  "run_dir": "/Users/king/polymath_v3.3/POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/work/stress_test/correction_16",
+  "status": "passed",
+  "wildcard_openie_lane_counts": {
+    "REJECT": 15
+  },
+  "wildcard_terminal_counts": {}
+}

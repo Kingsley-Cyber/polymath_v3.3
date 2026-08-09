@@ -1,0 +1,1190 @@
+{
+  "generated_at": "2026-08-06T23:19:29.329432+00:00",
+  "hit_count": 7038,
+  "records": [
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 2001,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 1703,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 515,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 89,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run2/e2e_summary.json"
+        },
+        {
+          "matches": 89,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run3/e2e_summary.json"
+        },
+        {
+          "matches": 89,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run4/e2e_summary.json"
+        },
+        {
+          "matches": 89,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run5/e2e_summary.json"
+        },
+        {
+          "matches": 89,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s14_final_run/e2e_summary.json"
+        },
+        {
+          "matches": 69,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run1/e2e_summary.json"
+        },
+        {
+          "matches": 66,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_quality_gold.json"
+        },
+        {
+          "matches": 50,
+          "path": "backend/services/code_graph_augmenter.py"
+        },
+        {
+          "matches": 49,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/.agent_state/state.json"
+        },
+        {
+          "matches": 49,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/all_relation_decisions.json"
+        },
+        {
+          "matches": 45,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/regenerate_fixtures.py"
+        },
+        {
+          "matches": 38,
+          "path": "backend/tests/test_code_graph_augmenter.py"
+        },
+        {
+          "matches": 36,
+          "path": "backend/services/ingestion/worker.py"
+        },
+        {
+          "matches": 35,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/qualified_triples.json"
+        },
+        {
+          "matches": 32,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_gold.json"
+        },
+        {
+          "matches": 31,
+          "path": "backend/services/extraction/graphify_pipeline.py"
+        },
+        {
+          "matches": 29,
+          "path": "backend/scripts/run_graphify_fixture_e2e.py"
+        }
+      ],
+      "capability": "graphify_entrypoint",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 32226,
+          "path": "docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json"
+        },
+        {
+          "matches": 6144,
+          "path": "docs/baselines/LATENCY_2026-07-13.json"
+        },
+        {
+          "matches": 1905,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 1248,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 709,
+          "path": "backend/services/chat_orchestrator.py"
+        },
+        {
+          "matches": 623,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 616,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 601,
+          "path": "backend/services/ingestion/worker.py"
+        },
+        {
+          "matches": 515,
+          "path": "backend/routers/ingestion.py"
+        },
+        {
+          "matches": 506,
+          "path": "backend/services/retriever/__init__.py"
+        },
+        {
+          "matches": 471,
+          "path": "backend/services/graph/orchestrator.py"
+        },
+        {
+          "matches": 470,
+          "path": "backend/services/ingestion_service.py"
+        },
+        {
+          "matches": 365,
+          "path": "backend/services/graph/neo4j_writer.py"
+        },
+        {
+          "matches": 357,
+          "path": "docs/baselines/QUALITY_T_TWO_LANE_OFF_2026-07-17.json"
+        },
+        {
+          "matches": 338,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/graph_snapshot.json"
+        },
+        {
+          "matches": 337,
+          "path": "backend/services/retriever/planned_fusion.py"
+        },
+        {
+          "matches": 329,
+          "path": "docs/baselines/QUALITY_STEP1_TEMPORAL_COMBINED_2026-07-17.json"
+        },
+        {
+          "matches": 310,
+          "path": "backend/polymath_mcp/tools.py"
+        },
+        {
+          "matches": 303,
+          "path": "backend/services/ghost_b.py"
+        },
+        {
+          "matches": 291,
+          "path": "backend/services/ingestion/extraction_jobs.py"
+        }
+      ],
+      "capability": "ingestion_orchestrator",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 1345,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 254,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 117,
+          "path": "docs/baselines/DEPENDENCY_PATTERN_MINING_REPORT.json"
+        },
+        {
+          "matches": 54,
+          "path": "backend/services/extraction/graphify_relations.py"
+        },
+        {
+          "matches": 39,
+          "path": "backend/services/extraction/dep_path_extractor.py"
+        },
+        {
+          "matches": 36,
+          "path": "docs/baselines/RELATION_STAGE_TRACE_2026-07-31.json"
+        },
+        {
+          "matches": 33,
+          "path": "backend/tests/extraction/test_corroboration_gate.py"
+        },
+        {
+          "matches": 31,
+          "path": "docs/baselines/RELATION_STAGE_TRACE_2026-07-31.txt"
+        },
+        {
+          "matches": 30,
+          "path": "config/predicate_synonyms.yaml"
+        },
+        {
+          "matches": 29,
+          "path": "scripts/autoresearch_polymath_local_extraction.py"
+        },
+        {
+          "matches": 29,
+          "path": "scripts/bench_python_deterministic_relation_compiler.py"
+        },
+        {
+          "matches": 26,
+          "path": "scripts/build_modernbert_predicate_dataset.py"
+        },
+        {
+          "matches": 23,
+          "path": "backend/scripts/unified_shadow_pipeline.py"
+        },
+        {
+          "matches": 22,
+          "path": "backend/services/extraction/frame_extractor.py"
+        },
+        {
+          "matches": 22,
+          "path": "backend/services/extraction/relex_adapter.py"
+        },
+        {
+          "matches": 21,
+          "path": "backend/tests/extraction/test_relex_adapter.py"
+        },
+        {
+          "matches": 19,
+          "path": "backend/services/ghost_b.py"
+        },
+        {
+          "matches": 19,
+          "path": "backend/tests/test_dep_path_extractor.py"
+        },
+        {
+          "matches": 18,
+          "path": "backend/scripts/shadow_mode_corroboration.py"
+        },
+        {
+          "matches": 18,
+          "path": "backend/services/extraction/corroboration_gate.py"
+        }
+      ],
+      "capability": "svo",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 2723,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 1369,
+          "path": "docs/baselines/LATENCY_2026-07-13.json"
+        },
+        {
+          "matches": 646,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/all_relation_decisions.json"
+        },
+        {
+          "matches": 505,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 316,
+          "path": "backend/services/graph/neo4j_writer.py"
+        },
+        {
+          "matches": 294,
+          "path": "docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json"
+        },
+        {
+          "matches": 281,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/accepted_relation_decisions.json"
+        },
+        {
+          "matches": 241,
+          "path": "docs/baselines/RUNPOD_SAME_CHUNK_LOCAL_REFERENCE_2026-07-15.json"
+        },
+        {
+          "matches": 184,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 171,
+          "path": "scripts/build_modernbert_predicate_dataset.py"
+        },
+        {
+          "matches": 168,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 161,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/graph_snapshot.json"
+        },
+        {
+          "matches": 158,
+          "path": "backend/services/ghost_b.py"
+        },
+        {
+          "matches": 146,
+          "path": "backend/services/extraction/dep_path_extractor.py"
+        },
+        {
+          "matches": 143,
+          "path": "backend/services/extraction/corroboration_gate.py"
+        },
+        {
+          "matches": 140,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_throughput_gold.json"
+        },
+        {
+          "matches": 138,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/qualified_triples.json"
+        },
+        {
+          "matches": 129,
+          "path": "backend/services/ingestion/semantic_observations.py"
+        },
+        {
+          "matches": 129,
+          "path": "runpod_flash_extractor/services/ingestion/semantic_observations.py"
+        },
+        {
+          "matches": 127,
+          "path": "backend/services/ingestion/claim_compiler.py"
+        }
+      ],
+      "capability": "predicate_mapping",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 1439,
+          "path": "docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json"
+        },
+        {
+          "matches": 543,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 478,
+          "path": "docs/baselines/QUALITY_STEP1_TEMPORAL_COMBINED_2026-07-17.json"
+        },
+        {
+          "matches": 312,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 308,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 274,
+          "path": "docs/baselines/LATENCY_2026-07-13.json"
+        },
+        {
+          "matches": 273,
+          "path": "docs/baselines/QUALITY_STEP0_COMBINED_FROZEN_2026-07-17.json"
+        },
+        {
+          "matches": 204,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 176,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 156,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 129,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 106,
+          "path": "backend/services/ingestion/worker.py"
+        },
+        {
+          "matches": 66,
+          "path": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md"
+        },
+        {
+          "matches": 62,
+          "path": "docs/baselines/QUALITY_T_TWO_LANE_OFF_2026-07-17.json"
+        },
+        {
+          "matches": 60,
+          "path": "backend/tests/test_worker_phases.py"
+        },
+        {
+          "matches": 59,
+          "path": "backend/services/retriever/__init__.py"
+        },
+        {
+          "matches": 59,
+          "path": "docs/baselines/EVAL_2026-07-14_qdrant_mongo.json"
+        },
+        {
+          "matches": 59,
+          "path": "docs/baselines/EVAL_2026-07-14_qdrant_mongo_graph.json"
+        },
+        {
+          "matches": 59,
+          "path": "docs/baselines/EVAL_2026-07-14_qdrant_mongo_graph_rescored_v4.json"
+        },
+        {
+          "matches": 59,
+          "path": "docs/baselines/EVAL_2026-07-14_qdrant_mongo_rescored_v4.json"
+        }
+      ],
+      "capability": "mongo_writer",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 545,
+          "path": "docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json"
+        },
+        {
+          "matches": 484,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 415,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 392,
+          "path": "docs/baselines/QUALITY_STEP1_TEMPORAL_COMBINED_2026-07-17.json"
+        },
+        {
+          "matches": 318,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 258,
+          "path": "docs/baselines/QUALITY_STEP0_COMBINED_FROZEN_2026-07-17.json"
+        },
+        {
+          "matches": 209,
+          "path": "backend/services/graph/orchestrator.py"
+        },
+        {
+          "matches": 204,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 176,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 162,
+          "path": "backend/services/retriever/__init__.py"
+        },
+        {
+          "matches": 161,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 137,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 134,
+          "path": "CONTINUITY/local_ingestion_phase_a/ENTITY_DEDUP_RESOLUTION_PLAN.md"
+        },
+        {
+          "matches": 124,
+          "path": "backend/services/ingestion/worker.py"
+        },
+        {
+          "matches": 110,
+          "path": "backend/polymath_mcp/tools.py"
+        },
+        {
+          "matches": 108,
+          "path": "backend/tests/test_worker_phases.py"
+        },
+        {
+          "matches": 100,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/all_relation_decisions.json"
+        },
+        {
+          "matches": 95,
+          "path": "backend/routers/graph.py"
+        },
+        {
+          "matches": 82,
+          "path": "backend/services/graph/entity_dedup/apply.py"
+        },
+        {
+          "matches": 82,
+          "path": "backend/services/ingestion/alias_corpus_clustering.py"
+        }
+      ],
+      "capability": "neo4j_writer",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 1765,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 784,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 600,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 490,
+          "path": "docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json"
+        },
+        {
+          "matches": 394,
+          "path": "backend/registries/semantic_gateway_provider_prices.v1.json"
+        },
+        {
+          "matches": 364,
+          "path": "docs/baselines/LATENCY_2026-07-13.json"
+        },
+        {
+          "matches": 267,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 215,
+          "path": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md"
+        },
+        {
+          "matches": 201,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 197,
+          "path": "backend/services/ghost_b.py"
+        },
+        {
+          "matches": 178,
+          "path": "frontend/package-lock.json"
+        },
+        {
+          "matches": 172,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 157,
+          "path": "docs/baselines/EVAL_2026-07-29_qdrant_mongo_stress20_fixed.json"
+        },
+        {
+          "matches": 153,
+          "path": "docs/baselines/EVAL_2026-07-29_qdrant_mongo_stress20_hybrid.json"
+        },
+        {
+          "matches": 120,
+          "path": "docs/execution_plan_audit/raw/registry_extraction.json"
+        },
+        {
+          "matches": 118,
+          "path": "CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md"
+        },
+        {
+          "matches": 118,
+          "path": "backend/services/ingestion_service.py"
+        },
+        {
+          "matches": 106,
+          "path": ".qoder/repowiki/en/content/System Architecture/Integration Patterns and External Dependencies.md"
+        },
+        {
+          "matches": 106,
+          "path": "backend/scripts/semantic_gateway_ugo_canary.py"
+        },
+        {
+          "matches": 106,
+          "path": "backend/services/ghost_a.py"
+        }
+      ],
+      "capability": "provider_aliases",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 260,
+          "path": "backend/scripts/unified_shadow_pipeline.py"
+        },
+        {
+          "matches": 245,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 220,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/gold_ceiling/gold_entity_syntax_ceiling.json"
+        },
+        {
+          "matches": 220,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/gold_ceiling/gold_entity_syntax_ceiling_repeat.json"
+        },
+        {
+          "matches": 214,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 202,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 109,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 95,
+          "path": "backend/tests/extraction/test_verb_prep_fixtures.py"
+        },
+        {
+          "matches": 88,
+          "path": "backend/scripts/run_graphify_fixture_e2e.py"
+        },
+        {
+          "matches": 84,
+          "path": "scripts/autoresearch_polymath_local_extraction.py"
+        },
+        {
+          "matches": 82,
+          "path": "scripts/grade_extraction_quality_rubric.py"
+        },
+        {
+          "matches": 79,
+          "path": "backend/tests/extraction/test_open_relation_fixtures.py"
+        },
+        {
+          "matches": 69,
+          "path": "backend/scripts/shadow_mode_corroboration.py"
+        },
+        {
+          "matches": 65,
+          "path": "backend/scripts/predicate_confusion_matrix.py"
+        },
+        {
+          "matches": 63,
+          "path": "backend/tests/extraction/test_credit_pattern_fixtures.py"
+        },
+        {
+          "matches": 59,
+          "path": "scripts/bench_python_deterministic_relation_compiler.py"
+        },
+        {
+          "matches": 58,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/scripts/validate_fixtures.py"
+        },
+        {
+          "matches": 58,
+          "path": "backend/scripts/run_gold_entity_syntax_ceiling.py"
+        },
+        {
+          "matches": 57,
+          "path": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md"
+        },
+        {
+          "matches": 51,
+          "path": "LOCAL_EXTRACTION_COMMIT_PRD_DRAFT.md"
+        }
+      ],
+      "capability": "tests",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 4107,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 2234,
+          "path": "docs/baselines/FINAL_ACCEPTANCE_COMPLETE_STACK_2026-07-19.json"
+        },
+        {
+          "matches": 756,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 737,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/all_relation_decisions.json"
+        },
+        {
+          "matches": 538,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 524,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/graph_snapshot.json"
+        },
+        {
+          "matches": 480,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 462,
+          "path": "docs/baselines/LATENCY_2026-07-13.json"
+        },
+        {
+          "matches": 379,
+          "path": "backend/services/ingestion/semantic_digest_claim_inputs.py"
+        },
+        {
+          "matches": 359,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/accepted_relation_decisions.json"
+        },
+        {
+          "matches": 320,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 219,
+          "path": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md"
+        },
+        {
+          "matches": 212,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/neo4j_relation_assertions.json"
+        },
+        {
+          "matches": 208,
+          "path": "backend/services/ingestion/claim_compiler.py"
+        },
+        {
+          "matches": 174,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/qualified_triples.json"
+        },
+        {
+          "matches": 166,
+          "path": "backend/tests/test_semantic_digest_claim_inputs.py"
+        },
+        {
+          "matches": 150,
+          "path": "backend/scripts/materialize_semantic_digest_claim_inputs.py"
+        },
+        {
+          "matches": 150,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 143,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 136,
+          "path": "backend/scripts/audit_claim_assessment_ugo.py"
+        }
+      ],
+      "capability": "claim_assertion",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 1692,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 538,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_fixture.md"
+        },
+        {
+          "matches": 187,
+          "path": "docs/audits/execution_plan_2026-07-13/source_artifacts.json"
+        },
+        {
+          "matches": 158,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 98,
+          "path": "CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md"
+        },
+        {
+          "matches": 97,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/stress_tests/technical_book_graphrag_stress_test/stage_payloads.json"
+        },
+        {
+          "matches": 86,
+          "path": "docs/execution_plan_audit/raw/registry_extraction.json"
+        },
+        {
+          "matches": 84,
+          "path": "docs/EXECUTION_PLAN_2026-07-13.md"
+        },
+        {
+          "matches": 78,
+          "path": "local_ghost_b/pipeline_config.py"
+        },
+        {
+          "matches": 75,
+          "path": "scripts/bootstrap_models.py"
+        },
+        {
+          "matches": 72,
+          "path": "LOCAL_EXTRACTION_REAL_FILE_SIMULATION_REPORT.md"
+        },
+        {
+          "matches": 72,
+          "path": "scripts/benchmark_semantic_extraction_local.py"
+        },
+        {
+          "matches": 69,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/.agent_state/state.json"
+        },
+        {
+          "matches": 61,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/fixtures/graphify_throughput_gold.json"
+        },
+        {
+          "matches": 60,
+          "path": "scripts/benchmark_glirel_claim_compiler_c2.py"
+        },
+        {
+          "matches": 59,
+          "path": "CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md"
+        },
+        {
+          "matches": 59,
+          "path": "scripts/bench_local_draft_schema_pipeline.py"
+        },
+        {
+          "matches": 58,
+          "path": "docs/RAPTOR_RAG_IMPLEMENTATION_CHECKLIST.md"
+        },
+        {
+          "matches": 55,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run2/e2e_summary.json"
+        },
+        {
+          "matches": 55,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/e2e/s12_final_run3/e2e_summary.json"
+        }
+      ],
+      "capability": "model_loader",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 154,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 23,
+          "path": "CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md"
+        },
+        {
+          "matches": 11,
+          "path": "CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md"
+        },
+        {
+          "matches": 10,
+          "path": "backend/services/extraction/dep_path_extractor.py"
+        },
+        {
+          "matches": 6,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/stages/discover_repo.py"
+        },
+        {
+          "matches": 5,
+          "path": "backend/services/extraction/graphify_completion.py"
+        },
+        {
+          "matches": 5,
+          "path": "backend/services/extraction/relation_evidence.py"
+        },
+        {
+          "matches": 4,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/RUNBOOK.md"
+        },
+        {
+          "matches": 4,
+          "path": "backend/scripts/bench_gliner_relex.py"
+        },
+        {
+          "matches": 3,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 3,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/.agent_state/state.json"
+        },
+        {
+          "matches": 3,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/workflow.json"
+        },
+        {
+          "matches": 3,
+          "path": "backend/scripts/relation_stage_trace.py"
+        },
+        {
+          "matches": 2,
+          "path": "CONTINUITY/KNOWLEDGE_PIPELINE_LINEAGE_MAP_20260804.md"
+        },
+        {
+          "matches": 2,
+          "path": "CONTINUITY/PRECISION_GATE_RELEX_2026-07-31.md"
+        },
+        {
+          "matches": 2,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/AGENTS.md"
+        },
+        {
+          "matches": 2,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/README.md"
+        },
+        {
+          "matches": 2,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/stages/mention_complete.py"
+        },
+        {
+          "matches": 2,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/workflow.py"
+        },
+        {
+          "matches": 2,
+          "path": "backend/scripts/shadow_mode_corroboration.py"
+        }
+      ],
+      "capability": "dependency_matcher",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 259,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 19,
+          "path": "backend/scripts/unified_shadow_pipeline.py"
+        },
+        {
+          "matches": 13,
+          "path": "backend/services/extraction/syntax_lane.py"
+        },
+        {
+          "matches": 7,
+          "path": "CONTINUITY/OWNER_INGESTION_THROUGHPUT_AND_QUALITY_ANALYSIS_20260806.md"
+        },
+        {
+          "matches": 6,
+          "path": "backend/scripts/adjudicate_d_e_candidates.py"
+        },
+        {
+          "matches": 6,
+          "path": "backend/services/ingestion/relex_local.py"
+        },
+        {
+          "matches": 6,
+          "path": "backend/tests/extraction/test_conjunction_adversarial.py"
+        },
+        {
+          "matches": 6,
+          "path": "backend/tests/extraction/test_verb_prep_fixtures.py"
+        },
+        {
+          "matches": 5,
+          "path": "POLYMATH_GRAPHIFY_OPENIE_AGENT_PACK/stages/discover_repo.py"
+        },
+        {
+          "matches": 5,
+          "path": "backend/tests/extraction/test_open_relation_fixtures.py"
+        },
+        {
+          "matches": 4,
+          "path": "CONTINUITY/SPEED_BENCH_CLOSEOUT_AND_PERFORMANCE_PLAN_20260805.md"
+        },
+        {
+          "matches": 4,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/reports/workflow_final_status.json"
+        },
+        {
+          "matches": 4,
+          "path": "backend/scripts/run_gold_entity_syntax_ceiling.py"
+        },
+        {
+          "matches": 4,
+          "path": "backend/services/extraction/graphify_relations.py"
+        },
+        {
+          "matches": 4,
+          "path": "backend/services/extraction/relex_gate.py"
+        },
+        {
+          "matches": 4,
+          "path": "backend/services/extraction/spacy_relation_adapter.py"
+        },
+        {
+          "matches": 4,
+          "path": "docs/baselines/GLINER_RELEX_EVALUATION_2026-07-31.md"
+        },
+        {
+          "matches": 4,
+          "path": "docs/baselines/RELEX_PRECISION_GATE_RESULT_2026-07-31.md"
+        },
+        {
+          "matches": 3,
+          "path": "COORDINATION.md"
+        },
+        {
+          "matches": 3,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/reports/parse_once_policy.json"
+        }
+      ],
+      "capability": "frame_extractor",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    },
+    {
+      "action": "INSPECT",
+      "actual_paths": [
+        {
+          "matches": 8,
+          "path": "backend/tests/test_temporal_query_routing.py"
+        },
+        {
+          "matches": 7,
+          "path": "backend/tests/test_bibliographic_capture.py"
+        },
+        {
+          "matches": 6,
+          "path": "backend/services/extraction/appos_enrichment.py"
+        },
+        {
+          "matches": 5,
+          "path": "backend/services/extraction/mention_normalizer.py"
+        },
+        {
+          "matches": 5,
+          "path": "backend/tests/test_code_lane_skills.py"
+        },
+        {
+          "matches": 4,
+          "path": "backend/services/ingestion/docling_adapter.py"
+        },
+        {
+          "matches": 4,
+          "path": "runpod_flash_extractor/runtime.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/services/extraction/dep_path_extractor.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/services/extraction/frame_extractor.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/services/retriever/temporal.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/services/runpod_local_extraction.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/services/web_query_builder.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/tests/test_relex_gate.py"
+        },
+        {
+          "matches": 3,
+          "path": "backend/tests/test_semantic_observations.py"
+        },
+        {
+          "matches": 3,
+          "path": "scripts/bench_python_deterministic_relation_compiler.py"
+        },
+        {
+          "matches": 2,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/parse_once_discovery.json"
+        },
+        {
+          "matches": 2,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/discovery/repo_probe.json"
+        },
+        {
+          "matches": 2,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/reports/parse_once_policy.json"
+        },
+        {
+          "matches": 2,
+          "path": "GRAPHIFY_GLINER2_CPU_AGENT/artifacts/reports/s14_parse_once_policy.json"
+        },
+        {
+          "matches": 2,
+          "path": "backend/requirements.mcp.txt"
+        }
+      ],
+      "capability": "spacy_construction",
+      "current_responsibility": "discovered_by_keyword_scan",
+      "downstream_callers": [],
+      "reason": "Repository agent must inspect these files and assign KEEP/EXTEND/ADAPT/REPLACE/REMOVE/NEW.",
+      "symbols_or_functions": [],
+      "tests_protecting_it": []
+    }
+  ],
+  "repo_root": "/Users/king/polymath_v3.3"
+}

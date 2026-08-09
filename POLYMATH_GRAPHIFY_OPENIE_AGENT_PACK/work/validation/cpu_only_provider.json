@@ -1,0 +1,97 @@
+{
+  "cpu_only": true,
+  "elapsed_seconds": 6.3265898329991614,
+  "health": {
+    "batch_size": 4,
+    "description_hash": "e92f6b08e4bc405463eefe125b451c22085c35fab3bc3089ef26d2b62120dee2",
+    "description_release": "graphify-entity-descriptions-v1",
+    "device": "cpu",
+    "entity_types": [
+      "Person",
+      "Organization",
+      "Location",
+      "Event",
+      "Concept",
+      "Method",
+      "Product",
+      "Software",
+      "Document",
+      "Standard",
+      "Rule",
+      "Law",
+      "Artifact",
+      "TimeReference"
+    ],
+    "model_checkpoint_sha256": "845fc4bd93c525b86124c58ab4f56c9eacf8587953086b14c501fab25957c007",
+    "model_id": "fastino/gliner2-base-v1",
+    "model_load_count": 1,
+    "model_revision": "f5b2ecedebe4381b088c1cf276f5bf72a52cac54",
+    "package_version": "1.3.2",
+    "provider_release": "graphify-gliner2-cpu-v1",
+    "provider_release_hash": "980cedfda1250987d592caecc0fb257dfa855db9b187f517839a17b872218ac4",
+    "ready": true,
+    "threshold": 0.5
+  },
+  "package_pins": {
+    "accelerate": "1.14.0",
+    "gliner2": "1.3.2",
+    "peft": "0.20.0",
+    "safetensors": "0.7.0",
+    "torch": "2.12.0",
+    "transformers": "4.57.6"
+  },
+  "predictions": [
+    [
+      {
+        "confidence": 0.9995187520980835,
+        "end": 8,
+        "entity_type": "person",
+        "start": 0,
+        "text": "Polymath"
+      },
+      {
+        "confidence": 0.9995515942573547,
+        "end": 21,
+        "entity_type": "software",
+        "start": 14,
+        "text": "MongoDB"
+      },
+      {
+        "confidence": 0.8911483883857727,
+        "end": 49,
+        "entity_type": "artifact",
+        "start": 31,
+        "text": "canonical evidence"
+      },
+      {
+        "confidence": 0.966711163520813,
+        "end": 49,
+        "entity_type": "document",
+        "start": 31,
+        "text": "canonical evidence"
+      }
+    ],
+    [
+      {
+        "confidence": 0.9996191263198853,
+        "end": 6,
+        "entity_type": "organization",
+        "start": 0,
+        "text": "OpenAI"
+      },
+      {
+        "confidence": 0.9999991655349731,
+        "end": 25,
+        "entity_type": "person",
+        "start": 15,
+        "text": "Sam Altman"
+      }
+    ]
+  ],
+  "retired_provider_modules_loaded": [],
+  "retired_providers_not_loaded": true,
+  "same_provider_object": true,
+  "schema_version": "polymath.gliner2_cpu_proof.v1",
+  "single_warm_model": true,
+  "status": "passed"
+}

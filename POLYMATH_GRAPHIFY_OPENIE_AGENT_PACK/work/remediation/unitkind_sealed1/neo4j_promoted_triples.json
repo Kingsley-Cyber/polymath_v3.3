@@ -1,0 +1,466 @@
+[
+  {
+    "evidence_count": 0,
+    "object": "calibrated telemetry points",
+    "object_entity_id": "entity:calibrated-telemetry-points",
+    "predicate": "consumes",
+    "subject": "alert engine",
+    "subject_entity_id": "entity:alert-engine"
+  },
+  {
+    "evidence_count": 0,
+    "object": "limit checking process",
+    "object_entity_id": "entity:limit-checking-process",
+    "predicate": "implements",
+    "subject": "alert engine",
+    "subject_entity_id": "entity:alert-engine"
+  },
+  {
+    "evidence_count": 0,
+    "object": "anomaly notices",
+    "object_entity_id": "entity:anomaly-notices",
+    "predicate": "produces",
+    "subject": "alert engine",
+    "subject_entity_id": "entity:alert-engine"
+  },
+  {
+    "evidence_count": 0,
+    "object": "calibrated telemetry points",
+    "object_entity_id": "entity:calibrated-telemetry-points",
+    "predicate": "consumes",
+    "subject": "archive process",
+    "subject_entity_id": "entity:archive-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "processing floor",
+    "object_entity_id": "entity:processing-floor",
+    "predicate": "consumes",
+    "subject": "archive process",
+    "subject_entity_id": "entity:archive-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mission telemetry archive",
+    "object_entity_id": "entity:mission-telemetry-archive",
+    "predicate": "produces",
+    "subject": "archive process",
+    "subject_entity_id": "entity:archive-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "tidegauge",
+    "object_entity_id": "entity:tidegauge",
+    "predicate": "uses",
+    "subject": "archive process",
+    "subject_entity_id": "entity:archive-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "cinder mesa ground station",
+    "object_entity_id": "entity:cinder-mesa-ground-station",
+    "predicate": "owns",
+    "subject": "aurelia orbital",
+    "subject_entity_id": "entity:aurelia-orbital"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mission telemetry archive",
+    "object_entity_id": "entity:mission-telemetry-archive",
+    "predicate": "owns",
+    "subject": "aurelia orbital",
+    "subject_entity_id": "entity:aurelia-orbital"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mission telemetry archive",
+    "object_entity_id": "entity:mission-telemetry-archive",
+    "predicate": "consumes",
+    "subject": "backfill process",
+    "subject_entity_id": "entity:backfill-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "regenerated point set",
+    "object_entity_id": "entity:regenerated-point-set",
+    "predicate": "produces",
+    "subject": "backfill process",
+    "subject_entity_id": "entity:backfill-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame envelopes",
+    "object_entity_id": "entity:frame-envelopes",
+    "predicate": "derived_from",
+    "subject": "calibrated telemetry points",
+    "subject_entity_id": "entity:calibrated-telemetry-points"
+  },
+  {
+    "evidence_count": 0,
+    "object": "safe hold response process",
+    "object_entity_id": "entity:safe-hold-response-process",
+    "predicate": "defines",
+    "subject": "contingency playbook",
+    "subject_entity_id": "entity:contingency-playbook"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame transport process",
+    "object_entity_id": "entity:frame-transport-process",
+    "predicate": "supports",
+    "subject": "copperline",
+    "subject_entity_id": "entity:copperline"
+  },
+  {
+    "evidence_count": 0,
+    "object": "accepted envelopes",
+    "object_entity_id": "entity:accepted-envelopes",
+    "predicate": "consumes",
+    "subject": "decommutation and calibration unit",
+    "subject_entity_id": "entity:decommutation-and-calibration-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "copperline",
+    "object_entity_id": "entity:copperline",
+    "predicate": "depends_on",
+    "subject": "decommutation and calibration unit",
+    "subject_entity_id": "entity:decommutation-and-calibration-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "decommutation process",
+    "object_entity_id": "entity:decommutation-process",
+    "predicate": "implements",
+    "subject": "decommutation and calibration unit",
+    "subject_entity_id": "entity:decommutation-and-calibration-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "skyloom",
+    "object_entity_id": "entity:skyloom",
+    "predicate": "part_of",
+    "subject": "decommutation and calibration unit",
+    "subject_entity_id": "entity:decommutation-and-calibration-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "calibrated telemetry points",
+    "object_entity_id": "entity:calibrated-telemetry-points",
+    "predicate": "produces",
+    "subject": "decommutation and calibration unit",
+    "subject_entity_id": "entity:decommutation-and-calibration-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "latchkey",
+    "object_entity_id": "entity:latchkey",
+    "predicate": "uses",
+    "subject": "decommutation and calibration unit",
+    "subject_entity_id": "entity:decommutation-and-calibration-unit"
+  },
+  {
+    "evidence_count": 0,
+    "object": "calibration table set",
+    "object_entity_id": "entity:calibration-table-set",
+    "predicate": "uses",
+    "subject": "decommutation process",
+    "subject_entity_id": "entity:decommutation-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "calibration table set",
+    "object_entity_id": "entity:calibration-table-set",
+    "predicate": "owns",
+    "subject": "dr maren oduya",
+    "subject_entity_id": "entity:dr-maren-oduya"
+  },
+  {
+    "evidence_count": 0,
+    "object": "ninety days",
+    "object_entity_id": "entity:ninety-days",
+    "predicate": "derived_from",
+    "subject": "drift report",
+    "subject_entity_id": "entity:drift-report"
+  },
+  {
+    "evidence_count": 0,
+    "object": "flight dynamics review",
+    "object_entity_id": "entity:flight-dynamics-review",
+    "predicate": "supports",
+    "subject": "drift report",
+    "subject_entity_id": "entity:drift-report"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raw downlink stream",
+    "object_entity_id": "entity:raw-downlink-stream",
+    "predicate": "consumes",
+    "subject": "eastern horizon",
+    "subject_entity_id": "entity:eastern-horizon"
+  },
+  {
+    "evidence_count": 0,
+    "object": "limit checking process",
+    "object_entity_id": "entity:limit-checking-process",
+    "predicate": "implements",
+    "subject": "engine",
+    "subject_entity_id": "entity:engine"
+  },
+  {
+    "evidence_count": 0,
+    "object": "operator fatigue",
+    "object_entity_id": "entity:operator-fatigue",
+    "predicate": "causes",
+    "subject": "false limit trips",
+    "subject_entity_id": "entity:false-limit-trips"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame integrity",
+    "object_entity_id": "entity:frame-integrity",
+    "predicate": "defines",
+    "subject": "frame integrity charter",
+    "subject_entity_id": "entity:frame-integrity-charter"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame envelope",
+    "object_entity_id": "entity:frame-envelope",
+    "predicate": "defines",
+    "subject": "frame registry",
+    "subject_entity_id": "entity:frame-registry"
+  },
+  {
+    "evidence_count": 0,
+    "object": "eight second bursts",
+    "object_entity_id": "entity:eight-second-bursts",
+    "predicate": "consumes",
+    "subject": "groundgate",
+    "subject_entity_id": "entity:groundgate"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raw downlink stream",
+    "object_entity_id": "entity:raw-downlink-stream",
+    "predicate": "consumes",
+    "subject": "groundgate",
+    "subject_entity_id": "entity:groundgate"
+  },
+  {
+    "evidence_count": 0,
+    "object": "station scheduler",
+    "object_entity_id": "entity:station-scheduler",
+    "predicate": "depends_on",
+    "subject": "groundgate",
+    "subject_entity_id": "entity:groundgate"
+  },
+  {
+    "evidence_count": 0,
+    "object": "skyloom",
+    "object_entity_id": "entity:skyloom",
+    "predicate": "part_of",
+    "subject": "groundgate",
+    "subject_entity_id": "entity:groundgate"
+  },
+  {
+    "evidence_count": 0,
+    "object": "frame envelope",
+    "object_entity_id": "entity:frame-envelope",
+    "predicate": "produces",
+    "subject": "groundgate",
+    "subject_entity_id": "entity:groundgate"
+  },
+  {
+    "evidence_count": 0,
+    "object": "palisade",
+    "object_entity_id": "entity:palisade",
+    "predicate": "uses",
+    "subject": "groundgate",
+    "subject_entity_id": "entity:groundgate"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raw downlink stream",
+    "object_entity_id": "entity:raw-downlink-stream",
+    "predicate": "consumes",
+    "subject": "kestrel",
+    "subject_entity_id": "entity:kestrel"
+  },
+  {
+    "evidence_count": 0,
+    "object": "raw downlink stream",
+    "object_entity_id": "entity:raw-downlink-stream",
+    "predicate": "consumes",
+    "subject": "kst 14",
+    "subject_entity_id": "entity:kst-14"
+  },
+  {
+    "evidence_count": 0,
+    "object": "pass overruns",
+    "object_entity_id": "entity:pass-overruns",
+    "predicate": "causes",
+    "subject": "march blackout event",
+    "subject_entity_id": "entity:march-blackout-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "two",
+    "object_entity_id": "entity:two",
+    "predicate": "causes",
+    "subject": "march blackout event",
+    "subject_entity_id": "entity:march-blackout-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "cinder mesa ground station",
+    "object_entity_id": "entity:cinder-mesa-ground-station",
+    "predicate": "related_to",
+    "subject": "march blackout event",
+    "subject_entity_id": "entity:march-blackout-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "march 14th",
+    "object_entity_id": "entity:march-14th",
+    "predicate": "related_to",
+    "subject": "march blackout event",
+    "subject_entity_id": "entity:march-blackout-event"
+  },
+  {
+    "evidence_count": 0,
+    "object": "anomaly notices",
+    "object_entity_id": "entity:anomaly-notices",
+    "predicate": "consumes",
+    "subject": "ops console",
+    "subject_entity_id": "entity:ops-console"
+  },
+  {
+    "evidence_count": 0,
+    "object": "skyloom",
+    "object_entity_id": "entity:skyloom",
+    "predicate": "part_of",
+    "subject": "ops console",
+    "subject_entity_id": "entity:ops-console"
+  },
+  {
+    "evidence_count": 0,
+    "object": "pass predictions",
+    "object_entity_id": "entity:pass-predictions",
+    "predicate": "produces",
+    "subject": "orrery",
+    "subject_entity_id": "entity:orrery"
+  },
+  {
+    "evidence_count": 0,
+    "object": "pass predictions",
+    "object_entity_id": "entity:pass-predictions",
+    "predicate": "consumes",
+    "subject": "pass planning service",
+    "subject_entity_id": "entity:pass-planning-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "spacecraft recovery",
+    "object_entity_id": "entity:spacecraft-recovery",
+    "predicate": "supports",
+    "subject": "safe hold response process",
+    "subject_entity_id": "entity:safe-hold-response-process"
+  },
+  {
+    "evidence_count": 0,
+    "object": "900 milliseconds",
+    "object_entity_id": "entity:900-milliseconds",
+    "predicate": "defines",
+    "subject": "service commitment letter",
+    "subject_entity_id": "entity:service-commitment-letter"
+  },
+  {
+    "evidence_count": 0,
+    "object": "archive completeness",
+    "object_entity_id": "entity:archive-completeness",
+    "predicate": "defines",
+    "subject": "service commitment letter",
+    "subject_entity_id": "entity:service-commitment-letter"
+  },
+  {
+    "evidence_count": 0,
+    "object": "p99 delivery latency",
+    "object_entity_id": "entity:p99-delivery-latency",
+    "predicate": "defines",
+    "subject": "service commitment letter",
+    "subject_entity_id": "entity:service-commitment-letter"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mission operations",
+    "object_entity_id": "entity:mission-operations",
+    "predicate": "supports",
+    "subject": "skyloom",
+    "subject_entity_id": "entity:skyloom"
+  },
+  {
+    "evidence_count": 0,
+    "object": "alarms",
+    "object_entity_id": "entity:alarms",
+    "predicate": "causes",
+    "subject": "spacecraft bus",
+    "subject_entity_id": "entity:spacecraft-bus"
+  },
+  {
+    "evidence_count": 0,
+    "object": "orrery",
+    "object_entity_id": "entity:orrery",
+    "predicate": "uses",
+    "subject": "station scheduler",
+    "subject_entity_id": "entity:station-scheduler"
+  },
+  {
+    "evidence_count": 0,
+    "object": "false limit trips",
+    "object_entity_id": "entity:false-limit-trips",
+    "predicate": "causes",
+    "subject": "thermal sensor saturation",
+    "subject_entity_id": "entity:thermal-sensor-saturation"
+  },
+  {
+    "evidence_count": 0,
+    "object": "downsampled retrieval",
+    "object_entity_id": "entity:downsampled-retrieval",
+    "predicate": "supports",
+    "subject": "tidegauge",
+    "subject_entity_id": "entity:tidegauge"
+  },
+  {
+    "evidence_count": 0,
+    "object": "mission telemetry archive",
+    "object_entity_id": "entity:mission-telemetry-archive",
+    "predicate": "consumes",
+    "subject": "trend service",
+    "subject_entity_id": "entity:trend-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "regenerated point set",
+    "object_entity_id": "entity:regenerated-point-set",
+    "predicate": "consumes",
+    "subject": "trend service",
+    "subject_entity_id": "entity:trend-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "drift report",
+    "object_entity_id": "entity:drift-report",
+    "predicate": "produces",
+    "subject": "trend service",
+    "subject_entity_id": "entity:trend-service"
+  },
+  {
+    "evidence_count": 0,
+    "object": "copperline",
+    "object_entity_id": "entity:copperline",
+    "predicate": "owns",
+    "subject": "veldstone systems",
+    "subject_entity_id": "entity:veldstone-systems"
+  }
+]

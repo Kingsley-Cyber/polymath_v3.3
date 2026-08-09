@@ -1,0 +1,31 @@
+{
+  "deleted_counts": {
+    "assertion_edges": 0,
+    "assertion_support": 0,
+    "mentions": 0,
+    "nodes": 0,
+    "relations": 0
+  },
+  "first_after": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "passed": true,
+  "second_after": {
+    "counts": {
+      "assertion_edges": 175,
+      "assertion_support": 175,
+      "mentions": 434,
+      "nodes": 425,
+      "relations": 15
+    },
+    "digest": "130a8300be27a5c2dfe4de437efbfdc796d81d7d5704de4870aee3b48e40665f"
+  },
+  "status": "passed"
+}
