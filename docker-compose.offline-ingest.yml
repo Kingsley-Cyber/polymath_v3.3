@@ -52,6 +52,7 @@ services:
       - "./config:/app/config:ro"
     environment:
       APP_ENV: offline-ingest-worker
+      INGEST_MAX_ACTIVE_BATCHES: ${INGEST_MAX_ACTIVE_BATCHES:-0}
       # PRODUCTION extraction stack (owner-ratified consolidation 2026-08-08):
       # ONE heavy encoder — Relex-large on the host-MPS sidecar serves both
       # entities and relations. GLiNER2/bi/composite are evaluation-only

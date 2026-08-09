@@ -3536,6 +3536,15 @@ def start_local_batch_runner(
     existing = _RUNNING_BATCHES.get(batch_id)
     if existing and not existing.done():
         return False
+    # Fleet mode: cap concurrent batch runners per worker process so a
+    # multi-worker deployment spreads corpus lanes instead of one process
+    # hoarding every lane (observed 2026-08-09: one worker owned all three
+    # corpora single-core while two idled on "lane owned").
+    cap = int(os.environ.get("INGEST_MAX_ACTIVE_BATCHES", "0") or 0)
+    if cap > 0:
+        active = sum(1 for t in _RUNNING_BATCHES.values() if not t.done())
+        if active >= cap:
+            return False
 
     async def _run() -> None:
         try:
