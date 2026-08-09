@@ -114,7 +114,10 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      # GDS plugin load takes ~200s on this host — a 30s grace declared the
+      # container unhealthy mid-boot and autoheal kill-looped it (54+
+      # restarts, fleet-wide graph outage 2026-08-09). 300s covers it.
+      start_period: 300s
     restart: unless-stopped
 
   redis:
