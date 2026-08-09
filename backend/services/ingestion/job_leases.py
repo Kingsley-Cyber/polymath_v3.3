@@ -23,10 +23,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_JOB_LEASE_SECONDS = 15 * 60
 DEFAULT_JOB_MAX_ATTEMPTS = 5
 DEFAULT_LANE_LEASE_SECONDS = 30 * 60
-# A lane owner whose heartbeat is older than this is dead, not busy (the
-# heartbeat renews every ≤60s): same-batch runners may adopt its lease, and
-# batch schedulers treat its corpus as available.
-DEFAULT_LANE_ADOPT_STALE_SECONDS = 180.0
+# A lane owner whose heartbeat is older than this is dead, not busy: same-
+# batch runners may adopt its lease, and batch schedulers treat its corpus as
+# available. The beat renews every ≤60s, BUT the heartbeat coroutine shares
+# the runner's event loop — sync CPU phases (book-scale spacy/chunking) block
+# it for minutes while the runner is perfectly alive. Observed 2026-08-09: a
+# healthy runner's beat went 400s+ stale mid-book. Keep this comfortably
+# above the longest legitimate sync stretch; a wrongful adoption is fenced
+# (the loser's renewal fails by lease_id and it stands down) but costs a
+# re-run of the stolen item.
+DEFAULT_LANE_ADOPT_STALE_SECONDS = 420.0
 SUPERSEDED_JOB_STATUS = "superseded"
 DEAD_LETTER_JOB_STATUS = "dead_letter"
 LANE_LEASE_COLLECTION = "ingest_lane_leases"
