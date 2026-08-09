@@ -2241,6 +2241,14 @@ class Settings(BaseSettings):
             "effects and shadow-record registry lookups. Empty = no fixture ranking."
         ),
     )
+    ALIAS_SHADOW_BUILD_AT_INGEST: bool = Field(
+        default=True,
+        description=(
+            "Build alias SHADOW records (candidates -> gate -> clustering -> "
+            "schema projection) when an ingest batch completes. Shadow-side "
+            "only; production schema writes stay hard-locked."
+        ),
+    )
     ALIAS_RETRIEVAL_PRODUCTION_SCHEMA_WRITES: bool = Field(
         default=False,
         description="Hard lock — Phase 8 must not write production schemas.",

@@ -1561,6 +1561,27 @@ async def refresh_batch_counts(
     else:
         update["completed_at"] = None
     await db[BATCHES].update_one({"batch_id": batch_id}, {"$set": update})
+    # Alias shadow build fires exactly on the transition INTO a completed
+    # batch (owner-ordered production wiring). Shadow-side only, never
+    # fails the refresh, and re-running is idempotent by design.
+    if (
+        status in {BATCH_DONE, BATCH_PARTIAL}
+        and batch.get("status") not in {BATCH_DONE, BATCH_PARTIAL}
+        and getattr(get_settings(), "ALIAS_SHADOW_BUILD_AT_INGEST", False)
+    ):
+        try:
+            from services.ingestion.alias_shadow_build import (
+                rebuild_corpus_alias_shadow,
+            )
+
+            await rebuild_corpus_alias_shadow(
+                db, corpus_id=str(batch.get("corpus_id") or "")
+            )
+        except Exception:  # noqa: BLE001 — observability lane, never blocks
+            logger.exception(
+                "alias shadow rebuild failed for corpus %s",
+                str(batch.get("corpus_id") or "")[:8],
+            )
     refreshed = await db[BATCHES].find_one({"batch_id": batch_id}, {"_id": 0})
     return refreshed or {**batch, **update}
 

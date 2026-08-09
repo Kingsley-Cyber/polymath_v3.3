@@ -881,7 +881,7 @@ class IngestionConfig(BaseModel):
         default=False, description="Run GHOST B: entity extraction + Neo4j graph"
     )
     chunk_summarization: bool = Field(
-        default=False, description="Run GHOST A: summarize parents + embed summaries"
+        default=True, description="Run GHOST A: summarize parents + embed summaries"
     )
     target_qdrant_collections: list[str] = Field(
         default_factory=lambda: ["naive", "hrag"],

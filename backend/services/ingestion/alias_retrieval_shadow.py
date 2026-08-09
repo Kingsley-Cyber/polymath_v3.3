@@ -39,8 +39,50 @@ def register_shadow_schema_records(
 def clear_shadow_schema_registry(corpus_id: str | None = None) -> None:
     if corpus_id is None:
         _SHADOW_RECORD_REGISTRY.clear()
+        _HYDRATED_CORPora_ATTEMPTED.clear()
     else:
         _SHADOW_RECORD_REGISTRY.pop(str(corpus_id), None)
+        _HYDRATED_CORPora_ATTEMPTED.discard(str(corpus_id))
+
+
+# Corpora whose durable shadow rows we already tried to hydrate this process.
+_HYDRATED_CORPora_ATTEMPTED: set[str] = set()
+
+
+async def hydrate_shadow_records_from_db(corpus_ids: Sequence[str]) -> int:
+    """Load durable shadow schema projections into the in-process registry.
+
+    The ingest worker writes `schema_entity_shadow_projections` (see
+    alias_shadow_build); the query process hydrates on first miss per
+    corpus. Attempt-once per process: a corpus rebuilt mid-process is
+    picked up on the next process start (shadow lane is observability,
+    not authority).
+    """
+    from services.conversation import conversation_service
+
+    db = conversation_service._db
+    if db is None:
+        return 0
+    loaded = 0
+    for corpus_id in {str(c) for c in corpus_ids}:
+        if corpus_id in _HYDRATED_CORPora_ATTEMPTED or corpus_id in _SHADOW_RECORD_REGISTRY:
+            continue
+        _HYDRATED_CORPora_ATTEMPTED.add(corpus_id)
+        rows = await db["schema_entity_shadow_projections"].find(
+            {"corpus_id": corpus_id}, {"_id": 0, "created_at": 0}
+        ).to_list(length=None)
+        records = []
+        for row in rows:
+            row.pop("identity_authority", None)
+            row.pop("note", None)
+            try:
+                records.append(ShadowSchemaRecordV1.model_validate(row))
+            except Exception:  # noqa: BLE001 — skip malformed rows, never raise
+                continue
+        if records:
+            _SHADOW_RECORD_REGISTRY[corpus_id] = records
+            loaded += len(records)
+    return loaded
 
 
 def fixture_corpus_allowlist(settings: Any | None = None) -> set[str]:
@@ -406,18 +448,19 @@ async def run_alias_retrieval_shadow_async(
     deadline = float(
         getattr(settings, "ALIAS_RETRIEVAL_SHADOW_DEADLINE_SECONDS", 0.35)
     )
-    try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(
-                run_alias_retrieval_shadow,
-                query=query,
-                tier=tier,
-                corpus_ids=corpus_ids,
-                finalists=finalists,
-                settings=settings,
-            ),
-            timeout=deadline,
+    async def _hydrate_then_run():
+        await hydrate_shadow_records_from_db(corpus_ids)
+        return await asyncio.to_thread(
+            run_alias_retrieval_shadow,
+            query=query,
+            tier=tier,
+            corpus_ids=corpus_ids,
+            finalists=finalists,
+            settings=settings,
         )
+
+    try:
+        return await asyncio.wait_for(_hydrate_then_run(), timeout=deadline)
     except Exception as exc:
         return list(finalists), {
             "status": "schema_lane_failure_fallback",

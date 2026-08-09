@@ -195,19 +195,31 @@ class RelexSidecarEntityProvider:
         relation rows (text-local offsets, raw label+score) ride the census
         artifact to the relation lane, which then makes no second pass.
         """
+        from services.extraction import relex_sidecar_client
         from services.extraction.graphify_relations import _relex_relation_labels
-        from services.extraction.relex_sidecar_client import infer
 
         active = schema_descriptions(adapters)
         label_strings = sorted(label.replace("_", " ").lower() for label in active)
         back = {label.replace("_", " ").lower(): label for label in active}
+        # Transport batching only: the sidecar scores each window
+        # independently, so slicing the call changes nothing semantic — but
+        # a whole book's windows in ONE call exceeds any sane HTTP timeout
+        # (O5 soak finding: 3.3MB books died at the 300s bound forever).
+        try:
+            batch = max(1, int(os.environ.get("RELEX_INFER_BATCH", "16")))
+        except ValueError:
+            batch = 16
+        text_list = list(texts)
+        results = []
+        for start in range(0, len(text_list), batch):
+            results.extend(relex_sidecar_client.infer(
+                text_list[start:start + batch], entity_labels=label_strings,
+                relation_labels=_relex_relation_labels(),
+                **_relex_thresholds(),
+            ))
         entity_rows: list[list[EntityPrediction]] = []
         relation_rows: list[list[dict]] = []
-        for result in infer(
-            list(texts), entity_labels=label_strings,
-            relation_labels=_relex_relation_labels(),
-            **_relex_thresholds(),
-        ):
+        for result in results:
             text = texts[len(entity_rows)]
             row: list[EntityPrediction] = []
             for item in result.entities:

@@ -705,7 +705,7 @@ class GlobalIngestionSummarySettings(BaseModel):
     """
 
     enabled: bool = Field(
-        default=False,
+        default=True,
         description="Default value for chunk_summarization on newly created corpora.",
     )
     max_summary_tokens: int = Field(
