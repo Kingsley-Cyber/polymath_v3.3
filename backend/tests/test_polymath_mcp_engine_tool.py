@@ -185,3 +185,70 @@ async def test_switch_refuses_unqualified_production_but_allows_qualification(mo
     assert prod["status"] == "refused" and "not production-qualified" in prod["reason"]
     assert qual["status"] == "routed" and qual["route"]["mode"] == "qualification"
     assert qual["route"]["expected_release"] == "relex-large-cuda-sidecar-v1"
+
+
+@pytest.mark.asyncio
+async def test_wake_tool_sends_magic_packet_and_polls_health(monkeypatch):
+    from services.extraction import engine_routing
+
+    sent = []
+
+    class _FakeSock:
+        def setsockopt(self, *a): pass
+        def sendto(self, packet, addr): sent.append((packet, addr))
+        def close(self): pass
+
+    health = {"release": "relex-large-cuda-sidecar-v1", "device": "cuda"}
+
+    class _Resp:
+        def read(self):
+            import json
+            return json.dumps(health).encode()
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+
+    class _Routing:
+        async def find_one(self, q):
+            return {"_id": "primary",
+                    "wake": {"mac_address": "AA:BB:CC:DD:EE:FF",
+                             "sidecar_url": "http://gpu-box:8737"}}
+
+    class _Db(dict):
+        def __missing__(self, key):
+            value = _Routing(); self[key] = value; return value
+
+    fake_db = _Db()
+    from polymath_mcp.auth import SYSTEM_USER_ID, _current_user_id
+    token = _current_user_id.set(SYSTEM_USER_ID)
+    try:
+        with patch("socket.socket", return_value=_FakeSock()), \
+             patch("urllib.request.urlopen", return_value=_Resp()), \
+             patch.object(type(mcp_tools.ingestion_service), "db",
+                          property(lambda self: fake_db)):
+            out = await mcp_tools.polymath_wake_extraction_engine(wait_seconds=10)
+    finally:
+        _current_user_id.reset(token)
+    assert out["status"] == "awake_and_healthy" and out["healthy"] is True
+    assert out["release"] == "relex-large-cuda-sidecar-v1"
+    # magic packet: 6x 0xFF + MAC 16 times, both discard ports
+    assert len(sent) == 2
+    packet = sent[0][0]
+    assert packet[:6] == b"\xff" * 6 and len(packet) == 6 + 6 * 16
+
+
+@pytest.mark.asyncio
+async def test_wake_tool_refuses_without_mac(monkeypatch):
+    class _Routing:
+        async def find_one(self, q): return None
+    class _Db(dict):
+        def __missing__(self, key):
+            value = _Routing(); self[key] = value; return value
+    from polymath_mcp.auth import SYSTEM_USER_ID, _current_user_id
+    token = _current_user_id.set(SYSTEM_USER_ID)
+    try:
+        with patch.object(type(mcp_tools.ingestion_service), "db",
+                          property(lambda self: _Db())):
+            out = await mcp_tools.polymath_wake_extraction_engine()
+    finally:
+        _current_user_id.reset(token)
+    assert out["status"] == "refused" and "mac" in out["reason"].lower()

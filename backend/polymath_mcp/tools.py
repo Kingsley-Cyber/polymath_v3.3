@@ -3236,6 +3236,73 @@ async def polymath_extraction_engine() -> dict[str, Any]:
     }
 
 
+async def polymath_wake_extraction_engine(
+    mac_address: str = "",
+    sidecar_url: str = "",
+    wait_seconds: int = 180,
+) -> dict[str, Any]:
+    """Wake the GPU workstation (Wake-on-LAN) and wait for its sidecar to
+    come healthy — the on-demand half of RunPod-style GPU access with no
+    human in the middle.
+
+    With no arguments, uses the wake config stored on the engine-routing
+    control document (fields wake.mac_address / wake.sidecar_url, set once
+    by ops). Sends the magic packet, then polls /health until the pinned
+    sidecar responds or the wait expires. Typical cold path: BIOS boot +
+    WSL + model load ~1-3 min. Follow with polymath_set_extraction_engine
+    to route to it; the determinism gates apply there as always.
+    """
+    import socket
+    import urllib.request as _rq
+
+    from services.extraction import engine_routing
+
+    _require_user_id_for_write()
+    route = None
+    if not mac_address or not sidecar_url:
+        db = ingestion_service.db
+        if db is not None:
+            route = await db[engine_routing.ROUTING_COLLECTION].find_one(
+                {"_id": engine_routing.ROUTING_DOC_ID}
+            )
+        wake = (route or {}).get("wake") or {}
+        mac_address = mac_address or str(wake.get("mac_address") or "")
+        sidecar_url = sidecar_url or str(wake.get("sidecar_url") or "")
+    if not mac_address:
+        return {"status": "refused",
+                "reason": "no MAC address given and none stored on the routing "
+                          "document (wake.mac_address) — ops must record it once"}
+    mac = mac_address.replace(":", "").replace("-", "").lower()
+    if len(mac) != 12:
+        return {"status": "refused", "reason": f"invalid MAC address: {mac_address!r}"}
+    packet = b"\xff" * 6 + bytes.fromhex(mac) * 16
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    for port in (9, 7):
+        sock.sendto(packet, ("255.255.255.255", port))
+    sock.close()
+    result: dict[str, Any] = {"status": "magic_packet_sent", "mac": mac_address,
+                              "healthy": False, "sidecar_url": sidecar_url or None}
+    if sidecar_url:
+        import asyncio
+        deadline = asyncio.get_event_loop().time() + max(10, int(wait_seconds))
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                with _rq.urlopen(sidecar_url.rstrip("/") + "/health", timeout=4) as resp:
+                    health = json.loads(resp.read())
+                result.update(status="awake_and_healthy", healthy=True,
+                              release=health.get("release"), device=health.get("device"))
+                break
+            except Exception:  # noqa: BLE001 — still booting
+                await asyncio.sleep(5)
+        else:
+            result["status"] = "magic_packet_sent_but_not_healthy_in_time"
+        if result["healthy"]:
+            result["next"] = ("polymath_set_extraction_engine(sidecar_url=...) — "
+                              "the qualification gate applies there")
+    return result
+
+
 async def polymath_set_extraction_engine(
     sidecar_url: str,
     mode: Literal["production", "qualification"] = "production",
@@ -3431,6 +3498,7 @@ ALL_TOOLS = (
     polymath_get_ingest_status,
     polymath_verify_ingestion,
     polymath_extraction_engine,
+    polymath_wake_extraction_engine,
     polymath_set_extraction_engine,
     polymath_delete_document,
     polymath_backfill_summaries,
