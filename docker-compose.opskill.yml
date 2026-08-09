@@ -1,0 +1,17 @@
+# O2 crash-drill override — NEVER used in production.
+# Arms the deterministic kill seam inside the ingest worker and shortens
+# the item lease so crashed-lease reclaim is drill-speed.
+#
+#   OPS_KILL_POINT=<stage-or-store point> docker compose \
+#     -f docker-compose.yml -f docker-compose.override.yml \
+#     -f docker-compose.offline-ingest.yml -f docker-compose.opskill.yml \
+#     --profile offline-ingest up -d ingest-worker
+#
+# The marker directory lives on the mounted drop-off volume so the seam
+# fires exactly once across the crash/restart cycle.
+services:
+  ingest-worker:
+    environment:
+      GRAPHIFY_OPS_KILL: ${OPS_KILL_POINT:-}
+      GRAPHIFY_OPS_KILL_MARKER: /data/ingest-drop-off/graphify_ops_kill
+      INGEST_STALE_JOB_MINUTES: "1"

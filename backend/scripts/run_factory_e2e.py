@@ -143,6 +143,21 @@ def _poll_and_validate(client: httpx.Client, cid: str, args) -> int:
 
     # ── stage validation ────────────────────────────────────────────────
     db = _mongo()
+
+    # Convergence wait: document status flips terminal before the async
+    # write tail (evidence points, summary lanes, cross-store verify)
+    # finishes. Snapshotting immediately races that tail and reports
+    # phantom INCOMPLETEs, so wait for write_state.verified on every doc.
+    convergence_deadline = time.monotonic() + min(300, max(60, args.timeout))
+    while time.monotonic() < convergence_deadline:
+        unverified = db.documents.count_documents({
+            "corpus_id": cid, "write_state.verified": {"$ne": True},
+        })
+        if unverified == 0:
+            print("  write-state converged: all documents verified")
+            break
+        print(f"  [{time.strftime('%H:%M:%S')}] awaiting write-state convergence: {unverified} unverified")
+        time.sleep(10)
     report: dict = {"corpus_id": cid, "corpus_name": args.corpus_name, "documents": terminal}
     docs_rows = list(db.documents.find({"corpus_id": cid}, {"doc_id": 1, "status": 1}))
     chunks = db.chunks.count_documents({"corpus_id": cid})
@@ -181,17 +196,34 @@ def _poll_and_validate(client: httpx.Client, cid: str, args) -> int:
         f"corpus_{cid8}_evidence",
         {"must": [{"key": "record_kind", "match": {"value": "parent_summary"}}]},
     )
+    # Legacy collections hold child AND summary points; parity against
+    # child-only eligibility flags must compare child rows on both sides.
+    legacy_children = {
+        kind: _qdrant_count(
+            f"corpus_{cid8}_{kind}",
+            {"must": [{"key": "chunk_type", "match": {"value": "child"}}]},
+        )
+        for kind in ("naive", "hrag", "graph")
+    }
+    # Noisy-kind chunks are never vectorized BY DESIGN and carry explicit
+    # per-chunk receipts (O4). Vector conservation is therefore
+    # children + by-design omissions == chunks — not children == chunks.
+    by_design_omissions = db.chunks.count_documents({
+        "corpus_id": cid, "vector_omitted_by_design.by_design": True,
+    })
     report["qdrant"] = {
         "legacy": legacy,
+        "legacy_children": legacy_children,
         "evidence_total": evidence_total,
         "evidence_children": child_points,
         "evidence_parent_summaries": summary_points,
         "evidence_flags": flags,
-        "one_point_per_child": child_points == chunks,
+        "by_design_omissions": by_design_omissions,
+        "child_conservation": child_points + by_design_omissions == chunks,
         "flag_parity_counts": {
-            "focused_vs_naive": (flags["eligible_focused"], legacy["naive"]),
-            "hierarchical_vs_hrag": (flags["eligible_hierarchical"], legacy["hrag"]),
-            "graph_seed_vs_graph": (flags["eligible_graph_seed"], legacy["graph"]),
+            "focused_vs_naive": (flags["eligible_focused"], legacy_children["naive"]),
+            "hierarchical_vs_hrag": (flags["eligible_hierarchical"], legacy_children["hrag"]),
+            "graph_seed_vs_graph": (flags["eligible_graph_seed"], legacy_children["graph"]),
         },
     }
 
@@ -219,7 +251,7 @@ def _poll_and_validate(client: httpx.Client, cid: str, args) -> int:
     ok = (
         len(terminal) == len(doc_ids)
         and not failed_receipts
-        and report["qdrant"]["one_point_per_child"]
+        and report["qdrant"]["child_conservation"]
         and evidence_total > 0
     )
     print("FACTORY E2E:", "PASS" if ok else "INCOMPLETE — see report")

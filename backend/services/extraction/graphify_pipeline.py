@@ -29,6 +29,7 @@ from models.graphify_contracts import (
     stable_id,
 )
 from services.control_plane import ledger
+from services.ops_drills.kill_seam import ops_kill_point
 from services.extraction.canonical import normalize_entity_type
 from services.extraction.gliner2_cpu_provider import (
     MODEL_ID,
@@ -169,6 +170,58 @@ async def _stage(
             raise RuntimeError(f"Graphify resume artifact hash mismatch at {stage.value}")
         return payload, dict(existing_receipt["receipt"]), True
 
+    # Crash-recovery reconciliation: the artifact write precedes the receipt
+    # write, so a crash in that gap leaves a durable, hash-verified artifact
+    # with no passing receipt. Stages are deterministic — adopt the artifact
+    # and complete the receipt instead of inferring again.
+    if (
+        existing_artifact
+        and existing_artifact.get("input_hash") == input_hash
+        and existing_artifact.get("output_hash")
+        and (existing_receipt or {}).get("status") != "passed"
+    ):
+        payload = dict(existing_artifact["payload"])
+        if stable_digest(_logical_payload(payload)) == existing_artifact["output_hash"]:
+            receipt_model = StageReceiptV1(
+                run_id=run_id,
+                document_id=doc_id,
+                stage=stage,
+                status="passed",
+                input_hash=input_hash,
+                output_hash=existing_artifact["output_hash"],
+                release_pins={**release_pins, "stage_release": release},
+                elapsed_seconds=0.0,
+                input_count=input_count,
+                output_count=int(output_count(payload)),
+                errors=(),
+                warnings=("reconciled_existing_artifact",),
+                retry_count=int((existing_receipt or {}).get("attempt_no") or 0),
+            ).model_dump(mode="json")
+            stored = await ledger.record_graphify_stage_receipt(
+                db,
+                receipt_id=receipt_id,
+                run_id=run_id,
+                corpus_id=corpus_id,
+                doc_id=doc_id,
+                stage=stage.value,
+                status="passed",
+                receipt=receipt_model,
+            )
+            await ledger.record_stage_attempt(
+                db,
+                corpus_id=corpus_id,
+                run_id=run_id,
+                doc_id=doc_id,
+                stage=stage.value,
+                action="graphify_stage_reconcile",
+                status="passed",
+                executor=PIPELINE_RELEASE,
+                receipt=receipt_model,
+                duration_ms=0,
+            )
+            return payload, dict(stored["receipt"]), True
+
+    ops_kill_point(f"{stage.value}:before_compute")
     started = time.perf_counter()
     stage_pins = {**release_pins, "stage_release": release}
     retry_count = int((existing_receipt or {}).get("attempt_no") or 0)
@@ -183,6 +236,7 @@ async def _stage(
         if not conserved:
             raise RuntimeError(f"Graphify stage conservation failed at {stage.value}")
         output_hash = stable_digest(_logical_payload(payload))
+        ops_kill_point(f"{stage.value}:after_compute")
         await mongo_writer.persist_graphify_stage_artifact(
             db,
             artifact_id=artifact_id,
@@ -194,6 +248,7 @@ async def _stage(
             release=release,
             payload=payload,
         )
+        ops_kill_point(f"{stage.value}:after_artifact")
         elapsed = time.perf_counter() - started
         receipt_model = StageReceiptV1(
             run_id=run_id,

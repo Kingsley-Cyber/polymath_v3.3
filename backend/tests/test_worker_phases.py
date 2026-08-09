@@ -386,6 +386,7 @@ def _install_mocks(
     checkpoint_mock = AsyncMock(side_effect=_checkpoint_side_effect)
     update_state_mock = AsyncMock()
     verify_mock = AsyncMock(return_value=(True, []))
+    stamp_omissions_mock = AsyncMock(return_value=0)
     summary_tree_mock = AsyncMock(return_value={})
     readiness_mock = AsyncMock(return_value=_ready_report())
     mongo_db = MagicMock()
@@ -407,6 +408,10 @@ def _install_mocks(
         patch.object(worker, "_checkpoint_child_chunks", checkpoint_mock),
         patch.object(worker.mongo_writer, "update_write_state", update_state_mock),
         patch("services.ingestion.verify.verify_ingest", verify_mock),
+        patch(
+            "services.ingestion.verify.stamp_by_design_vector_omissions",
+            stamp_omissions_mock,
+        ),
         patch("services.ingestion.summary_tree.build_and_store_tree", summary_tree_mock),
         patch(
             "services.retrieval_readiness.ensure_corpus_retrieval_ready",

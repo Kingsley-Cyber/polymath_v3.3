@@ -318,3 +318,32 @@ async def test_reducer_supported_entity_survives_without_an_accepted_relation() 
     assert "Temporary Coordination" in {
         entity.canonical_name for entity in output.report.results[0].entities
     }
+
+
+@pytest.mark.asyncio
+async def test_orphaned_artifact_is_adopted_without_reinference() -> None:
+    # Crash between artifact persistence and receipt write (O2 case C):
+    # the durable, hash-verified artifact must be adopted and its receipt
+    # completed WITHOUT running inference again.
+    db = _Db()
+    provider = _Provider()
+    first = await run_graphify_pipeline(
+        db=db, corpus_id="corpus", doc_id="doc",
+        text="Graphify uses MongoDB.", children=_children(), provider=provider,
+    )
+    receipts = db["graphify_stage_receipts"]
+    census_value = PipelineStage.ENTITY_CENSUS_COMPLETE.value
+    receipts.rows = [row for row in receipts.rows if row["stage"] != census_value]
+    fresh_provider = _Provider()
+    recovered = await run_graphify_pipeline(
+        db=db, corpus_id="corpus", doc_id="doc",
+        text="Graphify uses MongoDB.", children=_children(), provider=fresh_provider,
+    )
+    assert fresh_provider.calls == 0
+    assert recovered.identity_digest == first.identity_digest
+    census_receipt = next(
+        row for row in receipts.rows if row["stage"] == census_value
+    )
+    assert census_receipt["status"] == "passed"
+    assert "reconciled_existing_artifact" in census_receipt["receipt"]["warnings"]
+    assert len(db["graphify_stage_artifacts"].rows) == 14

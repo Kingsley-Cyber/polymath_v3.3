@@ -58,6 +58,35 @@ async def _expected_child_count(
     return int(await db["chunks"].count_documents(with_active_records(query)))
 
 
+async def stamp_by_design_vector_omissions(
+    db: AsyncIOMotorDatabase,
+    *,
+    doc_id: str,
+    corpus_id: str,
+) -> int:
+    """Give every noisy-kind (non-retrievable) chunk an explicit terminal
+    receipt for its intentionally missing child vector.
+
+    Vector conservation must never rest on re-deriving writer intent from
+    ``NOISY_KINDS``: every omitted chunk carries its own BY_DESIGN receipt, so
+    ``child_points + stamped_omissions == active_chunks`` is checkable from
+    the data alone (O4 closeout: never an unexplained 239/241).
+    """
+    res = await db["chunks"].update_many(
+        with_active_records({
+            "doc_id": doc_id,
+            "corpus_id": corpus_id,
+            "chunk_kind": {"$in": sorted(NOISY_KINDS)},
+            "vector_omitted_by_design": {"$exists": False},
+        }),
+        {"$set": {"vector_omitted_by_design": {
+            "by_design": True,
+            "reason": "noisy_kind_not_retrievable",
+        }}},
+    )
+    return int(res.modified_count)
+
+
 def expected_summary_points_from_state(write_state: Any) -> int | None:
     """Writer-intent expectation (2026-07-04): the qdrant phase stamps
     write_state.summary_points with the number of summary vectors it ACTUALLY
@@ -379,6 +408,35 @@ async def verify_ingest(
             errors.append(
                 f"mismatch: expected={expected} child vectors but "
                 f"{col} has {qcnt} child vectors"
+            )
+
+    # 3b. Vector-omission conservation: every active chunk is either an
+    # eligible child vector or carries an explicit BY_DESIGN omission
+    # receipt. Eligibility exclusions must never be implicit — an
+    # unexplained gap between Mongo chunks and child vectors is an error
+    # even when the per-collection expected counts happen to line up.
+    if target_qdrant_collections:
+        eligible_count = await _expected_child_count(
+            db,
+            doc_id=doc_id,
+            corpus_id=corpus_id,
+            collection_kind="naive",
+            exclude_noisy=True,
+        )
+        stamped_count = await db["chunks"].count_documents(
+            with_active_records({
+                "doc_id": doc_id,
+                "corpus_id": corpus_id,
+                "vector_omitted_by_design.by_design": True,
+            })
+        )
+        if eligible_count + stamped_count != mongo_chunk_count:
+            unexplained = mongo_chunk_count - eligible_count - stamped_count
+            errors.append(
+                "vector-omission conservation: "
+                f"{eligible_count} eligible + {stamped_count} by-design "
+                f"!= {mongo_chunk_count} active chunks "
+                f"({unexplained} unexplained omissions)"
             )
 
     # 3a. Summary breadth tier count. Child-vector counts intentionally filter

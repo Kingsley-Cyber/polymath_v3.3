@@ -18,7 +18,11 @@ class _Cursor:
 
 
 class _FakeChunks:
-    async def count_documents(self, _query):
+    async def count_documents(self, query):
+        # One eligible chunk, zero by-design omissions: the 3b conservation
+        # identity (eligible + stamped == active) holds at 1 + 0 == 1.
+        if "vector_omitted_by_design" in repr(query):
+            return 0
         return 1
 
     async def find_one(self, _query, _projection=None):
@@ -194,7 +198,8 @@ async def test_verify_ingest_checks_graph_retrieval_indexes(monkeypatch):
     assert ok is True
     assert errors == []
     wait_mock.assert_awaited_once()
-    assert expected_count_mock.await_count == 2
+    # qdrant expectation + 3b conservation identity + neo4j check
+    assert expected_count_mock.await_count == 3
     assert all(
         call.kwargs.get("exclude_noisy") is True
         for call in expected_count_mock.await_args_list

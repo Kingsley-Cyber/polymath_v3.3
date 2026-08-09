@@ -92,6 +92,7 @@ from models.schemas import IngestionConfig, IngestJobResponse, SourceTier, Write
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from qdrant_client import AsyncQdrantClient
 from services.embedder import embed_batch
+from services.ops_drills.kill_seam import ops_kill_point
 from dataclasses import asdict, dataclass, field
 
 from services.ghost_a import SummaryResult, SummaryTask, summarize_parents
@@ -4316,6 +4317,12 @@ async def run_ingest_job(
                     summary_sparse_map=summary_sparse_map,
                     facet_profile=facet_profile,
                 )
+            ops_kill_point("store:qdrant:after_write")
+            from services.ingestion.verify import stamp_by_design_vector_omissions
+
+            await stamp_by_design_vector_omissions(
+                db, doc_id=doc_id, corpus_id=corpus_id
+            )
             write_updates: dict[str, Any] = {
                 "qdrant_written": True,
                 "qdrant_written_at": datetime.utcnow(),
@@ -4576,6 +4583,7 @@ async def run_ingest_job(
                     ghost_b_metrics=ghost_b_metrics,
                     graphify_enrichment=graphify_enrichment,
                 )
+            ops_kill_point("store:neo4j:after_write")
             await mongo_writer.update_write_state(
                 db,
                 doc_id,
