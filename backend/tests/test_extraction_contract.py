@@ -18,9 +18,20 @@ def _resolve(*, corpus_engine=None, global_engine=None):
     )
 
 
-def test_engine_surface_is_graphify_or_off_only():
-    assert ENGINES == ("off", "graphify_cpu")
+def test_engine_surface_is_the_qualified_registry():
+    # Owner-ordered 2026-08-10: ghost_b_llm (provider-LLM lane) joins the
+    # registry; graphify_cpu remains canonical/default; retired names still
+    # fail closed (covered below).
+    assert ENGINES == ("off", "graphify_cpu", "ghost_b_llm")
     assert CANONICAL_ENGINE == "graphify_cpu"
+
+
+def test_ghost_b_llm_resolves_when_explicitly_selected():
+    contract = _resolve(corpus_engine="ghost_b_llm")
+    assert contract.engine == "ghost_b_llm"
+    assert contract.source == "corpus"
+    assert not contract.uses_graphify_cpu
+    assert not contract.errors
 
 
 def test_graphify_is_the_default_and_canonical_provider():
