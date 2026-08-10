@@ -345,6 +345,55 @@ async def _run_ghost_b_backfill(
                 "skipped": True,
             },
         )
+    if engine == "ghost_b_llm":
+        # Seam completion (2026-08-10): the dead-last enrichment pass rides
+        # this backfill path, so it must honor engine selection exactly like
+        # the inline worker dispatch — same pool builder, same lifecycle
+        # auto-start, same ExtractionResponse flow into the graph writer.
+        if not tasks:
+            return ExtractionBatchReport(
+                results=[], failures=[], metrics={"engine": engine}
+            )
+        from services.ghost_b import SchemaContext, extract_entities
+        from services.ingestion.model_lifecycle import ensure_model_lifecycle_ready
+        from services.ingestion.worker import _build_ghost_pool
+
+        pool = _build_ghost_pool(
+            list(getattr(config, "extraction_models", None) or [])
+        )
+        if not pool:
+            raise RuntimeError(
+                "ghost_b_llm requires a configured extraction_models pool"
+            )
+        ready_pool = await ensure_model_lifecycle_ready(
+            pool, purpose="graph_backfill"
+        )
+        if ready_pool is not None:
+            pool = ready_pool
+        if not pool:
+            raise RuntimeError(
+                "ghost_b_llm has no lifecycle-ready extraction_models lanes"
+            )
+        from config import get_settings as _gs
+
+        schema = SchemaContext(
+            entity_schema=config.entity_schema,
+            relation_schema=config.relation_schema,
+            strict=config.schema_strict,
+        )
+        report = await extract_entities(
+            tasks,
+            schema=schema,
+            pool=pool,
+            return_report=True,
+            enable_facts=_gs().EXTRACTION_ENABLE_FACTS,
+        )
+        if isinstance(report, ExtractionBatchReport):
+            report.metrics["engine"] = "ghost_b_llm"
+            return report
+        return ExtractionBatchReport(
+            results=list(report), failures=[], metrics={"engine": "ghost_b_llm"}
+        )
     if engine != "graphify_cpu":
         raise RuntimeError(f"unsupported extraction engine: {engine}")
     if not tasks:
