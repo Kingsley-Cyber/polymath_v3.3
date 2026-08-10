@@ -260,12 +260,13 @@ class IngestionConfig(BaseModel):
     extraction_models: list[_legacy.ModelProfileRef] = Field(default_factory=list)
     entity_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     models_linked: bool = False
-    # Per-corpus extraction contract. Graphify CPU is the only production
-    # extraction provider; "off" is an explicit vectors-only opt-out.
-    # Retired values fail validation and are never aliased or routed.
+    # Per-corpus extraction contract. Graphify CPU remains the default;
+    # ghost_b_llm is the explicitly selected provider-LLM lane and "off" is
+    # the vectors-only opt-out. Retired values still fail validation.
     extraction_engine: Literal[
         "off",
         "graphify_cpu",
+        "ghost_b_llm",
     ] = Field(default="graphify_cpu")
 
     # Default to the universal vocab so freshly-instantiated configs match
@@ -566,16 +567,18 @@ class RetrievalSettings(_legacy.RetrievalSettings):
 
 
 class ExtractionSettings(BaseModel):
-    """Global extraction policy with one provider and one explicit opt-out."""
+    """Global extraction policy with explicit CPU, provider-LLM, and off lanes."""
 
     engine: Literal[
         "off",
         "graphify_cpu",
+        "ghost_b_llm",
     ] = Field(
         default="graphify_cpu",
         description=(
             "'graphify_cpu' runs the canonical CPU GLiNER2 census and "
-            "parse-once deterministic relation pipeline; 'off' is vectors-only."
+            "parse-once deterministic relation pipeline; 'ghost_b_llm' runs "
+            "the configured Ghost B provider pool; 'off' is vectors-only."
         ),
     )
 

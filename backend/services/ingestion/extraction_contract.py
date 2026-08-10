@@ -1,4 +1,4 @@
-"""Fail-closed extraction contract for the single Graphify production path."""
+"""Fail-closed extraction contract for qualified extraction paths."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from services.provider_payload import (  # noqa: F401
     ingestion_provider_payload_extras,
 )
 
-ENGINES = ("off", "graphify_cpu")
+ENGINES = ("off", "graphify_cpu", "ghost_b_llm")
 CANONICAL_ENGINE = "graphify_cpu"
 
 
@@ -38,11 +38,11 @@ def resolve_extraction_contract(
     extraction_model_count: int,
     provider_pool_entries: list[object] | tuple[object, ...] | None = None,
 ) -> ExtractionContract:
-    """Resolve Graphify or the explicit vectors-only opt-out.
+    """Resolve a registered engine or the explicit vectors-only opt-out.
 
     Legacy arguments stay in the function signature until API callers finish
-    shedding provider-pool fields. They cannot select or activate a provider.
-    Retired engine names fail closed instead of being aliased to Graphify.
+    shedding provider-pool fields. Engine selection is corpus, then global,
+    then Graphify CPU by default. Retired names fail closed without aliases.
     """
     del models_linked, summary_model_count, extraction_model_count, provider_pool_entries
     corpus_value = str(corpus_engine or "").strip().lower()

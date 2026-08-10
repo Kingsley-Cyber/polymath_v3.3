@@ -11,8 +11,9 @@ Ingestion pipeline worker — locked pipeline order:
                    * DEPRECATED enrichment = cloud/LLM Ghost A, only when an
                      explicit summary_cost_controller / cost authority is open
                      (llm_summary_enrichment.v1). Not removed; not default.
-                 Extraction lane = graphify_cpu (canonical). Ghost B / Neo4j
-                 graph materialization runs iff use_neo4j=True.
+                 Extraction lane = graphify_cpu (default) or explicitly
+                 selected ghost_b_llm. Ghost B / Neo4j graph materialization
+                 runs iff use_neo4j=True.
   5. Mongo     → compact document metadata + parent summaries +
                  extraction rows. Flip mongo_written.
   6. Embed     → one embed_batch call over children+summary texts.
@@ -104,6 +105,7 @@ from services.ghost_b import (
     ExtractionTask,
     FactItem,
     RelationItem,
+    SchemaContext,
 )
 
 from services.facets import build_ingest_facet_profile
@@ -381,13 +383,21 @@ def _resource_profile_for_config(
     pool: list[Any] | None = None,
     source_location: str | None = None,
 ) -> ResourceProfile:
+    selected_engine = (
+        extraction_engine
+        if extraction_engine is not None
+        else getattr(config, "extraction_engine", None)
+    )
+    # The freeze-era resource planner intentionally recognizes only the local
+    # CPU/off envelopes. Ghost B owns remote-provider concurrency and VRAM
+    # throttling internally, so retain the existing Mac orchestration envelope
+    # instead of widening the planner's governance surface for this seam.
+    planner_engine = (
+        "graphify_cpu" if selected_engine == "ghost_b_llm" else selected_engine
+    )
     return plan_ingestion_resources(
         config=config,
-        extraction_engine=(
-            extraction_engine
-            if extraction_engine is not None
-            else getattr(config, "extraction_engine", None)
-        ),
+        extraction_engine=planner_engine,
         extraction_pool=(pool if pool is not None else []),
         source_location=source_location,
         settings=get_settings(),
@@ -885,6 +895,13 @@ def _build_ghost_pool(refs) -> list[dict]:
             lifecycle_auto_stop = True
         else:
             lifecycle_auto_stop = bool(data.get("lifecycle_auto_stop"))
+        lifecycle_api_key = data.get("lifecycle_api_key")
+        if not lifecycle_api_key and data.get("lifecycle_base_url"):
+            # The managed RTX lane intentionally uses one credential for its
+            # OpenAI endpoint and lifecycle controller. Keep an explicitly
+            # configured lifecycle key authoritative when providers separate
+            # those credentials.
+            lifecycle_api_key = data.get("api_key")
         out.append(
             {
                 "provider_preset": data.get("provider_preset") or "",
@@ -893,7 +910,7 @@ def _build_ghost_pool(refs) -> list[dict]:
                 "api_key": data.get("api_key") or None,
                 "max_concurrent": int(data.get("max_concurrent") or 1) or 1,
                 "lifecycle_base_url": data.get("lifecycle_base_url") or None,
-                "lifecycle_api_key": data.get("lifecycle_api_key") or None,
+                "lifecycle_api_key": lifecycle_api_key or None,
                 "lifecycle_auto_start": bool(data.get("lifecycle_auto_start")),
                 "lifecycle_auto_stop": lifecycle_auto_stop,
                 "lifecycle_up_path": data.get("lifecycle_up_path") or "/up",
@@ -1731,12 +1748,26 @@ async def _run_ghosts_parallel(
         ]
         from services.ingestion.extraction_contract import resolve_extraction_contract
 
+        global_engine = "graphify_cpu"
+        try:
+            from services.settings import settings_service as _settings_service
+
+            global_extraction = await _settings_service.get_system_extraction()
+            global_engine = str(
+                getattr(global_extraction, "engine", "graphify_cpu")
+                or "graphify_cpu"
+            )
+        except Exception as exc:  # noqa: BLE001 - canonical default is safe
+            logger.warning("global extraction settings unavailable: %s", exc)
+
+        pool_refs = list(getattr(config, "extraction_models", None) or [])
         contract = resolve_extraction_contract(
             corpus_engine=getattr(config, "extraction_engine", None),
-            global_engine="graphify_cpu",
-            models_linked=False,
-            summary_model_count=0,
-            extraction_model_count=0,
+            global_engine=global_engine,
+            models_linked=getattr(config, "models_linked", False),
+            summary_model_count=len(getattr(config, "summary_models", None) or []),
+            extraction_model_count=len(pool_refs),
+            provider_pool_entries=pool_refs,
         )
         if contract.errors:
             raise RuntimeError(
@@ -1751,6 +1782,200 @@ async def _run_ghosts_parallel(
                 "skipped": True,
             }
             return []
+
+        if contract.engine == "ghost_b_llm":
+            pool = _build_ghost_pool(pool_refs)
+            if not pool:
+                raise RuntimeError(
+                    "ghost_b_llm requires a configured extraction_models pool"
+                )
+
+            try:
+                from services.ingestion.provider_lane_health import (
+                    filter_extraction_pool_by_provider_health,
+                )
+
+                provider_health = await load_recent_provider_lane_health(
+                    db,
+                    corpus_id=corpus_id,
+                )
+                pool, skipped_lanes = filter_extraction_pool_by_provider_health(
+                    pool,
+                    provider_health,
+                )
+                if skipped_lanes:
+                    logger.warning(
+                        "phase=ghost_b_provider_health doc=%s corpus=%s skipped_lanes=%s",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        skipped_lanes,
+                    )
+                pool, concurrency_adjustments = adapt_extraction_pool_concurrency(
+                    pool,
+                    provider_health,
+                )
+                if concurrency_adjustments:
+                    logger.info(
+                        "phase=ghost_b_provider_concurrency doc=%s corpus=%s adjustments=%s",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        concurrency_adjustments,
+                    )
+            except Exception as exc:  # noqa: BLE001 - health is advisory
+                logger.warning("ghost_b provider health check failed: %s", exc)
+            if not pool:
+                raise RuntimeError(
+                    "ghost_b_llm has no available extraction_models lanes"
+                )
+
+            from services.ingestion.model_lifecycle import (
+                ensure_model_lifecycle_ready,
+            )
+
+            try:
+                ready_pool = await ensure_model_lifecycle_ready(
+                    pool,
+                    purpose="schema_lens",
+                )
+            except RuntimeError as exc:
+                warning = (
+                    "Ghost B extraction deferred: no configured provider lane is "
+                    f"currently available ({exc})."
+                )
+                warnings.append(warning)
+                logger.warning(
+                    "phase=ghost_b_deferred reason=provider_unavailable "
+                    "doc=%s corpus=%s error=%s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    exc,
+                )
+                return ghost_b_from_staging
+            if ready_pool is not None:
+                pool = ready_pool
+            if not pool:
+                raise RuntimeError(
+                    "ghost_b_llm has no lifecycle-ready extraction_models lanes"
+                )
+
+            schema_ctx = SchemaContext(
+                entity_schema=config.entity_schema,
+                relation_schema=config.relation_schema,
+                strict=config.schema_strict,
+            )
+            body_parents_for_lens = [
+                p
+                for p in parents
+                if not should_skip_ghost_b(
+                    getattr(p, "chunk_kind", None) or ChunkKind.BODY
+                )
+            ]
+            schema_lens = await get_or_create_schema_lens(
+                db=db,
+                corpus_id=corpus_id,
+                filename=filename or (existing_doc or {}).get("filename") or doc_id,
+                parents=body_parents_for_lens or parents,
+                children=body_children or children,
+                entity_schema=config.entity_schema,
+                relation_schema=config.relation_schema,
+                pool=pool,
+                model=model,
+                allow_llm=True,
+            )
+
+            async def _schema_resolver(
+                kind: str,
+                query_vec: list[float],
+                top_k: int,
+            ) -> list[str]:
+                return await retrieve_schema_for_chunk(
+                    qdrant_client,
+                    corpus_id,
+                    kind,
+                    query_vec,
+                    top_k,
+                )
+
+            logger.info(
+                "phase=ghost_b_run doc=%s corpus=%s engine=%s children=%d pool=%d strict=%s",
+                doc_id[:12],
+                corpus_id[:8],
+                contract.engine,
+                len(tasks),
+                len(pool),
+                schema_ctx.strict,
+            )
+            ghost_b_run_id = str(uuid.uuid4())
+            from services.ghost_b import extract_entities as _provider_extract
+
+            report = await _provider_extract(
+                tasks,
+                model=model,
+                schema=schema_ctx,
+                schema_lens=schema_lens,
+                chunk_vectors=None,
+                schema_resolver=_schema_resolver,
+                pool=pool,
+                return_report=True,
+                enable_facts=settings.EXTRACTION_ENABLE_FACTS,
+                audit_event_sink=_build_ghost_b_error_event_sink(
+                    db,
+                    run_id=ghost_b_run_id,
+                ),
+                audit_run_id=ghost_b_run_id,
+            )
+            if isinstance(report, ExtractionBatchReport):
+                fresh_results = report.results
+                failures = report.failures
+                metrics = dict(report.metrics or {})
+            else:  # Compatibility with injected test doubles.
+                fresh_results = report
+                failures = []
+                metrics = _ghost_b_metrics_for_skipped(fresh_results) or {}
+            metrics["engine"] = "ghost_b_llm"
+            metrics["schema_lens"] = schema_lens.to_dict()
+            ghost_b_failures.extend(failures)
+            ghost_b_metrics = metrics
+
+            if len(fresh_results) < len(tasks):
+                if not fresh_results and tasks:
+                    warning = _ghost_b_total_failure_warning(total=len(tasks))
+                    warnings.append(warning)
+                    logger.error(
+                        "phase=ghost_b_total_failure doc=%s corpus=%s total=%d failures=%d",
+                        doc_id[:12],
+                        corpus_id[:8],
+                        len(tasks),
+                        len(failures),
+                    )
+                    return ghost_b_from_staging or None
+                missing_ids = sorted(
+                    {task.chunk_id for task in tasks}
+                    - {result.chunk_id for result in fresh_results}
+                )
+                warnings.append(
+                    _ghost_b_partial_warning(
+                        extracted=len(fresh_results),
+                        total=len(tasks),
+                    )
+                )
+                logger.warning(
+                    "phase=ghost_b_partial doc=%s corpus=%s extracted=%d total=%d missing_sample=%s",
+                    doc_id[:12],
+                    corpus_id[:8],
+                    len(fresh_results),
+                    len(tasks),
+                    missing_ids[:5],
+                )
+
+            if not ghost_b_from_staging:
+                return list(fresh_results)
+            merged_by_chunk = {
+                result.chunk_id: result for result in ghost_b_from_staging
+            }
+            for result in fresh_results:
+                merged_by_chunk[result.chunk_id] = result
+            return list(merged_by_chunk.values())
 
         from services.extraction.graphify_pipeline import run_graphify_pipeline
 
