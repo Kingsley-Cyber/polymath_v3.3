@@ -485,6 +485,26 @@ async def reconcile_corpus(
     execution_receipt: dict[str, Any] | None = None
     if execute and (gap_totals or outbox_rows or pending_runs):
         lane_flags = _lane_run_flags(settings)
+        # Owner rule (2026-08-10), enforced by the control plane itself:
+        # enrichment must NEVER hinder the fast lane. While this corpus has
+        # inline batch work pending (queued/staged/running/recoverable), the
+        # extraction/graph/summary repair lanes stay CLOSED here — by code,
+        # not operator env discipline (V2 runs all lanes by default, so env
+        # flags alone cannot express the rule). The moment the corpus's
+        # inline drain finishes, the same gate opens automatically and the
+        # enrichment pass proceeds corpus-wide. Fail toward the rule.
+        try:
+            pending_inline = await db["ingest_batch_items"].count_documents({
+                "corpus_id": corpus_id,
+                "status": {"$in": [
+                    "queued", "staged", "running", "failed_recoverable",
+                ]},
+            })
+        except Exception:  # noqa: BLE001
+            pending_inline = 1
+        if pending_inline:
+            for gated in ("run_extraction_jobs", "run_summary_jobs", "run_graph_jobs"):
+                lane_flags[gated] = False
         started = time.monotonic()
         try:
             execution_receipt = await ingestion_service.run_bounded_corpus_repair_cycle(
