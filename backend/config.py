@@ -1506,6 +1506,14 @@ class Settings(BaseSettings):
             "chunks on the target corpus."
         ),
     )
+    TWO_PHASE_DEFER_ENRICH: bool = Field(
+        default=False,
+        description=(
+            "With TWO_PHASE_INGEST: skip the per-doc detached enrichment "
+            "task entirely so extraction/graph run DEAD LAST as a corpus "
+            "pass via the repair lanes (enable those after the drain)."
+        ),
+    )
     INGEST_PREFLIGHT_CANARY: bool = Field(
         default=True,
         description=(

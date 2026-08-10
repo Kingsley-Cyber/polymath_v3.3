@@ -4397,7 +4397,16 @@ async def run_ingest_job(
             try:
                 from config import get_settings as _gs_tp2
 
-                if bool(getattr(_gs_tp2(), "TWO_PHASE_INGEST", False)):
+                _tp_settings = _gs_tp2()
+                if bool(getattr(_tp_settings, "TWO_PHASE_INGEST", False)) and not bool(
+                    getattr(_tp_settings, "TWO_PHASE_DEFER_ENRICH", False)
+                ):
+                    # TWO_PHASE_DEFER_ENRICH (owner-ordered 2026-08-10):
+                    # enrichment runs DEAD LAST as a corpus pass — the
+                    # per-doc detached task would compete with the fast
+                    # lane for the CPU farm. With defer on, gaps are left
+                    # for the repair lanes, which stay disabled until the
+                    # inline drain finishes.
 
                     async def _enrich(cid=corpus_id, did=doc_id):
                         try:
