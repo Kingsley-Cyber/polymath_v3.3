@@ -21,3 +21,7 @@ Symptom → root cause → guarding invariant. Match new symptoms against old sh
 - **'vocabulary rejection / letter-by-letter guessing'** → diff SPECIMENS/ghost_b_prompt.md vs VOCABULARIES/grammar-schema first.
 - **'deployed but behavior unchanged'** → check TRUTH_TABLES deploy semantics (baked vs bind-mounted) before touching config.
 - **'same concept, different names in different files'** → the vocab-drift class; diff the VOCABULARIES/ MUST MATCH lines.
+## 11. GPU idle after deploy while work queued (2026-08-11)
+symptom: executor+pump both log `lease_busy claimed=0` on every GPU corpus; nvidia-smi 1%; queue unchanged
+root cause: `up -d --force-recreate` kills runners mid-batch; their `ingest_lane_leases` rows (per-corpus `extraction` lane mutex, ~30-min TTL, heartbeat-refreshed) survive with dead owners — all claimers block until TTL
+guard: boot sweep in enrichment_executor deletes lane leases with heartbeat_at >10min stale (live holders refresh every few minutes); INVARIANT: deploy stall <= one boot, not one TTL

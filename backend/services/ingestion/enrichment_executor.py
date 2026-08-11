@@ -142,6 +142,24 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
     idle_sleep = float(os.environ.get("ENRICHMENT_EXECUTOR_IDLE_SECONDS", "120") or 120)
     cycle = 0
     logger.info("enrichment executor: single-owner loop starting (batch=%d)", batch_limit)
+    # Boot sweep (postmortem 2026-08-11): a deploy recreate kills runners
+    # mid-batch and their corpus-lane leases idle the GPU until TTL expiry
+    # (~30 min measured). Live holders heartbeat every few minutes, so any
+    # lease with a 10-minute-stale heartbeat belongs to a dead process.
+    try:
+        from datetime import timedelta
+
+        stale = datetime.utcnow() - timedelta(minutes=10)
+        swept = await db["ingest_lane_leases"].delete_many(
+            {"heartbeat_at": {"$lt": stale}}
+        )
+        if swept.deleted_count:
+            logger.info(
+                "enrichment executor: swept %d stale lane leases at boot",
+                swept.deleted_count,
+            )
+    except Exception:  # noqa: BLE001 — sweep is best-effort
+        pass
     while True:
         cycle += 1
         total_succeeded = 0
