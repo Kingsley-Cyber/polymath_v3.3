@@ -60,6 +60,19 @@ from services.provider_presets import (
 
 
 logger = logging.getLogger(__name__)
+
+# Under stacked parallel batches (executor + pump lanes) p99 generation
+# latency can cross 120s; a hardcoded client timeout then converts slow
+# successes into retries/failures (measured 2026-08-11: ~1% blank-reason
+# failures). Env-tunable, default raised to 300s.
+def _ghost_b_http_timeout() -> float:
+    import os as _os
+
+    try:
+        return max(60.0, float(_os.environ.get("GHOST_B_HTTP_TIMEOUT_SECONDS", "300")))
+    except ValueError:
+        return 300.0
+
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 _GLOBAL_EXTRACTION_SEMAPHORE: asyncio.Semaphore | None = None
 _GLOBAL_EXTRACTION_SEMAPHORE_LIMIT: int | None = None
@@ -4853,7 +4866,7 @@ async def extract_entities(
                 async with lane_sems[pool_idx]:
                     async with global_sem:
                         async with provider_sems[pool_idx]:
-                            async with httpx.AsyncClient(timeout=120.0) as client:
+                            async with httpx.AsyncClient(timeout=_ghost_b_http_timeout()) as client:
                                 try:
                                     resp = await client.post(
                                         f"{settings.LITELLM_URL}/chat/completions",
@@ -5606,7 +5619,7 @@ async def extract_entities(
             async with lane_sems[pool_idx]:
                 async with global_sem:
                     async with provider_sems[pool_idx]:
-                        async with httpx.AsyncClient(timeout=120.0) as client:
+                        async with httpx.AsyncClient(timeout=_ghost_b_http_timeout()) as client:
                             try:
                                 resp = await client.post(
                                     f"{settings.LITELLM_URL}/chat/completions",
