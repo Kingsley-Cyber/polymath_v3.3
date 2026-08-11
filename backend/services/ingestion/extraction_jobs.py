@@ -1305,6 +1305,14 @@ async def run_extraction_jobs(
         now=now,
         runner="extraction_jobs.run",
         increment_attempt=False,
+        # 2026-08-10 root-cause fix: job leases default to minutes while a
+        # big document's graphify execution runs 10-25 min. Mid-run expiry
+        # let ANY other runner reclaim the jobs to queued, so the finishing
+        # runner's fenced _mark_jobs matched zero rows and hours of
+        # completed work were silently discarded (burst-then-stall). The
+        # runner never renews mid-run, so the lease must cover the worst
+        # execution, not the average claim.
+        lease_seconds=7200,
     )
     if not jobs:
         return {
