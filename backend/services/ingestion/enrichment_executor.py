@@ -210,8 +210,11 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
                             plan_graph_promotion_jobs,
                         )
 
+                        plan_limit = int(os.environ.get(
+                            "ENRICHMENT_PLAN_LIMIT", "2000") or 2000)
                         await plan_extraction_jobs(
-                            db, corpus_id=cid, user_id=uid, apply=True, limit=200
+                            db, corpus_id=cid, user_id=uid, apply=True,
+                            limit=plan_limit,
                         )
                         await plan_graph_promotion_jobs(db, corpus_id=cid, apply=True)
                         queued = await db["extraction_jobs"].count_documents(
