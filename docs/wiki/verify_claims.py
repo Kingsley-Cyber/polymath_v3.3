@@ -18,7 +18,7 @@ CHECKS = [
     ("lane lease 30min", r"DEFAULT_LANE_LEASE_SECONDS\s*=\s*30 \* 60", "backend/services/ingestion/job_leases.py", [25]),
     ("default types aligned to 15-Literal (was 4-bucket)", r'"TimeReference", "other",', "backend/services/ghost_b.py", [166]),
     ("universal 30 incl sentinel", r"MUST stay last", "backend/services/ghost_b.py", [245]),
-    ("schema-native root cause", r"prompt teaches a contract the grammar forbids", "backend/services/ghost_b.py", [1880]),
+    ("schema-native root cause", r"prompt teaches a contract the grammar forbids", "backend/services/ghost_b.py", [1884]),
     ("lane-manager 8085 fallback", r"http://192\.168\.1\.83:8085", "backend/polymath_mcp/tools.py", [3582, 3661]),
     ("relex sidecar 8737", r"host\.docker\.internal:8737", "backend/services/extraction/relex_sidecar_client.py", [7, 40]),
     ("max attempts 5", r"INGEST_JOB_MAX_ATTEMPTS: int = Field", "backend/config.py", [1247]),

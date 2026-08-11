@@ -1853,6 +1853,10 @@ Guide: companies/labs/teams = Organization; cities/regions/facilities = Location
 PREDICATE ONTOLOGY — every relation predicate must be one of the following. Read the meanings and choose the single best fit for each stated relationship:
 {pred_block}
 
+OUTPUT FORMAT
+- Emit MINIFIED JSON: no indentation, no newlines, no spaces between tokens. Verbose formatting wastes your output budget and truncates the extraction.
+- OMIT optional fields you would leave empty: surface_form when identical to canonical_name, query_aliases when none, definitional_phrase when absent, relation_cue, and facts when there are none.
+
 CHOOSING PREDICATES
 - Pick the predicate whose meaning matches the sentence, not the most familiar word.
 - Direction matters: the acting or containing side is the subject as defined above.
@@ -1934,6 +1938,7 @@ Model data flow explicitly: whatever a system reads/accepts/ingests -> that syst
 Direction rules: the acting system is the subject of uses/consumes/produces/stores ("Atlas is maintained by Acme Corp" -> {{"subject": "atlas", "predicate": "created_by", "object": "acme corp"}}). For defines, the standard/spec/policy/objective is the subject and the thing it specifies is the object ("a policy defines a rule" -> subject: policy).
 
 {facts_block}RULES
+- MINIFIED JSON only (no whitespace); omit empty optional fields — verbose output truncates and fails.
 - Be EXHAUSTIVE: if the text states it, extract it. Missing a stated entity or relationship is an error.
 - After listing entities, go entity by entity and emit EVERY relationship the text states for that entity. A typical technical passage yields 8-15 relations; if you have fewer, re-read the text for missed connections before finishing.
 - Every relation requires its exact evidence_phrase from TEXT; no supporting phrase -> do not emit it.
