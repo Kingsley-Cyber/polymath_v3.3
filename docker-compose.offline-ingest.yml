@@ -28,6 +28,8 @@ services:
     build: ./backend
     profiles: ["offline-ingest"]
     mem_limit: 2g
+    volumes:
+      - "./config:/app/config:ro"
     command: ["python", "-c", "import asyncio\nfrom services.conversation import conversation_service\nfrom services.ingestion_service import ingestion_service\nfrom services.ingestion.enrichment_executor import run_enrichment_executor\nasync def main():\n    await conversation_service.connect()\n    await ingestion_service.connect(conversation_service._db)\n    await run_enrichment_executor(conversation_service._db, ingestion_service)\nasyncio.run(main())"]
     environment:
       APP_ENV: enrich-worker-2
