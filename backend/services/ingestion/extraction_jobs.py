@@ -9,10 +9,11 @@ idempotent, and eventually executable at chunk granularity.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from pymongo import ReplaceOne, UpdateOne
@@ -1232,6 +1233,32 @@ def _status_counts_from_updates(
     return counts
 
 
+async def _renew_job_leases(
+    db: Any,
+    *,
+    job_ids: list[str],
+    lease_seconds: int = 7200,
+) -> None:
+    """Extend the running lease for a set of in-flight jobs.
+
+    Belt-and-braces for the 7200s claim lease: even a worst-case book
+    execution finishes inside one lease, but a renewal every ~1/4 lease
+    means a crash frees the jobs within minutes of the missed beat
+    instead of up to two hours. Fences on status=running so it can only
+    extend a lease this runner still holds.
+    """
+    if not job_ids:
+        return
+    deadline = datetime.utcnow() + timedelta(seconds=max(60, int(lease_seconds)))
+    try:
+        await db["extraction_jobs"].update_many(
+            {"job_id": {"$in": job_ids}, "status": "running"},
+            {"$set": {"lease_until": deadline, "updated_at": datetime.utcnow()}},
+        )
+    except Exception:  # noqa: BLE001 — renewal is best-effort
+        pass
+
+
 async def run_extraction_jobs(
     db: Any,
     *,
@@ -1435,13 +1462,27 @@ async def run_extraction_jobs(
                         corpus_id=corpus_id,
                         doc=doc,
                     )
-                    report = await _run_ghost_b_backfill(
-                        db=db,
-                        qdrant_client=qdrant_client,
-                        corpus_id=corpus_id,
-                        tasks=tasks,
-                        config=config,
-                    )
+                    _doc_job_ids = [str(j.get("job_id") or "") for j in doc_jobs]
+                    _doc_job_ids = [jid for jid in _doc_job_ids if jid]
+
+                    async def _lease_heartbeat() -> None:
+                        while True:
+                            await asyncio.sleep(1800)  # ~1/4 of the 7200s lease
+                            await _renew_job_leases(db, job_ids=_doc_job_ids)
+
+                    _hb = asyncio.create_task(_lease_heartbeat())
+                    try:
+                        report = await _run_ghost_b_backfill(
+                            db=db,
+                            qdrant_client=qdrant_client,
+                            corpus_id=corpus_id,
+                            tasks=tasks,
+                            config=config,
+                        )
+                    finally:
+                        _hb.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await _hb
                     await _persist_extraction_rows(
                         db,
                         doc_id=doc_id,
