@@ -203,6 +203,9 @@ UNIVERSAL_RELATION_SCHEMA: list[str] = [
     "implements",
     "depends_on",
     "produces",
+    "consumes",      # wiki drift-audit catch 2026-08-11: was in the 31-Literal
+                     # and gloss/mapping tables but missing here — the inline
+                     # JSONL-lane vocab rendered only 30 of 31 predicates.
     "stores",
     "detects",       # absorbs the previous `extracts` + `classifies` predicates
     "supports",
