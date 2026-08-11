@@ -1768,6 +1768,94 @@ def build_user_prompt(
     )
 
 
+def build_schema_native_prompt(
+    *,
+    chunk_id: str,
+    doc_id: str,
+    corpus_id: str,
+    text: str,
+    max_entities: int | None = None,
+    max_relations: int | None = None,
+    enable_facts: bool | None = None,
+    max_facts: int | None = None,
+    evidence_max_chars: int = 120,
+    fact_value_max_chars: int = 160,
+    **_ignored: Any,
+) -> str:
+    """Prompt for NATIVE json_schema (constrained-decoding) lanes.
+
+    Root cause it fixes (2026-08-11 battery forensics): the json_object
+    prompt teaches a contract the grammar forbids — 4-bucket lowercase
+    entity types, free-form verb-phrase predicates, "lowercase no-punct"
+    names — while xgrammar enforces the frozen ExtractionResponse (15
+    Capitalized types, 31 snake_case predicates) that the prompt NEVER
+    SHOWS. A small model then guesses vocabulary letter-by-letter under
+    the token mask ("company" -> Concept, "place" -> Product) and recall
+    collapses. This prompt teaches EXACTLY the enforced schema, with the
+    vocabularies rendered from the Literals themselves so prompt and
+    grammar cannot drift apart.
+    """
+    from typing import get_args as _get_args
+
+    from services.ghost_b_schemas import LLMEntity, LLMRelation
+
+    entity_types = list(_get_args(LLMEntity.model_fields["entity_type"].annotation))
+    predicates = list(_get_args(LLMRelation.model_fields["predicate"].annotation))
+    glosses = {
+        "uses": "employs a component/resource/tool",
+        "consumes": "takes in data or input",
+        "produces": "outputs or generates",
+        "stores": "holds data",
+        "runs_on": "executes on infrastructure",
+        "located_in": "geographic/physical containment",
+        "created_by": "built, made, or operated by",
+        "part_of": "is a component of",
+        "depends_on": "requires",
+        "instance_of": "is an example of a category",
+        "related_to": "LAST RESORT only when nothing narrower fits",
+    }
+    pred_lines = ", ".join(
+        f"{name} ({glosses[name]})" if name in glosses else name for name in predicates
+    )
+    n_ent = int(max_entities or 18)
+    n_rel = int(max_relations or 20)
+    facts_on = enable_facts is None or bool(enable_facts)
+    n_facts = int(max_facts or 5)
+    facts_block = (
+        f"""FACTS (optional, max {n_facts}) — measurable properties, statuses, thresholds:
+{{"subject": an entity canonical_name, "fact_type": one of property|status|timestamp|quantity|threshold|category|tag|rule_condition|rule_action, "property_name": "snake_case", "value": "verbatim, <= {fact_value_max_chars} chars", "confidence": 0.0-1.0, "evidence_phrase": "exact quote"}}
+
+"""
+        if facts_on
+        else "FACTS: return an empty list.\n\n"
+    )
+    return f"""Extract EVERY named entity and EVERY explicitly stated relationship from TEXT.
+Return one JSON object. The decoder enforces this exact schema — the values listed below are the ONLY legal values, so aim at them directly.
+
+ENTITIES (max {n_ent}) — every named system, organization, person, place, dataset, component, standard, method, and specific concept:
+{{"canonical_name": "the name as written in TEXT — keep words and spaces, lowercase is fine, NEVER snake_case, NEVER paraphrase", "surface_form": "the verbatim span from TEXT", "entity_type": "one of the ALLOWED TYPES", "confidence": 0.0-1.0}}
+ALLOWED TYPES: {", ".join(entity_types)}
+Type guide: companies/labs/teams = Organization; cities/regions/facilities = Location; platforms/systems/services/tools = Software; datasets/data streams/stored outputs = Artifact; procedures/techniques = Method; named ideas/principles = Concept; specs/protocols/formats = Standard; dates/periods = TimeReference.
+REIFY data and processes as entities: every dataset, message or event format, batch, metric, rule set, constraint set, check, and named procedure or process in the text is an entity (Artifact, Standard, Rule, or Method) — even when it is a descriptive noun phrase rather than a proper name. Relations can only connect entities you listed, so if a system reads a dataset or runs a procedure, that dataset or procedure must be an entity.
+
+RELATIONS (max {n_rel}) — one per relationship the text states; subject and object MUST be canonical_name values from your entities:
+{{"subject": "...", "predicate": "one of the ALLOWED PREDICATES", "object": "...", "confidence": 0.0-1.0, "evidence_phrase": "short exact quote from TEXT, <= {evidence_max_chars} chars"}}
+ALLOWED PREDICATES — pick the narrowest true one:
+{pred_lines}
+Model data flow explicitly: whatever a system reads/accepts/ingests -> that system consumes it; whatever it writes/emits/builds -> produces; each technology, component, or rule set a system relies on -> uses; what a store holds -> stores. Connect the named system to EACH component and input it uses — not only components to each other.
+Direction rules: the acting system is the subject of uses/consumes/produces/stores ("Atlas is maintained by Acme Corp" -> {{"subject": "atlas", "predicate": "created_by", "object": "acme corp"}}). For defines, the standard/spec/policy/objective is the subject and the thing it specifies is the object ("a policy defines a rule" -> subject: policy).
+
+{facts_block}RULES
+- Be EXHAUSTIVE: if the text states it, extract it. Missing a stated entity or relationship is an error.
+- After listing entities, go entity by entity and emit EVERY relationship the text states for that entity. A typical technical passage yields 8-15 relations; if you have fewer, re-read the text for missed connections before finishing.
+- Every relation requires its exact evidence_phrase from TEXT; no supporting phrase -> do not emit it.
+- Skip pronouns, bibliographic citations, section/figure references, and bare generic nouns (system, data, user, state) unless the text names a specific one.
+
+TEXT:
+{text}
+"""
+
+
 def build_json_object_prompt(
     *,
     chunk_id: str,
@@ -4590,7 +4678,15 @@ async def extract_entities(
             # Pt9c/provider-card — json_schema, json_object, and compiler-
             # gated json_object_prompt all use the single-object prompt. Only
             # the first two send provider-native response_format payloads.
-            if profile_output_mode in ("json_object", "json_schema", "json_object_prompt"):
+            if profile_output_mode == "json_schema":
+                # Native constrained decoding: the prompt must teach the
+                # exact grammar-enforced vocabulary (see builder docstring).
+                prompt = build_schema_native_prompt(
+                    **{k: v for k, v in profile_kwargs.items() if k != "max_total_lines"},
+                    evidence_max_chars=evidence_max_chars,
+                    fact_value_max_chars=fact_value_max_chars,
+                )
+            elif profile_output_mode in ("json_object", "json_object_prompt"):
                 prompt = build_json_object_prompt(
                     **{k: v for k, v in profile_kwargs.items() if k != "max_total_lines"},
                     evidence_max_chars=evidence_max_chars,
