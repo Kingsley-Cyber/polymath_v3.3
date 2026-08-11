@@ -272,3 +272,45 @@ inline secrets in scripts or corpus configs.
 8. **Corpus deletion** frees Docker space (vectors, rows, stored copies)
    and can never touch `/ingest-source` — the source drive is read-only
    and the purge guard refuses that path.
+
+## 🗺️ Token-efficient debugging workflow (owner-ratified 2026-08-11)
+
+This is the standing method — use it before reading source at scale.
+
+1. **Read the maps first, not the code.** `docs/audit/*.md` are atomic
+   execution/memory maps (per-file, `file:line`-cited); `docs/wiki/*`
+   are per-module pages (purpose, deps in/out, invariants, refactor +
+   bug-dependency notes). One map read replaces thousands of lines.
+2. **Delegate discovery to an external code-analysis agent** with the
+   ATOMIC-AUDIT contract: facts only, every claim `file:line`-cited,
+   verbatim conditions/queries, "NOT EXAMINED" over inference, read-only,
+   NO diagnosis. It writes a map file; the fixing agent reads the map.
+   This is how the control-plane consolidation was found — the agent
+   put two contradicting rules (checkout lease vs completion fence) side
+   by side and the bug was self-evident.
+3. **Verify with counters, never narrative.** A fix is real when a Mongo
+   count / heartbeat doc / measured rate moves — not when code compiles.
+   Report the number. See [[honesty-over-progress-narrative]].
+4. **One owner per concern.** The scheduler failure class was N
+   executors sharing lanes. When adding a loop, ask what already owns
+   this — extend it or replace it; never add a parallel one.
+
+### Architecture ground truth (as of consolidation)
+- Enrichment execution: ONE owner, `services/ingestion/enrichment_executor.py`
+  (heartbeat `enrichment_executor/_id=primary`). Reconciler is
+  planner-only (`CONTROL_PLANE_V2_EXECUTE` default off).
+- Extraction claims lease 7200s (unrenewed; renewal is an open debt).
+- Engines release-pinned + battery-gated (`extraction_contract.py`,
+  `release/`). Never route an unqualified engine to production.
+- Memory: caps must sum under the Docker VM. Bulk 24GB VM / ~23GB caps;
+  serve profile 16GB. Oversubscription = random OOM (root-caused).
+- Fast lane first, enrichment dead-last, enforced in the reconciler gate
+  and the executor loop — not by env discipline.
+
+### Open debts (paydown order)
+1. Lease renewal in `_run_doc_jobs` (2h orphan window → ~2min).
+2. Ledger gap-awareness (`corpus_has_actionable_work` blind to
+   extraction gaps → ticks skip work as certified).
+3. Readiness-relay TTL cache (dominant query-latency term).
+4. Qwen `ghost_b_llm` ontology battery (18 chunks/s enrichment future).
+5. RTX ingest-worker compose hang (their-side NFS negotiation).
