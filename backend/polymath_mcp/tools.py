@@ -3800,6 +3800,54 @@ async def polymath_auto_engine(
     }
 
 
+async def polymath_vllm_lane(action: str = "status") -> dict[str, Any]:
+    """Control the RTX vLLM extraction engine at min notice (RunPod-style).
+
+    Talks to the native lane controller (systemd vllm-qwen on the RTX box)
+    through the routing doc's auto_gpu_engine.lane_manager config.
+
+    Actions:
+      status — unit state, engine health, LIVE VRAM, configured
+               gpu-memory-utilization, and the owner cap (70GB: /up
+               refuses any config above 0.70 utilization).
+      up     — start the engine (~90s model load to healthy).
+      down   — stop it and free the whole card's VRAM.
+
+    The enrichment executor autoscales this automatically once the engine
+    is battery-qualified: up while GPU-routed extraction work exists, down
+    after the tail drains. This tool is the manual override for Hermes.
+    """
+    import urllib.request as _rq
+
+    db = ingestion_service.db
+    if db is None:
+        return {"error": "database not initialized"}
+    route = await db["extraction_engine_routing"].find_one(
+        {"_id": "primary"}, {"auto_gpu_engine": 1}
+    ) or {}
+    lane = dict((route.get("auto_gpu_engine") or {}).get("lane_manager") or {})
+    url = str(lane.get("url") or "").rstrip("/")
+    key = os.environ.get(str(lane.get("api_key_env") or "RTX_LANE_MANAGER_API_KEY"), "")
+    if not url or not key:
+        return {"error": "lane_manager not configured in routing doc (or key env missing)"}
+    action = (action or "status").strip().lower()
+    paths = {"status": ("GET", str(lane.get("status_path") or "/status")),
+             "up": ("POST", str(lane.get("up_path") or "/up")),
+             "down": ("POST", str(lane.get("down_path") or "/down"))}
+    if action not in paths:
+        return {"error": f"unknown action {action!r}; use status|up|down"}
+    method, path = paths[action]
+    try:
+        req = _rq.Request(url + path, method=method, headers={"X-Api-Key": key})
+        with _rq.urlopen(req, timeout=25) as resp:
+            body = json.loads(resp.read().decode() or "{}")
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"lane controller unreachable: {str(exc)[:160]}",
+                "hint": "box asleep/off? wake first, or extraction runs Mac-local via auto"}
+    return {"action": action, "lane": body,
+            "owner_cap": "70GB VRAM max — enforced by the controller at /up"}
+
+
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
@@ -3838,6 +3886,7 @@ ALL_TOOLS = (
     polymath_worker_stack,
     polymath_engine_pool,
     polymath_auto_engine,
+    polymath_vllm_lane,
     polymath_delete_document,
     polymath_backfill_summaries,
 )

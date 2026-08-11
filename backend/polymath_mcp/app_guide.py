@@ -215,6 +215,7 @@ MCP_TOOLSETS: list[dict[str, Any]] = [
             "polymath_fleet_status",
             "polymath_worker_stack",
             "polymath_auto_engine",
+            "polymath_vllm_lane",
         ],
     },
     {

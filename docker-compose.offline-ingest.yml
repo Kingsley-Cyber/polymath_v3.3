@@ -25,6 +25,7 @@ services:
     mem_limit: ${QUERY_BACKEND_MEM_LIMIT:-6g}
     environment:
       INGEST_RUNNERS_ENABLED: "false"
+      RTX_LANE_MANAGER_API_KEY: ${RTX_LANE_MANAGER_API_KEY:-}
       INGEST_MAX_ACTIVE_JOBS: "1"
       INGEST_BATCH_WORKERS: "1"
       INGEST_GLOBAL_MAX_DOCS: "1"

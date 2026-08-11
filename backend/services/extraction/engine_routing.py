@@ -258,9 +258,16 @@ async def set_auto_gpu_engine(
     engine: str = "ghost_b_llm",
     health_url: str = "",
     qualified: bool = False,
+    lane_manager: dict[str, Any] | None = None,
+    autostart: bool = True,
+    auto_offload: bool = True,
+    offload_after_idle_cycles: int = 3,
 ) -> None:
     """Ops act: configure the auto-failover target. `qualified` is only set
-    true after the extraction battery passes for `engine`."""
+    true after the extraction battery passes for `engine`. lane_manager
+    ({url, up_path, down_path, status_path, api_key_env}) enables the
+    executor's RunPod autoscale: up while GPU-routed work exists, VRAM
+    offloaded after the tail drains."""
     await db[ROUTING_COLLECTION].update_one(
         {"_id": ROUTING_DOC_ID},
         {"$set": {"auto_gpu_engine": {
@@ -268,6 +275,10 @@ async def set_auto_gpu_engine(
             "engine": engine,
             "health_url": health_url,
             "qualified": bool(qualified),
+            "lane_manager": dict(lane_manager or {}),
+            "autostart": bool(autostart),
+            "auto_offload": bool(auto_offload),
+            "offload_after_idle_cycles": int(offload_after_idle_cycles),
             "updated_at": __import__("datetime").datetime.utcnow(),
         }}},
         upsert=True,

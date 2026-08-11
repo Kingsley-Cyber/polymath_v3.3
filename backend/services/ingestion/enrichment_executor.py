@@ -34,6 +34,87 @@ logger = logging.getLogger(__name__)
 
 INLINE_PENDING_STATUSES = ("queued", "staged", "running", "failed_recoverable")
 
+# RunPod-style GPU autoscale (owner-ordered 2026-08-11): while queued
+# extraction work exists for GPU-routed corpora, keep the vLLM engine up
+# and hammer it; when the tail drains, offload VRAM after a few idle
+# cycles. New ingest (or Hermes via MCP) resurrects it at min notice.
+# Inert until the engine is battery-qualified — never touches an engine
+# still under test.
+_GPU_IDLE_CYCLES = 0
+
+
+def _probe_health(url: str) -> bool:
+    if not url:
+        return False
+    import urllib.request as _rq
+
+    try:
+        with _rq.urlopen(url, timeout=4) as resp:
+            return 200 <= resp.status < 300
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _lane_post(lane: dict[str, Any], path_key: str, default_path: str) -> str:
+    import urllib.request as _rq
+
+    url = str(lane.get("url") or "").rstrip("/")
+    path = str(lane.get(path_key) or default_path)
+    key = os.environ.get(str(lane.get("api_key_env") or "RTX_LANE_MANAGER_API_KEY"), "")
+    if not url or not key:
+        return "skipped_no_lane_credentials"
+    try:
+        req = _rq.Request(url + path, method="POST", headers={"X-Api-Key": key})
+        with _rq.urlopen(req, timeout=20) as resp:
+            return f"{path}:{resp.status}"
+    except Exception as exc:  # noqa: BLE001
+        return f"{path}:error:{str(exc)[:120]}"
+
+
+async def _autoscale_gpu(db: Any, remaining_jobs: int) -> dict[str, Any]:
+    global _GPU_IDLE_CYCLES
+    try:
+        route = await db["extraction_engine_routing"].find_one(
+            {"_id": "primary"}, {"auto_gpu_engine": 1}
+        ) or {}
+        gpu = dict(route.get("auto_gpu_engine") or {})
+        lane = dict(gpu.get("lane_manager") or {})
+        if not gpu.get("enabled") or not lane.get("url"):
+            return {"state": "inert"}
+        if not gpu.get("qualified"):
+            return {"state": "awaiting_qualification"}
+        gpu_corpora = await db["corpora"].count_documents({
+            "status": {"$ne": "archived"},
+            "default_ingestion_config.extraction_engine": {
+                "$in": ["auto", "ghost_b_llm"]
+            },
+        })
+        want_gpu = bool(remaining_jobs and gpu_corpora)
+        healthy = await asyncio.to_thread(
+            _probe_health, str(gpu.get("health_url") or "")
+        )
+        action = ""
+        if want_gpu and not healthy and gpu.get("autostart", True):
+            _GPU_IDLE_CYCLES = 0
+            action = await asyncio.to_thread(_lane_post, lane, "up_path", "/up")
+        elif not want_gpu and healthy and gpu.get("auto_offload", True):
+            _GPU_IDLE_CYCLES += 1
+            if _GPU_IDLE_CYCLES >= int(gpu.get("offload_after_idle_cycles", 3) or 3):
+                action = await asyncio.to_thread(_lane_post, lane, "down_path", "/down")
+                _GPU_IDLE_CYCLES = 0
+        else:
+            if want_gpu:
+                _GPU_IDLE_CYCLES = 0
+        return {
+            "state": "healthy" if healthy else "down",
+            "want_gpu": want_gpu,
+            "gpu_corpora": gpu_corpora,
+            "idle_cycles": _GPU_IDLE_CYCLES,
+            "action": action,
+        }
+    except Exception as exc:  # noqa: BLE001 — autoscale must never kill the loop
+        return {"state": "error", "error": str(exc)[:200]}
+
 
 def executor_enabled() -> bool:
     raw = os.environ.get("ENRICHMENT_EXECUTOR_ENABLED", "").strip().lower()
@@ -120,10 +201,14 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
             )
         except Exception:  # noqa: BLE001
             pass
+        gpu_autoscale = await _autoscale_gpu(db, remaining)
+        if gpu_autoscale.get("action"):
+            logger.info("enrichment executor: gpu autoscale %s", gpu_autoscale)
         await _heartbeat(db, {
             "cycle": cycle,
             "last_cycle_succeeded": total_succeeded,
             "remaining_jobs": remaining,
+            "gpu_autoscale": gpu_autoscale,
         })
         if total_succeeded:
             logger.info(
