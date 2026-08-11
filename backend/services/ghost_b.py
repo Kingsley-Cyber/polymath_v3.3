@@ -144,7 +144,14 @@ _GHOST_B_SCHEMA_CONTROL_HINT = (
 )
 
 # Default open-vocabulary enums when no schema is provided.
-_DEFAULT_ENTITY_TYPES = ["person", "org", "concept", "other"]
+# MUST MATCH ghost_b_schemas EntityType Literal (wiki: vocabularies/) —
+# was the legacy 4-bucket list; json_object/JSONL lanes taught types the
+# frozen schema rejects (wiki drift-audit catch 2026-08-11).
+_DEFAULT_ENTITY_TYPES = [
+    "Person", "Organization", "Location", "Event", "Concept", "Method",
+    "Product", "Software", "Document", "Standard", "Rule", "Law",
+    "Artifact", "TimeReference", "other",
+]
 FACT_TYPES: tuple[str, ...] = (
     "property",
     "status",
@@ -1771,6 +1778,75 @@ def build_user_prompt(
     )
 
 
+_PREDICATE_ONTOLOGY_EXPLANATIONS = {
+    "part_of": "X is a component, module, or subsystem of Y",
+    "member_of": "X belongs to group, team, or organization Y",
+    "located_in": "X is geographically or physically in Y",
+    "works_for": "person X is employed by or serves organization Y",
+    "created_by": "X was built, made, authored, or operated by Y",
+    "owns": "X possesses or controls Y",
+    "affiliated_with": "X is associated with Y (when no stronger link fits)",
+    "synonym_of": "X is another name for Y",
+    "instance_of": "X is an example or instance of category Y",
+    "uses": "X employs or relies on component, resource, or tool Y",
+    "runs_on": "software X executes on infrastructure or platform Y",
+    "trained_on": "model X was trained with data Y",
+    "references": "X cites, mentions, or points to Y",
+    "implements": "X realizes specification, method, or standard Y",
+    "depends_on": "X requires Y to function",
+    "produces": "X outputs, generates, or creates Y",
+    "consumes": "X takes in, reads, or ingests Y as input",
+    "stores": "X holds or persists data Y",
+    "detects": "X identifies, finds, or flags Y",
+    "supports": "X enables, assists, or backs Y",
+    "defines": "specification, registry, policy, or objective X specifies Y",
+    "represents": "X stands for or models Y",
+    "maps_to": "X corresponds to Y",
+    "preceded_by": "X is preceded by Y (Y came first)",
+    "causes": "X brings about Y",
+    "overlaps": "X partially coincides with Y",
+    "derived_from": "X originates from or is built from Y",
+    "contradicts": "X conflicts with Y",
+    "excepts": "rule X carves out an exception for Y",
+    "overrides": "X supersedes or replaces Y",
+    "related_to": "LAST RESORT — only when no other predicate fits",
+}
+
+
+def schema_native_system_prompt() -> str:
+    """System prompt for native json_schema lanes (owner-ordered 2026-08-11).
+
+    The FULL predicate ontology with an explanation per predicate lives in
+    the SYSTEM message: instruct models weight it strongly, and because it
+    is static per engine, vLLM prefix-caching makes it free at high
+    concurrency. Rendered from the frozen Literals — cannot drift.
+    """
+    from typing import get_args as _get_args
+
+    from services.ghost_b_schemas import LLMEntity, LLMRelation
+
+    entity_types = list(_get_args(LLMEntity.model_fields["entity_type"].annotation))
+    predicates = list(_get_args(LLMRelation.model_fields["predicate"].annotation))
+    pred_block = "\n".join(
+        f"- {name}: {_PREDICATE_ONTOLOGY_EXPLANATIONS.get(name, name)}"
+        for name in predicates
+    )
+    return f"""You are a knowledge-graph extractor. From the given TEXT you extract entities and the relationships stated between them, as one JSON object matching the enforced schema. Extract only what the text states; never invent.
+
+ENTITY TYPES — every entity_type must be one of:
+{", ".join(entity_types)}
+Guide: companies/labs/teams = Organization; cities/regions/facilities = Location; platforms/systems/services/tools = Software; datasets/data streams/stored outputs = Artifact; procedures/techniques = Method; named ideas/principles = Concept; specs/protocols/formats = Standard; dates/periods = TimeReference.
+
+PREDICATE ONTOLOGY — every relation predicate must be one of the following. Read the meanings and choose the single best fit for each stated relationship:
+{pred_block}
+
+CHOOSING PREDICATES
+- Pick the predicate whose meaning matches the sentence, not the most familiar word.
+- Direction matters: the acting or containing side is the subject as defined above.
+- If a relationship is stated but no predicate fits well, you MUST still emit it with the nearest predicate (related_to as the true last resort). NEVER drop a stated relationship.
+- A typical technical passage yields 8-15 relations; fewer usually means you missed some."""
+
+
 def build_schema_native_prompt(
     *,
     chunk_id: str,
@@ -1836,15 +1912,11 @@ def build_schema_native_prompt(
 Return one JSON object. The decoder enforces this exact schema — the values listed below are the ONLY legal values, so aim at them directly.
 
 ENTITIES (max {n_ent}) — every named system, organization, person, place, dataset, component, standard, method, and specific concept:
-{{"canonical_name": "the name as written in TEXT — keep words and spaces, lowercase is fine, NEVER snake_case, NEVER paraphrase", "surface_form": "the verbatim span from TEXT", "entity_type": "one of the ALLOWED TYPES", "confidence": 0.0-1.0}}
-ALLOWED TYPES: {", ".join(entity_types)}
-Type guide: companies/labs/teams = Organization; cities/regions/facilities = Location; platforms/systems/services/tools = Software; datasets/data streams/stored outputs = Artifact; procedures/techniques = Method; named ideas/principles = Concept; specs/protocols/formats = Standard; dates/periods = TimeReference.
+{{"canonical_name": "the name as written in TEXT — keep words and spaces, lowercase is fine, NEVER snake_case, NEVER paraphrase", "surface_form": "the verbatim span from TEXT", "entity_type": "one of the ENTITY TYPES defined in the system message", "confidence": 0.0-1.0}}
 REIFY data and processes as entities: every dataset, message or event format, batch, metric, rule set, constraint set, check, and named procedure or process in the text is an entity (Artifact, Standard, Rule, or Method) — even when it is a descriptive noun phrase rather than a proper name. Relations can only connect entities you listed, so if a system reads a dataset or runs a procedure, that dataset or procedure must be an entity.
 
 RELATIONS (max {n_rel}) — one per relationship the text states; subject and object MUST be canonical_name values from your entities:
-{{"subject": "...", "predicate": "one of the ALLOWED PREDICATES", "object": "...", "confidence": 0.0-1.0, "evidence_phrase": "short exact quote from TEXT, <= {evidence_max_chars} chars"}}
-ALLOWED PREDICATES — pick the narrowest true one:
-{pred_lines}
+{{"subject": "...", "predicate": "the best-fitting predicate from the PREDICATE ONTOLOGY in the system message", "object": "...", "confidence": 0.0-1.0, "evidence_phrase": "short exact quote from TEXT, <= {evidence_max_chars} chars"}}
 Model data flow explicitly: whatever a system reads/accepts/ingests -> that system consumes it; whatever it writes/emits/builds -> produces; each technology, component, or rule set a system relies on -> uses; what a store holds -> stores. Connect the named system to EACH component and input it uses — not only components to each other.
 Direction rules: the acting system is the subject of uses/consumes/produces/stores ("Atlas is maintained by Acme Corp" -> {{"subject": "atlas", "predicate": "created_by", "object": "acme corp"}}). For defines, the standard/spec/policy/objective is the subject and the thing it specifies is the object ("a policy defines a rule" -> subject: policy).
 
@@ -2010,7 +2082,12 @@ def build_json_object_prompt(
         "Rules:\n"
         f"- entities: max {entity_cap}; canonical_name lowercase, stripped punctuation; "
         "do not invent entity_type\n"
-        f"- relations: max {relation_cap}; predicate from allowed vocabulary; "
+        f"- relations: max {relation_cap}; predicate MUST be one of: "
+        f"part_of, member_of, located_in, works_for, created_by, owns, "
+        f"affiliated_with, synonym_of, instance_of, uses, runs_on, trained_on, "
+        f"references, implements, depends_on, produces, consumes, stores, "
+        f"detects, supports, defines, represents, maps_to, preceded_by, causes, "
+        f"overlaps, derived_from, contradicts, excepts, overrides, related_to; "
         "subject must match an entity canonical_name\n"
         f"{fact_rule}"
         f"{table_rules}"
@@ -4712,11 +4789,15 @@ async def extract_entities(
             last_prompt_hash = prompt_hash
             last_prompt_chars = prompt_chars
             attempt_payload = dict(payload_base)
-            system_prompt = (
-                _JSON_OBJECT_SYSTEM
-                if profile_output_mode in ("json_object", "json_schema", "json_object_prompt")
-                else _SYSTEM
-            )
+            if profile_output_mode == "json_schema":
+                # Owner-ordered 2026-08-11: the full predicate ontology with
+                # per-predicate explanations lives in the SYSTEM message
+                # (strongly weighted; vLLM prefix-cached, so free at scale).
+                system_prompt = schema_native_system_prompt()
+            elif profile_output_mode in ("json_object", "json_object_prompt"):
+                system_prompt = _JSON_OBJECT_SYSTEM
+            else:
+                system_prompt = _SYSTEM
             response_model = None
             if profile_output_mode == "json_schema":
                 from services.ghost_b_schemas import ExtractionResponse

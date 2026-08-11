@@ -16,14 +16,14 @@ CHECKS = [
     ("lane adopt 420s", r"DEFAULT_LANE_ADOPT_STALE_SECONDS\s*=\s*420\.0", "backend/services/ingestion/job_leases.py", [35]),
     ("job lease 15min", r"DEFAULT_JOB_LEASE_SECONDS\s*=\s*15 \* 60", "backend/services/ingestion/job_leases.py", [23]),
     ("lane lease 30min", r"DEFAULT_LANE_LEASE_SECONDS\s*=\s*30 \* 60", "backend/services/ingestion/job_leases.py", [25]),
-    ("4-bucket default types", r'_DEFAULT_ENTITY_TYPES = \["person", "org", "concept", "other"\]', "backend/services/ghost_b.py", [147]),
-    ("universal 30 incl sentinel", r"MUST stay last", "backend/services/ghost_b.py", [225]),
-    ("schema-native root cause", r"prompt teaches a contract the grammar forbids", "backend/services/ghost_b.py", [1791]),
+    ("default types aligned to 15-Literal (was 4-bucket)", r'"TimeReference", "other",', "backend/services/ghost_b.py", [153]),
+    ("universal 30 incl sentinel", r"MUST stay last", "backend/services/ghost_b.py", [232]),
+    ("schema-native root cause", r"prompt teaches a contract the grammar forbids", "backend/services/ghost_b.py", [1867]),
     ("lane-manager 8085 fallback", r"http://192\.168\.1\.83:8085", "backend/polymath_mcp/tools.py", [3582, 3661]),
     ("relex sidecar 8737", r"host\.docker\.internal:8737", "backend/services/extraction/relex_sidecar_client.py", [7, 40]),
     ("max attempts 5", r"INGEST_JOB_MAX_ATTEMPTS: int = Field", "backend/config.py", [1247]),
     ("stale job 30min", r"INGEST_STALE_JOB_MINUTES: int = Field", "backend/config.py", [1550]),
-    ("SCHEMA_INLINE_LIMIT 30", r"SCHEMA_INLINE_LIMIT \(30\)", "backend/services/ghost_b.py", [162]),
+    ("SCHEMA_INLINE_LIMIT 30", r"SCHEMA_INLINE_LIMIT \(30\)", "backend/services/ghost_b.py", [169]),
     ("kill seam inert flag", r"GRAPHIFY_OPS_KILL", "backend/services/ops_drills/kill_seam.py", None),
 ]
 
