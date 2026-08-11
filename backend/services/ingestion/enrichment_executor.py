@@ -168,6 +168,29 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
                 queued = await db["extraction_jobs"].count_documents(
                     {"corpus_id": cid, "status": "queued"}
                 )
+                if not queued:
+                    # Gap-awareness (battery forensics 2026-08-11): two-phase
+                    # defers enrichment, but the single-doc/MCP ingest path
+                    # never plans jobs — docs sat extraction-less until a
+                    # human called the planners. Planning is idempotent
+                    # (deterministic job ids), so plan whenever idle.
+                    try:
+                        from services.ingestion.extraction_jobs import (
+                            plan_extraction_jobs,
+                        )
+                        from services.ingestion.graph_promotion_jobs import (
+                            plan_graph_promotion_jobs,
+                        )
+
+                        await plan_extraction_jobs(
+                            db, corpus_id=cid, user_id=uid, apply=True, limit=200
+                        )
+                        await plan_graph_promotion_jobs(db, corpus_id=cid, apply=True)
+                        queued = await db["extraction_jobs"].count_documents(
+                            {"corpus_id": cid, "status": "queued"}
+                        )
+                    except Exception:  # noqa: BLE001 — planning is best-effort per cycle
+                        pass
                 if queued:
                     result = await ingestion_service.run_extraction_jobs(
                         corpus_id=cid, user_id=uid, limit=batch_limit
