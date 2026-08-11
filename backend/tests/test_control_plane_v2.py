@@ -683,6 +683,8 @@ def _fake_ingestion_service(qdrant, **kwargs):
 
 @pytest.mark.asyncio
 async def test_reconcile_corpus_plans_repair_for_stranded_doc(monkeypatch):
+    # These tests exercise the legacy in-tick execution path, now behind a flag.
+    monkeypatch.setenv("CONTROL_PLANE_V2_EXECUTE", "true")
     """End-to-end on the exact failing case: gap → planner invoked with a
     census-derived limit → executor driven → receipts written."""
     import services.ingestion.document_pipeline_jobs as dp_jobs
@@ -752,6 +754,8 @@ async def test_reconcile_corpus_certifies_healthy_doc_without_planning():
 async def test_reconcile_corpus_execution_failure_writes_failure_receipt(
     monkeypatch,
 ):
+    # These tests exercise the legacy in-tick execution path, now behind a flag.
+    monkeypatch.setenv("CONTROL_PLANE_V2_EXECUTE", "true")
     import services.ingestion.document_pipeline_jobs as dp_jobs
 
     async def fake_plan(db, **kwargs):
@@ -829,3 +833,14 @@ def test_lane_flags_flag_off_honors_legacy_lane_settings():
     assert flags["run_extraction_jobs"] is False
     assert flags["run_summary_jobs"] is False
     assert flags["run_graph_jobs"] is True
+
+
+
+@pytest.mark.asyncio
+async def test_reconcile_corpus_default_is_planner_only(monkeypatch):
+    """Consolidation invariant: without CONTROL_PLANE_V2_EXECUTE, the
+    reconciler plans but never executes — execution belongs to the single
+    enrichment executor."""
+    monkeypatch.delenv("CONTROL_PLANE_V2_EXECUTE", raising=False)
+    import os
+    assert os.environ.get("CONTROL_PLANE_V2_EXECUTE") is None

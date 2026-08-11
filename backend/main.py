@@ -495,6 +495,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         _run_auto_corpus_repair_tick("startup")
                     )
                 ingest_poll_task = asyncio.create_task(_ingest_worker_poll_loop())
+                # Consolidation (2026-08-11): ONE enrichment executor owns all
+                # enrichment execution; the reconciler is planner-only below.
+                from services.ingestion.enrichment_executor import (
+                    executor_enabled,
+                    run_enrichment_executor,
+                )
+
+                if executor_enabled():
+                    executor_task = asyncio.create_task(
+                        run_enrichment_executor(
+                            conversation_service._db, ingestion_service
+                        )
+                    )
+                    background_repair_tasks.add(executor_task)
+                    executor_task.add_done_callback(background_repair_tasks.discard)
                 logger.info(
                     "Durable ingest runners enabled; polling every %.1fs",
                     float(getattr(settings, "INGEST_RUNNER_POLL_SECONDS", 10.0) or 10.0),

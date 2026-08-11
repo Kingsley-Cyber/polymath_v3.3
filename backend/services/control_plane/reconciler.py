@@ -19,6 +19,7 @@ Invariants:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -483,7 +484,17 @@ async def reconcile_corpus(
     # 5. Drive existing executors for every lane (leases/cost controls are
     #    owned by the executors themselves and unchanged).
     execution_receipt: dict[str, Any] | None = None
-    if execute and (gap_totals or outbox_rows or pending_runs):
+    # Consolidation (2026-08-11): the reconciler is PLANNER-ONLY by default.
+    # Execution belongs to the single enrichment executor
+    # (services/ingestion/enrichment_executor.py). Five overlapping
+    # executors sharing lanes produced the lease wars and silent skips
+    # this program spent a night diagnosing; one owner per concern now.
+    # CONTROL_PLANE_V2_EXECUTE=true restores in-tick execution if ever
+    # needed for an isolated environment.
+    _execute_enabled = str(
+        os.environ.get("CONTROL_PLANE_V2_EXECUTE", "false")
+    ).strip().lower() in ("1", "true", "yes", "on")
+    if execute and _execute_enabled and (gap_totals or outbox_rows or pending_runs):
         lane_flags = _lane_run_flags(settings)
         # Owner rule (2026-08-10), enforced by the control plane itself:
         # enrichment must NEVER hinder the fast lane. While this corpus has
