@@ -1,0 +1,12 @@
+[Unit]
+Description=Polymath vLLM lane controller (native, owner cap 70GB)
+After=network.target
+
+[Service]
+User=kingsley
+ExecStart=/usr/bin/python3 /home/kingsley/vllm-server/lane_controller.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
