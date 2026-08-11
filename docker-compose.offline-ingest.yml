@@ -59,6 +59,8 @@ services:
       APP_ENV: offline-ingest-worker
       # GPU autoscale (executor) posts /up /down to the RTX lane controller.
       RTX_LANE_MANAGER_API_KEY: ${RTX_LANE_MANAGER_API_KEY:-}
+      # Bigger claim batches = fewer inter-batch gaps on the GPU lane.
+      ENRICHMENT_EXECUTOR_BATCH: ${ENRICHMENT_EXECUTOR_BATCH:-600}
       INGEST_MAX_ACTIVE_BATCHES: ${INGEST_MAX_ACTIVE_BATCHES:-0}
       # PRODUCTION extraction stack (owner-ratified consolidation 2026-08-08):
       # ONE heavy encoder — Relex-large on the host-MPS sidecar serves both
