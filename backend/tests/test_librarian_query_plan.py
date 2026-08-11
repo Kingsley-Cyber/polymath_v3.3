@@ -60,8 +60,14 @@ def _plan(query: str, shortlist=None) -> QueryPlanV1:
     )
 
 
-def test_librarian_flags_ship_default_off():
-    settings = Settings()
+def test_librarian_flags_ship_default_off(monkeypatch):
+    # Asserts the SHIPPED default. A local .env that enables the planner must
+    # not turn a default-audit test red — dotenv loads into os.environ at
+    # config import, so the var must be cleared, not just _env_file=None.
+    for var in ("LIBRARIAN_PLANNER_ENABLED", "LIBRARIAN_PLANNER_SHADOW",
+                "LIBRARIAN_LLM_DECOMPOSER_ENABLED"):
+        monkeypatch.delenv(var, raising=False)
+    settings = Settings(_env_file=None)
 
     assert settings.LIBRARIAN_PLANNER_ENABLED is False
     assert settings.LIBRARIAN_PLANNER_SHADOW is False

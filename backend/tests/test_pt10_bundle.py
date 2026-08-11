@@ -387,10 +387,14 @@ def test_answerability_gate_relationship_only_gap_is_partial_not_refusal():
     assert "partial" in note.lower()
 
 
-def test_answerability_gate_low_coverage_relationship_gap_still_refuses():
+def test_answerability_gate_low_coverage_relationship_gap_still_refuses(monkeypatch):
     # The refusal path survives the loosening: relationship-only missing with
     # coverage BELOW the partial floor (one of three atoms covered) must stay
     # unanswerable — the honesty floor.
+    # Pin the floor to the SHIPPED default: a loosened local .env tuning must
+    # not turn the honesty-floor audit green-for-the-wrong-reason.
+    from config import get_settings as _gs
+    monkeypatch.setattr(_gs(), "ANSWERABILITY_PARTIAL_FLOOR", 0.50, raising=False)
     query = "How does personality correlate with seduction?"
     diagnostics = {
         "selection": {
