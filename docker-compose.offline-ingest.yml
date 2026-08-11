@@ -46,6 +46,7 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       REDIS_URL: redis://redis:6379
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
       EMBEDDER_URL: ${OFFLINE_INGEST_EMBEDDER_URL:-http://host.docker.internal:8082}
       RELEX_SIDECAR_URL: ${RELEX_SIDECAR_URL:-http://host.docker.internal:8737}
     depends_on:
