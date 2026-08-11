@@ -163,6 +163,16 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
     while True:
         cycle += 1
         total_succeeded = 0
+        # Per-cycle stale-lease sweep (boot-only proved insufficient: a
+        # runner that dies AFTER startup leaves lanes wedged until TTL).
+        try:
+            from datetime import timedelta as _td
+
+            await db["ingest_lane_leases"].delete_many(
+                {"heartbeat_at": {"$lt": datetime.utcnow() - _td(minutes=10)}}
+            )
+        except Exception:  # noqa: BLE001
+            pass
         try:
             corpora = await db["corpora"].find(
                 {"status": {"$ne": "archived"}},
