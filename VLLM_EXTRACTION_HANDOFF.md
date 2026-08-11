@@ -24,7 +24,10 @@ The engine-exit you hit was KV-cache starvation — it must own the card:
 ```
 --model /models/qwen            # Qwen3-4B-Instruct-2507 (or your chosen SLM)
 --served-model-name polymath-extract
---gpu-memory-utilization 0.90   # THE fix: was starved
+--gpu-memory-utilization 0.72   # OWNER CAP: ~70GB max of the 96GB card.
+                                # (0.90 grabbed ~86GB — too greedy. 0.72*96 ≈ 69GB.
+                                #  Still 10x what the model needs; the rest is KV cache
+                                #  = concurrency. Raise only with owner approval.)
 --guided-decoding-backend xgrammar   # constrained decoding (outlines also fine)
 --max-model-len 8192
 --host 0.0.0.0 --port 8000

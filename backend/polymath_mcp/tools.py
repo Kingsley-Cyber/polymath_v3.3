@@ -3736,6 +3736,70 @@ async def polymath_engine_pool(
     return result
 
 
+async def polymath_auto_engine(
+    action: str = "status",
+) -> dict[str, Any]:
+    """RunPod-style extraction failover — inspect or toggle the "auto" engine.
+
+    With a corpus/global extraction_engine of "auto": extraction uses the
+    GPU LLM engine when the RTX box answers its health probe AND that
+    engine is battery-qualified; in every other state (box asleep,
+    unreachable, unqualified, errors) it resolves to the always-available
+    Mac-local encoder. Deterministic per health snapshot; fail-safe local.
+
+    Actions:
+      status  — the configured target, its qualification state, the LIVE
+                probe result, and what "auto" resolves to right now.
+      enable  — turn the GPU branch on (still gated by qualification).
+      disable — pin "auto" to the local encoder regardless of GPU state.
+
+    The `qualified` flag is NOT settable here — it flips only when the
+    extraction battery passes (backend/scripts/qualify_llm_extraction.py),
+    per the program's engine-governance rule.
+    """
+    import urllib.request as _rq
+
+    db = ingestion_service.db
+    if db is None:
+        return {"error": "database not initialized"}
+    doc = await db["extraction_engine_routing"].find_one(
+        {"_id": "primary"}, {"auto_gpu_engine": 1}
+    ) or {}
+    cfg = dict(doc.get("auto_gpu_engine") or {})
+    action = (action or "status").strip().lower()
+    if action in ("enable", "disable"):
+        cfg["enabled"] = action == "enable"
+        cfg["updated_at"] = datetime.utcnow()
+        await db["extraction_engine_routing"].update_one(
+            {"_id": "primary"}, {"$set": {"auto_gpu_engine": cfg}}, upsert=True
+        )
+        from services.extraction.engine_routing import invalidate_cache
+
+        invalidate_cache()
+    elif action != "status":
+        return {"error": f"unknown action {action!r}; use status|enable|disable"}
+    live = "unreachable"
+    health_url = str(cfg.get("health_url") or "")
+    if health_url:
+        try:
+            with _rq.urlopen(health_url, timeout=4) as resp:
+                live = "reachable" if 200 <= resp.status < 300 else f"http_{resp.status}"
+        except Exception:  # noqa: BLE001
+            live = "unreachable"
+    resolves_to = (
+        str(cfg.get("engine") or "ghost_b_llm")
+        if (cfg.get("enabled") and cfg.get("qualified") and live == "reachable")
+        else "graphify_cpu"
+    )
+    return {
+        "config": {k: cfg.get(k) for k in ("enabled", "engine", "health_url", "qualified")},
+        "gpu_probe": live,
+        "auto_resolves_to": resolves_to,
+        "note": ("qualified flips only via the extraction battery; "
+                 "local encoder is the guaranteed fallback"),
+    }
+
+
 # ── Registry — single source of truth for the MCP server to register ───────
 
 ALL_TOOLS = (
@@ -3773,6 +3837,7 @@ ALL_TOOLS = (
     polymath_fleet_status,
     polymath_worker_stack,
     polymath_engine_pool,
+    polymath_auto_engine,
     polymath_delete_document,
     polymath_backfill_summaries,
 )

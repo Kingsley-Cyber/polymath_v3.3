@@ -21,6 +21,10 @@ docker-compose.override.yml
 backend/TEST/
 A0_2/
 docs/
+!docs/audit/
+!docs/audit/**
+!docs/wiki/
+!docs/wiki/**
 polymath-foundry/
 a0-model-provider-streaming-architecture.md
 a0-streaming-normalizer (1).py
