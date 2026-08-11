@@ -12,6 +12,25 @@ from services.provider_payload import (  # noqa: F401
 )
 
 ENGINES = ("off", "graphify_cpu", "ghost_b_llm")
+
+# "auto" is a ROUTING alias, not an engine: it resolves to a concrete
+# engine before contract resolution (GPU LLM when the RTX box answers and
+# its engine is battery-qualified; the Mac-local encoder otherwise). The
+# registry stays closed — the contract never sees "auto".
+AUTO_ENGINE = "auto"
+
+
+async def resolve_configured_engine(db, configured: str | None) -> str | None:
+    value = str(configured or "").strip().lower()
+    if value != AUTO_ENGINE:
+        return configured
+    from services.extraction.engine_routing import resolve_auto_engine
+
+    try:
+        return await resolve_auto_engine(db)
+    except Exception:  # noqa: BLE001 — fail toward the always-available local engine
+        return CANONICAL_ENGINE
+
 CANONICAL_ENGINE = "graphify_cpu"
 
 

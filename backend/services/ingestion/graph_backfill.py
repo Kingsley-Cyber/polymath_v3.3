@@ -332,7 +332,14 @@ async def _run_ghost_b_backfill(
     tasks: list[ExtractionTask],
     config: IngestionConfig,
 ) -> ExtractionBatchReport:
-    engine = str(getattr(config, "extraction_engine", "graphify_cpu") or "graphify_cpu")
+    from services.ingestion.extraction_contract import resolve_configured_engine
+
+    engine = str(
+        await resolve_configured_engine(
+            db, getattr(config, "extraction_engine", "graphify_cpu")
+        )
+        or "graphify_cpu"
+    )
     if engine == "off":
         return ExtractionBatchReport(
             results=[],

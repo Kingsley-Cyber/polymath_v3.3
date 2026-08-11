@@ -213,6 +213,71 @@ def describe_route() -> dict[str, Any]:
     }
 
 
+async def resolve_auto_engine(db: Any) -> str:
+    """RunPod-style extraction failover (owner-ordered 2026-08-11).
+
+    Returns the concrete engine to use RIGHT NOW when a corpus/global
+    config selects "auto":
+
+      GPU reachable AND its LLM engine qualified  -> "ghost_b_llm"
+      otherwise (GPU off / unqualified / any error) -> "graphify_cpu"
+
+    "graphify_cpu" is the Mac-local MPS encoder — always available, always
+    qualified — so extraction never stalls when the RTX box is asleep. The
+    GPU branch is gated on BOTH reachability and a recorded qualification,
+    so auto can never route production to an unqualified vLLM engine.
+
+    Deterministic per health snapshot; fail-safe to the local encoder.
+    """
+    import urllib.request as _rq
+
+    try:
+        route = await db[ROUTING_COLLECTION].find_one({"_id": ROUTING_DOC_ID}) or {}
+    except Exception:  # noqa: BLE001
+        return CANONICAL_LOCAL_ENGINE
+    gpu = (route or {}).get("auto_gpu_engine") or {}
+    if not gpu.get("enabled") or not gpu.get("qualified"):
+        return CANONICAL_LOCAL_ENGINE
+    health_url = str(gpu.get("health_url") or "").strip()
+    engine = str(gpu.get("engine") or "ghost_b_llm").strip() or "ghost_b_llm"
+    if not health_url:
+        return CANONICAL_LOCAL_ENGINE
+    try:
+        with _rq.urlopen(health_url, timeout=4) as resp:
+            if 200 <= resp.status < 300:
+                return engine
+    except Exception:  # noqa: BLE001 — GPU asleep/unreachable is the common case
+        pass
+    return CANONICAL_LOCAL_ENGINE
+
+
+async def set_auto_gpu_engine(
+    db: Any,
+    *,
+    enabled: bool,
+    engine: str = "ghost_b_llm",
+    health_url: str = "",
+    qualified: bool = False,
+) -> None:
+    """Ops act: configure the auto-failover target. `qualified` is only set
+    true after the extraction battery passes for `engine`."""
+    await db[ROUTING_COLLECTION].update_one(
+        {"_id": ROUTING_DOC_ID},
+        {"$set": {"auto_gpu_engine": {
+            "enabled": bool(enabled),
+            "engine": engine,
+            "health_url": health_url,
+            "qualified": bool(qualified),
+            "updated_at": __import__("datetime").datetime.utcnow(),
+        }}},
+        upsert=True,
+    )
+    invalidate_cache()
+
+
+CANONICAL_LOCAL_ENGINE = "graphify_cpu"
+
+
 def invalidate_cache() -> None:
     with _cache_lock:
         _cache["at"] = 0.0

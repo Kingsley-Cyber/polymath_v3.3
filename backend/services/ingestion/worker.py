@@ -1761,8 +1761,13 @@ async def _run_ghosts_parallel(
             logger.warning("global extraction settings unavailable: %s", exc)
 
         pool_refs = list(getattr(config, "extraction_models", None) or [])
+        from services.ingestion.extraction_contract import resolve_configured_engine
+
+        _configured_engine = await resolve_configured_engine(
+            db, getattr(config, "extraction_engine", None)
+        )
         contract = resolve_extraction_contract(
-            corpus_engine=getattr(config, "extraction_engine", None),
+            corpus_engine=_configured_engine,
             global_engine=global_engine,
             models_linked=getattr(config, "models_linked", False),
             summary_model_count=len(getattr(config, "summary_models", None) or []),

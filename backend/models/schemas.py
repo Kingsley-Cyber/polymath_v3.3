@@ -267,6 +267,7 @@ class IngestionConfig(BaseModel):
         "off",
         "graphify_cpu",
         "ghost_b_llm",
+        "auto",
     ] = Field(default="graphify_cpu")
 
     # Default to the universal vocab so freshly-instantiated configs match
@@ -573,6 +574,7 @@ class ExtractionSettings(BaseModel):
         "off",
         "graphify_cpu",
         "ghost_b_llm",
+        "auto",
     ] = Field(
         default="graphify_cpu",
         description=(
