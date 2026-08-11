@@ -23,7 +23,7 @@ CHECKS = [
     ("relex sidecar 8737", r"host\.docker\.internal:8737", "backend/services/extraction/relex_sidecar_client.py", [7, 40]),
     ("max attempts 5", r"INGEST_JOB_MAX_ATTEMPTS: int = Field", "backend/config.py", [1247]),
     ("stale job 30min", r"INGEST_STALE_JOB_MINUTES: int = Field", "backend/config.py", [1550]),
-    ("SCHEMA_INLINE_LIMIT 30", r"SCHEMA_INLINE_LIMIT \(30\)", "backend/services/ghost_b.py", [169]),
+    ("SCHEMA_INLINE_LIMIT 30", r"SCHEMA_INLINE_LIMIT \(30\)", "backend/services/ghost_b.py", [182]),
     ("kill seam inert flag", r"GRAPHIFY_OPS_KILL", "backend/services/ops_drills/kill_seam.py", None),
 ]
 
