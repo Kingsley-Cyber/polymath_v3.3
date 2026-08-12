@@ -1017,8 +1017,19 @@ async def _persist_extraction_rows(
     corpus_id: str,
     results: list[Any],
     failures: list[Any],
+    provenance: dict[str, Any] | None = None,
 ) -> None:
+    """Persist extraction artifacts.
+
+    `provenance` stamps WHICH lane produced these rows (engine, model,
+    release, device, output_mode). Without it the ledger cannot attribute a
+    fact to the extractor that made it — the audit found 106k v2 rows with
+    empty model/provider, indistinguishable from each other at retrieval
+    time. Only fills fields the result did not already carry, so an engine
+    that reports its own identity per row still wins.
+    """
     now = datetime.utcnow()
+    stamp = {k: v for k, v in (provenance or {}).items() if v not in (None, "")}
     prepared_rows: list[dict[str, Any]] = []
     for result in results:
         row = _asdict(result)
@@ -1028,6 +1039,9 @@ async def _persist_extraction_rows(
         row["corpus_id"] = corpus_id
         row["status"] = "ok"
         row["updated_at"] = now
+        for key, value in stamp.items():
+            if not row.get(key):
+                row[key] = value
         prepared_rows.append(row)
     for failure in failures:
         row = _asdict(failure)
@@ -1495,6 +1509,14 @@ async def run_extraction_jobs(
                         corpus_id=corpus_id,
                         results=list(report.results),
                         failures=list(report.failures),
+                        provenance={
+                            "engine": (report.metrics or {}).get("engine"),
+                            "model": (report.metrics or {}).get("model"),
+                            "provider": (report.metrics or {}).get("provider"),
+                            "output_mode": (report.metrics or {}).get("output_mode"),
+                            "extractor_release": (report.metrics or {}).get("release"),
+                            "device": (report.metrics or {}).get("device"),
+                        },
                     )
                     success_by_id = {
                         result.chunk_id: _asdict(result)

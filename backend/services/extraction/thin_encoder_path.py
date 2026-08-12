@@ -221,14 +221,25 @@ def results_for_window(
         owner = owner_of(window.placements, head_start)
         if owner is None:
             continue
+        # Evidence must be a span the READER can verify inside the owning
+        # chunk. Spanning head->tail unclipped swallowed everything between
+        # them when subject and object sat in different children, producing
+        # "evidence" that quoted unrelated text (audit finding 2026-08-12).
+        tail_start = int(getattr(rel, "tail_start", head_start) or head_start)
+        span_start = min(head_start, tail_start)
+        span_end = max(
+            int(getattr(rel, "head_end", head_start) or head_start),
+            int(getattr(rel, "tail_end", head_start) or head_start),
+        )
         evidence = _evidence(
             window.text,
-            min(head_start, int(getattr(rel, "tail_start", head_start) or head_start)),
-            max(
-                int(getattr(rel, "head_end", head_start) or head_start),
-                int(getattr(rel, "tail_end", head_start) or head_start),
-            ),
+            max(span_start, owner.start),
+            min(span_end, owner.end),
         )
+        if not evidence:
+            # cross-chunk pair: quote the subject's own sentence rather than
+            # a span the owning chunk does not contain
+            evidence = _evidence(window.text, head_start, min(owner.end, span_end))
         buckets[owner.chunk_id]["relations"].append(
             relation_cls(
                 subject=canonical_name(head_text),
@@ -380,9 +391,15 @@ async def run_thin_extraction(
         )
 
     results = assemble_results(children, per_window, result_cls=ExtractionResult)
+    release = _encoder_release(replicas)
     elapsed = time.perf_counter() - started
     metrics = {
         "engine": "thin_encoder",
+        "model": release.get("model", ""),
+        "provider": "relex_sidecar",
+        "output_mode": "span_labeling",
+        "release": release.get("release", ""),
+        "device": release.get("device", ""),
         "entity_labels": len(entity_labels),
         "relation_labels": len(relation_labels),
         "windows": len(windows),
@@ -394,3 +411,28 @@ async def run_thin_extraction(
         "relations": sum(len(r.relations) for r in results),
     }
     return results, metrics
+
+
+def _encoder_release(replicas: Sequence[Any]) -> dict[str, str]:
+    """Identity of the encoder that produced this batch, for the ledger.
+
+    Read from a replica's /health so the recorded provenance is what actually
+    served the request, not a constant compiled into the caller.
+    """
+    import json
+    import urllib.request
+
+    for base in replicas:
+        if not base:
+            continue
+        try:
+            with urllib.request.urlopen(f"{str(base).rstrip('/')}/health", timeout=3) as resp:
+                body = json.loads(resp.read())
+            return {
+                "model": str(body.get("model") or body.get("model_id") or ""),
+                "release": str(body.get("release") or ""),
+                "device": str(body.get("device") or ""),
+            }
+        except Exception:  # noqa: BLE001
+            continue
+    return {"model": "", "release": "", "device": ""}
