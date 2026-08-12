@@ -315,11 +315,31 @@ async def _load_backfill_config(
     live_cfg = (corpus or {}).get("default_ingestion_config") or {}
     from services.ingestion_service import build_effective_config
 
-    return build_effective_config(
+    effective = build_effective_config(
         frozen_base=doc.get("ingestion_config") or live_cfg,
         live_corpus=live_cfg,
         ingest_overrides=None,
     )
+    # build_effective_config prefers the document's FROZEN config, which is
+    # correct for reproducing a historical run but wrong for the extraction
+    # controls the owner tunes live. The planner already overlays these via
+    # with_live_extraction_config (LIVE_EXTRACTION_CONFIG_FIELDS); the
+    # executor must agree, or a corpus's domain vocabulary is configured and
+    # silently inert — measured 2026-08-12: film_production labels were set
+    # on the corpus while the encoder still received the global 14.
+    from services.ingestion.extraction_jobs import LIVE_EXTRACTION_CONFIG_FIELDS
+
+    overlay = {
+        field: live_cfg[field]
+        for field in LIVE_EXTRACTION_CONFIG_FIELDS
+        if field in live_cfg and live_cfg.get(field) is not None
+    }
+    if overlay:
+        try:
+            effective = effective.model_copy(update=overlay)
+        except Exception:  # noqa: BLE001 — never fail a run on config overlay
+            pass
+    return effective
 
 
 async def _extract_tasks(
