@@ -27,7 +27,10 @@ services:
   enrich-worker-2:
     build: ./backend
     profiles: ["offline-ingest"]
-    mem_limit: 2g
+    # graphify_cpu loads local models in-process (count_lstm_v2, adapter
+    # compiler); 2g OOM-killed every lane (exit 137). The ghost_b_llm path
+    # only made HTTP calls, which is why 2g sufficed there.
+    mem_limit: ${ENRICH_LANE_MEM_LIMIT:-5g}
     volumes:
       - "./config:/app/config:ro"
     command: ["python", "-c", "import asyncio\nfrom services.conversation import conversation_service\nfrom services.ingestion_service import ingestion_service\nfrom services.ingestion.enrichment_executor import run_enrichment_executor\nasync def main():\n    await conversation_service.connect()\n    await ingestion_service.connect(conversation_service._db)\n    await run_enrichment_executor(conversation_service._db, ingestion_service)\nasyncio.run(main())"]
