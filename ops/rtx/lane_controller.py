@@ -22,6 +22,7 @@ UNIT = "vllm-qwen"
 # The encoder pool: systemd template units, one per replica port. These are
 # what actually serve extraction since the 2026-08-12 encoder cutover, so
 # the autoscaler must be able to raise and lower THEM, not just vLLM.
+# 8741 is the CPU embedder's port — a relex replica there crash-loops.
 POOL_PORTS = [8737, 8738, 8739, 8740, 8742, 8743, 8744]
 POOL_UNIT = "relex-sidecar@{port}"
 CAP_UTILIZATION = 0.70  # owner cap: 70GB max of the ~98GB card
