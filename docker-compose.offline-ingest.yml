@@ -52,7 +52,7 @@ services:
       # config.py:2883 defaults to 32 concurrent WHOLE-DOCUMENT pipelines
       EXTRACTION_REPAIR_MAX_ACTIVE_DOCS: "2"
       INGEST_RUNNERS_ENABLED: "false"
-      ENRICHMENT_EXECUTOR_BATCH: ${ENRICHMENT_EXECUTOR_BATCH:-600}
+      ENRICHMENT_EXECUTOR_BATCH: ${ENRICHMENT_EXECUTOR_BATCH:-5000}
       ENRICHMENT_PLAN_LIMIT: ${ENRICHMENT_PLAN_LIMIT:-2000}
       # Sibling batching: one prompt per parent group, one artifact per child.
       EXTRACTION_SIBLING_BATCHING: ${EXTRACTION_SIBLING_BATCHING:-true}
@@ -117,7 +117,7 @@ services:
       # GPU autoscale (executor) posts /up /down to the RTX lane controller.
       RTX_LANE_MANAGER_API_KEY: ${RTX_LANE_MANAGER_API_KEY:-}
       # Bigger claim batches = fewer inter-batch gaps on the GPU lane.
-      ENRICHMENT_EXECUTOR_BATCH: ${ENRICHMENT_EXECUTOR_BATCH:-600}
+      ENRICHMENT_EXECUTOR_BATCH: ${ENRICHMENT_EXECUTOR_BATCH:-5000}
       EXTRACTION_SIBLING_BATCHING: ${EXTRACTION_SIBLING_BATCHING:-true}
       EXTRACTION_SIBLING_GROUP_MAX_TOKENS: ${EXTRACTION_SIBLING_GROUP_MAX_TOKENS:-600}
       # MUST exceed the group cap or groups truncate silently (audit 2026-08-12)

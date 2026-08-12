@@ -1281,7 +1281,13 @@ async def run_extraction_jobs(
         _run_ghost_b_backfill,
     )
 
-    limit = max(1, min(int(limit or 25), 500))
+    # Ceiling raised 2026-08-12: 500 was sized for graphify, where one
+    # document ran 10-25 minutes. The encoder engine consumes ~53 chunks/s,
+    # so a 500-job claim is ~9 seconds of work and the loop overhead
+    # (corpus scan, planning, promotion) dominates — GPU sat at 0% with
+    # thousands queued. 5000 jobs is ~94s of encoder work, well inside the
+    # 7200s lease.
+    limit = max(1, min(int(limit or 25), 5000))
     now = datetime.utcnow()
     reclaimed = await reclaim_expired_running_jobs(
         db,
