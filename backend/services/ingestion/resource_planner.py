@@ -18,7 +18,12 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
-ExtractionBackend = Literal["off", "local_cpu"]
+# "remote_service": extraction runs OFF this machine (encoder sidecar pool,
+# provider LLM lane). The planner must not budget local CPU/RAM for it, and
+# — critically — must not raise, or ingesting a new document into such a
+# corpus fails outright (measured 2026-08-12: uploading to an `encoder`
+# corpus raised "unsupported extraction engine").
+ExtractionBackend = Literal["off", "local_cpu", "remote_service"]
 EmbeddingBackend = Literal["local_metal", "cpu", "remote", "disabled"]
 StorageMode = Literal["local_disk", "mounted_volume", "network_share"]
 
@@ -253,6 +258,8 @@ def classify_extraction_backend(
         return "local_cpu", ("local_cpu",)
     if engine == "off":
         return "off", ("off",)
+    if engine in {"encoder", "ghost_b_llm", "auto"}:
+        return "remote_service", ("remote_service",)
     raise ValueError(f"unsupported extraction engine: {engine}")
 
 
