@@ -306,7 +306,7 @@ async def _extract_tasks(
         query["chunk_id"] = {"$in": chunk_ids}
     rows = await db["chunks"].find(
         query,
-        {"chunk_id": 1, "text": 1, "chunk_kind": 1, "_id": 0},
+        {"chunk_id": 1, "text": 1, "chunk_kind": 1, "parent_id": 1, "_id": 0},
     ).to_list(length=None)
     all_chunk_ids = [str(row.get("chunk_id") or "") for row in rows if row.get("chunk_id")]
     tasks = [
@@ -315,6 +315,7 @@ async def _extract_tasks(
             doc_id=doc_id,
             corpus_id=corpus_id,
             text=str(row.get("text") or ""),
+            metadata={"parent_id": str(row.get("parent_id") or "")},
         )
         for row in rows
         if row.get("chunk_id")
@@ -388,14 +389,44 @@ async def _run_ghost_b_backfill(
             relation_schema=config.relation_schema,
             strict=config.schema_strict,
         )
+        # Sibling batching (owner ruling 2026-08-12): prompt once per parent
+        # group, keep one artifact per child. See sibling_batching module for
+        # why this beats parent-level JOBS on blast radius.
+        from services.extraction import sibling_batching as _sib
+
+        groups = None
+        prompt_tasks = tasks
+        if _sib.batching_enabled() and len(tasks) > 1:
+            candidate = _sib.group_sibling_tasks(tasks)
+            if len(candidate) < len(tasks):
+                groups = candidate
+                prompt_tasks = [
+                    _sib.merge_group(group, ExtractionTask) for group in candidate
+                ]
         report = await extract_entities(
-            tasks,
+            prompt_tasks,
             schema=schema,
             pool=pool,
             return_report=True,
             enable_facts=_gs().EXTRACTION_ENABLE_FACTS,
         )
         if isinstance(report, ExtractionBatchReport):
+            if groups:
+                expanded, failures = _sib.expand_report(
+                    report,
+                    groups,
+                    result_cls=ExtractionResult,
+                    failure_cls=ExtractionFailureItem,
+                )
+                report = ExtractionBatchReport(
+                    results=expanded,
+                    failures=failures,
+                    metrics={
+                        **(report.metrics or {}),
+                        "sibling_groups": len(groups),
+                        "sibling_children": len(tasks),
+                    },
+                )
             report.metrics["engine"] = "ghost_b_llm"
             return report
         return ExtractionBatchReport(
