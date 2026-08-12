@@ -178,6 +178,18 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
                 {"status": {"$ne": "archived"}},
                 {"corpus_id": 1, "user_id": 1},
             ).sort("corpus_id", 1).to_list(length=200)
+            # Lane-collision fix (owner speed ruling 2026-08-12): every
+            # executor previously walked corpora in the SAME sorted order,
+            # so N workers piled onto corpus[0] — one won its corpus-lane
+            # mutex and the rest logged lease_busy, leaving the GPU fed by
+            # a single lane. Rotate the walk by a per-process offset so
+            # concurrent workers land on DIFFERENT corpora and the engine
+            # sees N lanes of in-flight work instead of one.
+            if corpora:
+                import socket
+
+                offset = (abs(hash(socket.gethostname())) + cycle) % len(corpora)
+                corpora = corpora[offset:] + corpora[:offset]
         except Exception as exc:  # noqa: BLE001
             logger.warning("enrichment executor: corpus scan failed: %s", exc)
             await asyncio.sleep(idle_sleep)

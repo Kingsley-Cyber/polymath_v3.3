@@ -25,3 +25,8 @@ Symptom → root cause → guarding invariant. Match new symptoms against old sh
 symptom: executor+pump both log `lease_busy claimed=0` on every GPU corpus; nvidia-smi 1%; queue unchanged
 root cause: `up -d --force-recreate` kills runners mid-batch; their `ingest_lane_leases` rows (per-corpus `extraction` lane mutex, ~30-min TTL, heartbeat-refreshed) survive with dead owners — all claimers block until TTL
 guard: boot sweep in enrichment_executor deletes lane leases with heartbeat_at >10min stale (live holders refresh every few minutes); INVARIANT: deploy stall <= one boot, not one TTL
+
+## 12. N executors, 1 lane of GPU work (2026-08-12)
+symptom: 4 workers running, engine shows only 64 in-flight (one lane's worth) with 40s dead gaps; workers log `lease_busy claimed=0`
+root cause: every executor sorted corpora by corpus_id and walked them in the SAME order, so all N raced the same corpus-lane mutex; one won, the rest starved — parallel workers produced serial GPU feed
+guard: per-process rotation of the corpus walk (offset = hash(hostname)+cycle); INVARIANT: N concurrent executors must cover min(N, corpora) DISTINCT corpora per cycle
