@@ -19,6 +19,11 @@ PORT = 8086
 KEY_FILE = "/home/kingsley/vllm-server/controller-key.txt"
 SERVE_SH = "/home/kingsley/vllm-server/serve.sh"
 UNIT = "vllm-qwen"
+# The encoder pool: systemd template units, one per replica port. These are
+# what actually serve extraction since the 2026-08-12 encoder cutover, so
+# the autoscaler must be able to raise and lower THEM, not just vLLM.
+POOL_PORTS = [8737, 8738, 8739, 8740, 8742, 8743, 8744]
+POOL_UNIT = "relex-sidecar@{port}"
 CAP_UTILIZATION = 0.70  # owner cap: 70GB max of the ~98GB card
 NVSMI = "/usr/lib/wsl/lib/nvidia-smi"
 
@@ -86,6 +91,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authed():
             return self._send(401, {"error": "unauthorized"})
+        if self.path.rstrip("/") == "/pool/status":
+            alive = []
+            for port in POOL_PORTS:
+                try:
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{port}/health", timeout=3
+                    ) as resp:
+                        alive.append({"port": port, "healthy": resp.status == 200})
+                except Exception:  # noqa: BLE001
+                    alive.append({"port": port, "healthy": False})
+            healthy = sum(1 for a in alive if a["healthy"])
+            return self._send(200, {
+                "replicas": alive,
+                "healthy": healthy,
+                "vram": vram(),
+            })
         if self.path.rstrip("/") in ("", "/status"):
             return self._send(200, {
                 "controller": "native-vllm-qwen",
@@ -116,6 +137,18 @@ class Handler(BaseHTTPRequestHandler):
                 "action": "start", "rc": r.returncode,
                 "stderr": r.stderr.strip()[-300:], "unit": unit_state(),
             })
+        if path == "/pool/up":
+            started = []
+            for port in POOL_PORTS:
+                r = run(["sudo", "-n", "systemctl", "start", POOL_UNIT.format(port=port)])
+                started.append({"port": port, "rc": r.returncode})
+            return self._send(200, {"action": "pool_up", "units": started, "vram": vram()})
+        if path == "/pool/down":
+            stopped = []
+            for port in POOL_PORTS:
+                r = run(["sudo", "-n", "systemctl", "stop", POOL_UNIT.format(port=port)])
+                stopped.append({"port": port, "rc": r.returncode})
+            return self._send(200, {"action": "pool_down", "units": stopped, "vram": vram()})
         if path == "/down":
             r = run(["sudo", "-n", "systemctl", "stop", UNIT])
             return self._send(200 if r.returncode == 0 else 500, {

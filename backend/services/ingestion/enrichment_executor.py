@@ -85,8 +85,10 @@ async def _autoscale_gpu(db: Any, remaining_jobs: int) -> dict[str, Any]:
             return {"state": "awaiting_qualification"}
         gpu_corpora = await db["corpora"].count_documents({
             "status": {"$ne": "archived"},
+            # Every GPU-served engine. Omitting "encoder" here would make the
+            # autoscaler see zero GPU corpora and offload the pool MID-RUN.
             "default_ingestion_config.extraction_engine": {
-                "$in": ["auto", "ghost_b_llm"]
+                "$in": ["auto", "ghost_b_llm", "encoder"]
             },
         })
         want_gpu = bool(remaining_jobs and gpu_corpora)
