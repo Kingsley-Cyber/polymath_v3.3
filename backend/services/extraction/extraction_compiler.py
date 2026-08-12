@@ -406,3 +406,76 @@ def compile_extraction(
         )
     report.facts = collapse_duplicates(all_facts)
     return report.facts, report
+
+
+def filter_results_to_compiled(
+    results: Sequence[Any],
+    *,
+    domain: str | None = None,
+    result_cls: Any,
+    include_review: bool = False,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Return per-chunk results carrying ONLY compiled, gated content.
+
+    This is the graph-write gate. Raw proposals stay in the extraction
+    ledger (ghost_b_extractions) as the record of what the model said; the
+    graph receives only what survived the compiler. Nothing is rewritten —
+    surviving items are the originals, filtered.
+
+    include_review=False keeps REVIEW facts out of the graph until an
+    adjudicator exists, which is the conservative reading of the acceptance
+    policy: a fact nobody has adjudicated is not yet knowledge.
+    """
+    facts, report = compile_extraction(results, domain)
+    verdicts = {"accept", "review"} if include_review else {"accept"}
+    kept = [f for f in facts if f.verdict in verdicts]
+
+    # index the surviving facts by chunk so each result keeps its own
+    by_chunk: dict[str, set[tuple[str, str, str]]] = {}
+    entity_names: dict[str, set[str]] = {}
+    for fact in kept:
+        by_chunk.setdefault(fact.chunk_id, set()).add(
+            (fact.subject_name, fact.predicate, fact.object_name)
+        )
+        names = entity_names.setdefault(fact.chunk_id, set())
+        names.add(fact.subject_name)
+        names.add(fact.object_name)
+
+    from services.extraction.canonical import canonicalize_entity_name
+
+    out: list[Any] = []
+    for result in results:
+        chunk_id = str(getattr(result, "chunk_id", ""))
+        legal_names = entity_names.get(chunk_id, set())
+        legal_edges = by_chunk.get(chunk_id, set())
+        entities = [
+            e
+            for e in (getattr(result, "entities", None) or [])
+            if canonicalize_entity_name(str(getattr(e, "canonical_name", ""))) in legal_names
+        ]
+        relations = [
+            r
+            for r in (getattr(result, "relations", None) or [])
+            if (
+                canonicalize_entity_name(str(getattr(r, "subject", ""))),
+                str(getattr(r, "predicate", "")),
+                canonicalize_entity_name(str(getattr(r, "object", ""))),
+            )
+            in legal_edges
+        ]
+        out.append(
+            result_cls(
+                schema_version=getattr(result, "schema_version", ""),
+                chunk_id=chunk_id,
+                doc_id=str(getattr(result, "doc_id", "")),
+                corpus_id=str(getattr(result, "corpus_id", "")),
+                entities=entities,
+                relations=relations,
+                facts=[],
+                text=str(getattr(result, "text", "") or ""),
+            )
+        )
+    metrics = report.as_metrics()
+    metrics["graph_written_facts"] = len(kept)
+    metrics["domain"] = domain or "global"
+    return out, metrics

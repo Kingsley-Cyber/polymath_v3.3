@@ -237,6 +237,34 @@ async def _write_graph_results(
 ) -> None:
     from services.graph.projection_runner import project_document_via_control_plane
 
+    # COMPILE GATE (owner architecture 2026-08-12): raw encoder proposals are
+    # the ledger; only compiled, gated facts become graph edges. Without this
+    # the graph accumulated untypeable "other" nodes and edges whose endpoints
+    # were never entities.
+    try:
+        from services.extraction.extraction_compiler import filter_results_to_compiled
+
+        corpus_row = await db["corpora"].find_one(
+            {"corpus_id": corpus_id}, {"ontology_domain": 1}
+        )
+        extraction_results, compile_metrics = filter_results_to_compiled(
+            extraction_results,
+            domain=str((corpus_row or {}).get("ontology_domain") or "") or None,
+            result_cls=ExtractionResult,
+        )
+        metrics = {**(metrics or {}), "compiler": compile_metrics}
+        logger.info(
+            "compile gate: doc=%s domain=%s facts_to_graph=%s accepted=%s review=%s rejected=%s",
+            doc_id[:12],
+            compile_metrics.get("domain"),
+            compile_metrics.get("graph_written_facts"),
+            compile_metrics.get("accepted"),
+            compile_metrics.get("review"),
+            compile_metrics.get("rejected"),
+        )
+    except Exception as exc:  # noqa: BLE001 — never lose a graph write to the gate
+        logger.warning("compile gate skipped for doc=%s: %s", doc_id[:12], exc)
+
     await project_document_via_control_plane(
         db=db,
         neo4j_driver=neo4j_driver,

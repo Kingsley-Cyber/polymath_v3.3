@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from services.extraction import extraction_compiler as comp
+from services.extraction.extraction_compiler import filter_results_to_compiled
 
 
 @dataclass
@@ -237,3 +238,91 @@ def test_compiling_twice_with_a_domain_is_idempotent():
         (f.subject_id, f.predicate, f.object_id, f.verdict) for f in second
     ]
     assert r1.as_metrics() == r2.as_metrics()
+
+
+# --- the graph-write gate -------------------------------------------------
+
+from services.ghost_b import ExtractionResult as _ER  # noqa: E402
+
+
+def _real_result(chunk_id, entities, relations):
+    from services.ghost_b import EntityItem, RelationItem
+
+    return _ER(
+        schema_version="v2",
+        chunk_id=chunk_id,
+        doc_id="d",
+        corpus_id="c",
+        entities=[
+            EntityItem(canonical_name=n, surface_form=n, entity_type=t, confidence=0.9)
+            for n, t in entities
+        ],
+        relations=[
+            RelationItem(
+                subject=s, predicate=p, object=o, object_kind="entity",
+                confidence=conf, evidence_phrase="verbatim evidence here",
+            )
+            for s, p, o, conf in relations
+        ],
+        text="source text",
+    )
+
+
+def test_gate_keeps_only_compiled_content_and_never_rewrites_it():
+    r = _real_result(
+        "c1",
+        [("the wizard of oz", "Film"), ("circular journey", "Narrative Device"),
+         ("full listing", "other")],
+        [("the wizard of oz", "uses", "circular journey", 0.9),
+         ("hook", "part_of", "creative system", 0.9)],
+    )
+    out, metrics = filter_results_to_compiled(
+        [r], domain="film_production", result_cls=_ER
+    )
+    kept = out[0]
+    # the untypeable span and the endpoint-less edge are gone
+    assert [e.canonical_name for e in kept.entities] == [
+        "the wizard of oz", "circular journey"
+    ]
+    assert [(x.subject, x.predicate, x.object) for x in kept.relations] == [
+        ("the wizard of oz", "uses", "circular journey")
+    ]
+    # surviving items are the ORIGINAL objects, not rewritten ones
+    assert kept.relations[0].evidence_phrase == "verbatim evidence here"
+    assert metrics["graph_written_facts"] == 1
+
+
+def test_gate_preserves_one_result_per_chunk_even_when_all_content_is_dropped():
+    r1 = _real_result("c1", [("full listing", "other")], [])
+    r2 = _real_result("c2", [("the wizard of oz", "Film")], [])
+    out, _ = filter_results_to_compiled([r1, r2], domain="film_production", result_cls=_ER)
+    assert [o.chunk_id for o in out] == ["c1", "c2"]
+    assert out[0].entities == [] and out[0].relations == []
+
+
+def test_gate_excludes_review_facts_from_the_graph_by_default():
+    r = _real_result(
+        "c1",
+        [("alex", "Person"), ("qdrant", "Software")],
+        [("alex", "uses", "qdrant", 0.45)],  # review band
+    )
+    out, metrics = filter_results_to_compiled([r], result_cls=_ER)
+    assert out[0].relations == []
+    assert metrics["review"] == 1 and metrics["graph_written_facts"] == 0
+    out2, m2 = filter_results_to_compiled([r], result_cls=_ER, include_review=True)
+    assert len(out2[0].relations) == 1 and m2["graph_written_facts"] == 1
+
+
+def test_gate_is_idempotent():
+    r = _real_result(
+        "c1",
+        [("the wizard of oz", "Film"), ("circular journey", "Narrative Device")],
+        [("the wizard of oz", "uses", "circular journey", 0.9)],
+    )
+    first, m1 = filter_results_to_compiled([r], domain="film_production", result_cls=_ER)
+    # feeding the gate its own output must change nothing
+    second, m2 = filter_results_to_compiled(first, domain="film_production", result_cls=_ER)
+    assert [(x.subject, x.predicate, x.object) for x in first[0].relations] == [
+        (x.subject, x.predicate, x.object) for x in second[0].relations
+    ]
+    assert m1["graph_written_facts"] == m2["graph_written_facts"]
