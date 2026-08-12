@@ -52,8 +52,22 @@ def _limits() -> tuple[int, int]:
         except ValueError:
             return default
 
+    group_tokens = _int("EXTRACTION_SIBLING_GROUP_MAX_TOKENS", DEFAULT_MAX_GROUP_TOKENS)
+    # HARD CLAMP (blast-radius audit 2026-08-12): the extractor bounds prompt
+    # text to EXTRACTION_MAX_INPUT_TOKENS and truncates SILENTLY (log-only).
+    # A group larger than that budget loses its tail children — they would
+    # still receive an artifact and a succeeded job, i.e. silent empty
+    # extractions. Never group beyond what the prompt can actually carry.
+    try:
+        from config import get_settings
+
+        budget = int(getattr(get_settings(), "EXTRACTION_MAX_INPUT_TOKENS", 0) or 0)
+    except Exception:  # noqa: BLE001 — settings unavailable in unit context
+        budget = 0
+    if budget > 0:
+        group_tokens = min(group_tokens, max(1, int(budget * 0.9)))
     return (
-        _int("EXTRACTION_SIBLING_GROUP_MAX_TOKENS", DEFAULT_MAX_GROUP_TOKENS),
+        group_tokens,
         _int("EXTRACTION_SIBLING_GROUP_MAX_CHILDREN", DEFAULT_MAX_GROUP_CHILDREN),
     )
 
@@ -129,15 +143,30 @@ def _norm(value: str) -> str:
 
 
 def _owner_index(spans: Iterable[str], child_texts: list[str]) -> int | None:
-    """First child whose text contains any of the given verbatim spans."""
-    for span in spans:
+    """Child that owns the span: exact substring first, then token overlap.
+
+    The extractor's evidence gate accepts a 60% token-overlap paraphrase, so
+    ``evidence_phrase`` is not guaranteed to be a verbatim substring. Exact
+    match stays authoritative; overlap only breaks ties the substring pass
+    could not resolve, and an unresolved span falls back to the anchor.
+    """
+    candidates = [s for s in spans if len(_norm(s)) >= 3]
+    for span in candidates:
         needle = _norm(span)
-        if len(needle) < 3:
-            continue
         for idx, haystack in enumerate(child_texts):
             if needle in haystack:
                 return idx
-    return None
+    best_idx, best_score = None, 0.0
+    for span in candidates:
+        tokens = {t for t in re.findall(r"[a-z0-9]+", _norm(span)) if len(t) > 2}
+        if not tokens:
+            continue
+        for idx, haystack in enumerate(child_texts):
+            hay_tokens = set(re.findall(r"[a-z0-9]+", haystack))
+            score = len(tokens & hay_tokens) / len(tokens)
+            if score > best_score:
+                best_idx, best_score = idx, score
+    return best_idx if best_score >= 0.6 else None
 
 
 def split_result(result: Any, group: Sequence[Any], result_cls: Any) -> list[Any]:

@@ -47,3 +47,7 @@ VERIFY:
 - `grep -n 'DEFAULT_LANE_ADOPT_STALE_SECONDS' backend/services/ingestion/job_leases.py` → 420.0 at :35
 - `grep -n '_DEFAULT_ENTITY_TYPES' backend/services/ghost_b.py` → :147 with [person, org, concept, other]
 - `sed -n '32,63p' backend/models/local_extraction.py` → Literal size 34
+
+- extraction artifacts stay CHILD-keyed: one ghost_b_extractions row per child chunk id — desired_state.py:368-400 counts required extractions as len(chunk_ids), and neo4j_writer.py:2606-2622 DROPS any result whose chunk_id is not a live child. Batching may change the PROMPT grain, never the ARTIFACT grain.
+- sibling group tokens <= EXTRACTION_MAX_INPUT_TOKENS (config.py:2066, le=4096): _bounded_extraction_text (ghost_b.py:979-989) truncates prompt text SILENTLY, so an oversized group emits empty artifacts for its tail children while their jobs still flip succeeded. Clamped in sibling_batching._limits.
+- entity attribution cannot use evidence_phrase: EntityItem has no such field (ghost_b.py:2167-2186); surface_form/canonical_name are the only spans available.
