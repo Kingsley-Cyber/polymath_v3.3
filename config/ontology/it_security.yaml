@@ -1,0 +1,90 @@
+# Domain ontology: IT certification, cloud architecture, security operations.
+# Corpus: cybersecurity-study (CCNA, AWS SAA, CompTIA CySA+, Terraform, KQL,
+# incident response, data engineering).
+schema_version: polymath.domain_ontology.v1
+domain: it_security
+
+predicates:
+  configured_by:
+    allowed_pairs:
+      - [Cloud Service, Configuration Setting]
+      - [Infrastructure Component, Configuration Setting]
+      - [Network Service, Configuration Setting]
+      - [Software, Command]
+      - [Software, Configuration Setting]
+  created_by:
+    allowed_pairs:
+      - [Cloud Service, Cloud Provider]
+      - [Programming Language, Organization]
+      - [Software, Organization]
+      - [Standard, Organization]
+  defines:
+    allowed_pairs:
+      - [Certification, Standard]
+      - [Standard, Protocol]
+      - [Standard, Security Control]
+  depends_on:
+    allowed_pairs:
+      - [Cloud Service, Cloud Service]
+      - [Software, Database]
+      - [Software, Software Library]
+  exploits:
+    allowed_pairs:
+      - [Attack Technique, Network Service]
+      - [Attack Technique, Software]
+      - [Attack Technique, Vulnerability]
+  implements:
+    allowed_pairs:
+      - [Cloud Service, Standard]
+      - [Network Service, Protocol]
+      - [Security Control, Standard]
+      - [Software, Standard]
+  instance_of:
+    allowed_pairs:
+      - [Attack Technique, Attack Technique]
+      - [Cloud Service, Cloud Service]
+      - [Vulnerability, Vulnerability]
+  member_of:
+    allowed_pairs:
+      - [Person, Organization]
+  mitigates:
+    allowed_pairs:
+      - [Configuration Setting, Vulnerability]
+      - [Security Control, Attack Technique]
+      - [Security Control, Vulnerability]
+      - [Software, Vulnerability]
+  part_of:
+    allowed_pairs:
+      - [Cloud Service, Cloud Provider]
+      - [Command, Software]
+      - [Network Service, Infrastructure Component]
+      - [Software Library, Software]
+  produces:
+    allowed_pairs:
+      - [Command, Data Structure]
+      - [Software, Data Structure]
+  references:
+    allowed_pairs:
+      - [Certification, Protocol]
+      - [Certification, Standard]
+  runs_on:
+    allowed_pairs:
+      - [Cloud Service, Cloud Provider]
+      - [Database, Infrastructure Component]
+      - [Network Service, Infrastructure Component]
+      - [Software, Cloud Service]
+      - [Software, Infrastructure Component]
+  stores:
+    allowed_pairs:
+      - [Cloud Service, Data Structure]
+      - [Database, Data Structure]
+  uses:
+    allowed_pairs:
+      - [Attack Technique, Vulnerability]
+      - [Cloud Service, Protocol]
+      - [Network Service, Protocol]
+      - [Person, Software]
+      - [Software, Database]
+      - [Software, Programming Language]
+      - [Software, Protocol]
+      - [Software, Software Library]

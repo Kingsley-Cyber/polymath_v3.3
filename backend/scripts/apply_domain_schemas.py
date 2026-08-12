@@ -39,8 +39,11 @@ CORE_RELATIONS = [
     "contradicts", "preceded_by", "related_to",
 ]
 
+# ontology_domain binds the corpus to config/ontology/<domain>.yaml, whose
+# allowed_pairs are the type signatures for that corpus's vocabulary.
 SCHEMAS: dict[str, dict[str, list[str]]] = {
     "markbuildsbrands-transcripts": {
+        "ontology_domain": "consumer_psychology",
         "entity_schema": [
             "Person", "Organization", "Brand", "Product",
             "Consumer Segment", "Psychological Construct", "Cognitive Bias",
@@ -51,6 +54,7 @@ SCHEMAS: dict[str, dict[str, list[str]]] = {
         "relation_schema": CORE_RELATIONS + ["influences", "measured_by", "studied_in"],
     },
     "video-generation-school": {
+        "ontology_domain": "film_production",
         "entity_schema": [
             "Shot Type", "Camera Movement", "Camera Angle", "Lighting Technique",
             "Editing Technique", "Visual Effect", "Sound Technique",
@@ -61,6 +65,7 @@ SCHEMAS: dict[str, dict[str, list[str]]] = {
         "relation_schema": CORE_RELATIONS + ["performed_by", "achieved_with", "composed_of"],
     },
     "cybersecurity-study": {
+        "ontology_domain": "it_security",
         "entity_schema": [
             "Protocol", "Network Service", "Cloud Service", "Cloud Provider",
             "Vulnerability", "Attack Technique", "Security Control",
@@ -86,15 +91,19 @@ async def main() -> None:
             continue
         await db["corpora"].update_one(
             {"corpus_id": corpus["corpus_id"]},
+            # Idempotent: a fixed $set of values derived only from this file.
+            # Re-running produces byte-identical corpus state.
             {"$set": {
                 "default_ingestion_config.entity_schema": schema["entity_schema"],
                 "default_ingestion_config.relation_schema": schema["relation_schema"],
                 "default_ingestion_config.schema_strict": "soft",
+                "ontology_domain": schema["ontology_domain"],
                 "domain_schema_applied_at": datetime.utcnow(),
             }},
         )
         print(
-            f"  {name[:34]:36} entities={len(schema['entity_schema']):3} "
+            f"  {name[:34]:36} domain={schema['ontology_domain']:20} "
+            f"entities={len(schema['entity_schema']):3} "
             f"relations={len(schema['relation_schema']):3}"
         )
     print("applied. workers pick this up on the next claim — no restart needed.")

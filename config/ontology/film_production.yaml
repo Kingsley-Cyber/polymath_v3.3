@@ -1,0 +1,75 @@
+# Domain ontology: film production, cinematography, VFX, performance anatomy.
+# Corpus: video-generation-school (VES Handbook, Dancyger, Brown, FACS
+# manuals, Anatomy for Sculptors, sound design, digital compositing).
+schema_version: polymath.domain_ontology.v1
+domain: film_production
+
+predicates:
+  achieved_with:
+    allowed_pairs:
+      - [Camera Movement, Equipment]
+      - [Lighting Technique, Equipment]
+      - [Shot Type, Equipment]
+      - [Sound Technique, Equipment]
+      - [Visual Effect, Software]
+  composed_of:
+    allowed_pairs:
+      - [Facial Action, Anatomical Structure]
+      - [Film, Shot Type]
+      - [Shot Type, Composition Principle]
+  created_by:
+    allowed_pairs:
+      - [Film, Organization]
+      - [Film, Person]
+      - [Software, Organization]
+  defines:
+    allowed_pairs:
+      - [Composition Principle, Shot Type]
+      - [Narrative Device, Film]
+  instance_of:
+    allowed_pairs:
+      - [Camera Movement, Camera Movement]
+      - [Film, Narrative Device]
+      - [Shot Type, Shot Type]
+      - [Visual Effect, Visual Effect]
+  part_of:
+    allowed_pairs:
+      - [Anatomical Structure, Anatomical Structure]
+      - [Camera Movement, Shot Type]
+      - [Facial Action, Facial Action]
+      - [Shot Type, Film]
+  performed_by:
+    allowed_pairs:
+      - [Camera Movement, Production Role]
+      - [Editing Technique, Production Role]
+      - [Facial Action, Anatomical Structure]
+      - [Shot Type, Production Role]
+  produces:
+    allowed_pairs:
+      - [Editing Technique, Visual Effect]
+      - [Lighting Technique, Visual Effect]
+      - [Production Role, Film]
+      - [Sound Technique, Visual Effect]
+  references:
+    allowed_pairs:
+      - [Film, Film]
+      - [Film, Person]
+  supports:
+    allowed_pairs:
+      - [Composition Principle, Narrative Device]
+      - [Lighting Technique, Narrative Device]
+      - [Sound Technique, Narrative Device]
+  uses:
+    allowed_pairs:
+      - [Editing Technique, Software]
+      - [Film, Camera Movement]
+      - [Film, Editing Technique]
+      - [Film, Narrative Device]
+      - [Film, Shot Type]
+      - [Film, Visual Effect]
+      - [Person, Equipment]
+      - [Person, Software]
+      - [Production Role, Equipment]
+      - [Shot Type, Camera Angle]
+      - [Shot Type, Lighting Technique]
+      - [Visual Effect, Software]

@@ -149,3 +149,91 @@ def test_predicate_without_an_ontology_signature_routes_to_review():
     facts, report = comp.compile_extraction([r])
     assert report.accepted == 0 and report.review == 1
     assert "predicate_has_no_ontology_signature" in facts[0].reasons
+
+
+# --- domain ontology signatures: deterministic + idempotent ---------------
+
+DOMAIN_CORPORA = ("consumer_psychology", "film_production", "it_security")
+
+
+def test_domain_signatures_load_and_are_nonempty():
+    for domain in DOMAIN_CORPORA:
+        sigs = comp.signatures(domain)
+        assert sigs, f"{domain} loaded no signatures"
+
+
+def test_domain_signature_loading_is_deterministic():
+    # same domain, repeated loads -> identical frozen pair sets
+    for domain in DOMAIN_CORPORA:
+        first = comp._domain_signatures(domain)
+        second = comp._domain_signatures(domain)
+        assert first == second
+        assert {k: sorted(v) for k, v in first.items()} == {
+            k: sorted(v) for k, v in second.items()
+        }
+
+
+def test_domain_overlay_replaces_global_predicate_not_unions_it():
+    # `uses` in film_production means film pairs, not the global ones
+    film = comp.signatures("film_production")
+    glob = comp.signatures(None)
+    assert ("film", "shot type") in film["uses"]
+    # a pair the GLOBAL `uses` allows but the film domain does not
+    assert ("organization", "method") in glob["uses"]
+    assert ("organization", "method") not in film["uses"]
+
+
+def test_unknown_domain_falls_back_to_global_without_raising():
+    assert comp.signatures("no_such_domain") == comp.signatures(None)
+
+
+def test_domain_name_is_sanitised_against_path_traversal():
+    assert comp._domain_signatures("../../etc/passwd") == {}
+    assert comp._domain_signatures("") == {}
+
+
+def test_domain_typed_fact_is_accepted_when_its_signature_exists():
+    r = _Result(
+        entities=[_Ent("the wizard of oz", "Film"), _Ent("circular journey", "Narrative Device")],
+        relations=[_Rel("the wizard of oz", "uses", "circular journey", confidence=0.8)],
+    )
+    facts, report = comp.compile_extraction([r], domain="film_production")
+    assert report.accepted == 1
+    assert facts[0].subject_type == "film" and facts[0].object_type == "narrative device"
+
+
+def test_domain_typed_fact_with_illegal_pair_is_rejected():
+    # neither direction of Equipment/Narrative Device is legal for `uses`
+    r = _Result(
+        entities=[_Ent("dolly", "Equipment"), _Ent("circular journey", "Narrative Device")],
+        relations=[_Rel("dolly", "uses", "circular journey", confidence=0.99)],
+    )
+    facts, report = comp.compile_extraction([r], domain="film_production")
+    assert facts == [] and report.reject_reasons["illegal_type_signature"] == 1
+
+
+def test_invertible_direction_is_flagged_for_review_never_silently_flipped():
+    # film --uses--> narrative device is legal; the reverse is not. The
+    # compiler must NOT rewrite the claim — it flags and routes to REVIEW.
+    r = _Result(
+        entities=[_Ent("circular journey", "Narrative Device"), _Ent("the wizard of oz", "Film")],
+        relations=[_Rel("circular journey", "uses", "the wizard of oz", confidence=0.99)],
+    )
+    facts, report = comp.compile_extraction([r], domain="film_production")
+    assert report.review == 1 and report.accepted == 0
+    assert "direction_suspect_invertible" in facts[0].reasons
+    # the stored claim keeps the ORIGINAL direction; adjudication decides
+    assert facts[0].subject_name == "circular journey"
+
+
+def test_compiling_twice_with_a_domain_is_idempotent():
+    r = _Result(
+        entities=[_Ent("the wizard of oz", "Film"), _Ent("circular journey", "Narrative Device")],
+        relations=[_Rel("the wizard of oz", "uses", "circular journey", confidence=0.8)],
+    )
+    first, r1 = comp.compile_extraction([r], domain="film_production")
+    second, r2 = comp.compile_extraction([r], domain="film_production")
+    assert [(f.subject_id, f.predicate, f.object_id, f.verdict) for f in first] == [
+        (f.subject_id, f.predicate, f.object_id, f.verdict) for f in second
+    ]
+    assert r1.as_metrics() == r2.as_metrics()

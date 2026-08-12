@@ -1,0 +1,90 @@
+# Domain ontology: consumer psychology, behaviour science, marketing.
+# Corpus: markbuildsbrands-transcripts (APA/Cambridge handbooks of consumer
+# psychology, Solomon, Ariely, Wood, Ries & Trout, Christensen).
+#
+# CONTRACT: allowed_pairs are [subject_type, object_type] in the corpus's
+# entity_schema vocabulary. Case-insensitive at load. Order within a list is
+# irrelevant to behaviour — the loader builds a frozenset — but is kept
+# sorted so the file diffs cleanly and hashes stably.
+schema_version: polymath.domain_ontology.v1
+domain: consumer_psychology
+
+predicates:
+  causes:
+    allowed_pairs:
+      - [Cognitive Bias, Behavior]
+      - [Emotion, Behavior]
+      - [Marketing Strategy, Behavior]
+      - [Motivation, Behavior]
+      - [Psychological Construct, Behavior]
+      - [Psychological Construct, Emotion]
+  contradicts:
+    allowed_pairs:
+      - [Research Study, Theory]
+      - [Theory, Theory]
+  created_by:
+    allowed_pairs:
+      - [Brand, Organization]
+      - [Product, Organization]
+      - [Publication, Person]
+      - [Research Study, Person]
+      - [Theory, Person]
+  defines:
+    allowed_pairs:
+      - [Publication, Theory]
+      - [Theory, Cognitive Bias]
+      - [Theory, Psychological Construct]
+  influences:
+    allowed_pairs:
+      - [Brand, Consumer Segment]
+      - [Cognitive Bias, Behavior]
+      - [Emotion, Motivation]
+      - [Marketing Strategy, Consumer Segment]
+      - [Psychological Construct, Behavior]
+      - [Psychological Construct, Motivation]
+  instance_of:
+    allowed_pairs:
+      - [Behavior, Behavior]
+      - [Cognitive Bias, Psychological Construct]
+      - [Marketing Strategy, Marketing Strategy]
+  located_in:
+    allowed_pairs:
+      - [Consumer Segment, Market]
+      - [Organization, Market]
+  measured_by:
+    allowed_pairs:
+      - [Behavior, Metric]
+      - [Brand, Metric]
+      - [Psychological Construct, Metric]
+  member_of:
+    allowed_pairs:
+      - [Person, Consumer Segment]
+      - [Person, Organization]
+  owns:
+    allowed_pairs:
+      - [Organization, Brand]
+      - [Organization, Product]
+  part_of:
+    allowed_pairs:
+      - [Cognitive Bias, Theory]
+      - [Product, Brand]
+      - [Psychological Construct, Theory]
+  references:
+    allowed_pairs:
+      - [Publication, Research Study]
+      - [Publication, Theory]
+      - [Research Study, Research Study]
+  studied_in:
+    allowed_pairs:
+      - [Behavior, Research Study]
+      - [Cognitive Bias, Research Study]
+      - [Psychological Construct, Research Study]
+  supports:
+    allowed_pairs:
+      - [Metric, Theory]
+      - [Research Study, Theory]
+  uses:
+    allowed_pairs:
+      - [Brand, Marketing Strategy]
+      - [Organization, Marketing Strategy]
+      - [Research Study, Research Method]

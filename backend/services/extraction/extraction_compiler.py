@@ -126,14 +126,67 @@ def _all_signature_types(sigs: dict[str, set[tuple[str, str]]]) -> set[tuple[str
     return {pair for legal in sigs.values() for pair in legal}
 
 
+def _domain_signatures(domain: str) -> dict[str, set[tuple[str, str]]]:
+    """Load config/ontology/<domain>.yaml. Pure function of file content.
+
+    Deterministic: the same file always yields the same frozen pair sets,
+    independent of dict iteration order or call order. Idempotent: loading
+    repeatedly neither accumulates nor mutates state — the cache below is
+    keyed by domain and holds the same value it computed the first time.
+    """
+    safe = "".join(ch for ch in str(domain or "") if ch.isalnum() or ch in "_-")
+    if not safe:
+        return {}
+    try:
+        import yaml
+
+        from services.extraction.canonical import find_config_dir
+
+        path = find_config_dir(__file__) / "ontology" / f"{safe}.yaml"
+        if not path.exists():
+            return {}
+        data = yaml.safe_load(path.read_text()) or {}
+    except Exception:  # noqa: BLE001 — a missing domain is a gap, not a crash
+        return {}
+    out: dict[str, set[tuple[str, str]]] = {}
+    for name, spec in sorted((data.get("predicates") or {}).items()):
+        pairs = (spec or {}).get("allowed_pairs") or []
+        legal = {
+            (str(p[0]).strip().lower(), str(p[1]).strip().lower())
+            for p in pairs
+            if isinstance(p, (list, tuple)) and len(p) == 2
+        }
+        if legal:
+            out[str(name).strip().lower()] = legal
+    return out
+
+
 _SIGNATURES: dict[str, set[tuple[str, str]]] | None = None
+_DOMAIN_CACHE: dict[str, dict[str, set[tuple[str, str]]]] = {}
 
 
-def signatures() -> dict[str, set[tuple[str, str]]]:
+def signatures(domain: str | None = None) -> dict[str, set[tuple[str, str]]]:
+    """Global signatures, overlaid with the corpus domain's when given.
+
+    A domain predicate REPLACES the global entry for that predicate rather
+    than unioning with it: the domain file is the authority for its own
+    vocabulary, so `uses` in film_production means film pairs, not the
+    global ones. Merge order is fixed, so the result is deterministic.
+    """
     global _SIGNATURES
     if _SIGNATURES is None:
         _SIGNATURES = _ontology_signatures()
-    return _SIGNATURES
+    if not domain:
+        return _SIGNATURES
+    key = str(domain).strip().lower()
+    if key not in _DOMAIN_CACHE:
+        _DOMAIN_CACHE[key] = _domain_signatures(key)
+    domain_sigs = _DOMAIN_CACHE[key]
+    if not domain_sigs:
+        return _SIGNATURES
+    merged = dict(_SIGNATURES)
+    merged.update(domain_sigs)
+    return merged
 
 
 @dataclass(frozen=True)
@@ -209,6 +262,7 @@ def compile_relations(
     entities: dict[str, _Entity],
     chunk_id: str,
     report: CompileReport,
+    domain: str | None = None,
 ) -> list[CompiledFact]:
     """Apply the acceptance policy. Never a bare score comparison."""
     from services.extraction.canonical import (
@@ -217,7 +271,7 @@ def compile_relations(
     )
 
     accept_at, review_at = _thresholds()
-    sigs = signatures()
+    sigs = signatures(domain)
     facts: list[CompiledFact] = []
 
     for proposal in proposals:
@@ -328,8 +382,15 @@ def collapse_duplicates(facts: Sequence[CompiledFact]) -> list[CompiledFact]:
     return sorted(best.values(), key=lambda f: (f.subject_id, f.predicate, f.object_id))
 
 
-def compile_extraction(results: Iterable[Any]) -> tuple[list[CompiledFact], CompileReport]:
-    """Compile a batch of per-chunk encoder proposals into gated facts."""
+def compile_extraction(
+    results: Iterable[Any], domain: str | None = None
+) -> tuple[list[CompiledFact], CompileReport]:
+    """Compile a batch of per-chunk encoder proposals into gated facts.
+
+    `domain` selects config/ontology/<domain>.yaml so a corpus's own type
+    signatures apply. Compiling the same input twice with the same domain
+    yields byte-identical facts in the same order.
+    """
     report = CompileReport()
     all_facts: list[CompiledFact] = []
     for result in results:
@@ -340,6 +401,7 @@ def compile_extraction(results: Iterable[Any]) -> tuple[list[CompiledFact], Comp
                 entities,
                 str(getattr(result, "chunk_id", "")),
                 report,
+                domain,
             )
         )
     report.facts = collapse_duplicates(all_facts)
