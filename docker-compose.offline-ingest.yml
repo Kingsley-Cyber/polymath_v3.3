@@ -31,6 +31,13 @@ services:
     # compiler); 2g OOM-killed every lane (exit 137). The ghost_b_llm path
     # only made HTTP calls, which is why 2g sufficed there.
     mem_limit: ${ENRICH_LANE_MEM_LIMIT:-6g}
+    # Executor-only lane: no HTTP server, so the backend image's inherited
+    # `curl :8000/api/health` check can NEVER pass — autoheal was kill-looping
+    # perfectly healthy workers (diagnosed 2026-08-12). If the executor dies,
+    # PID 1 exits and the restart policy owns recovery; a liveness probe adds
+    # nothing on this lane.
+    healthcheck:
+      test: ["NONE"]
     volumes:
       - "./config:/app/config:ro"
       - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
