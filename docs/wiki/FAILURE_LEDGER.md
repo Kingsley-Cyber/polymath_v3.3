@@ -30,3 +30,8 @@ guard: boot sweep in enrichment_executor deletes lane leases with heartbeat_at >
 symptom: 4 workers running, engine shows only 64 in-flight (one lane's worth) with 40s dead gaps; workers log `lease_busy claimed=0`
 root cause: every executor sorted corpora by corpus_id and walked them in the SAME order, so all N raced the same corpus-lane mutex; one won, the rest starved — parallel workers produced serial GPU feed
 guard: per-process rotation of the corpus walk (offset = hash(hostname)+cycle); INVARIANT: N concurrent executors must cover min(N, corpora) DISTINCT corpora per cycle
+
+## 13. n-gram speculative decoding breaks constrained extraction (2026-08-12)
+symptom: after enabling --speculative-config ngram, decode rose 1897 -> 3071 tok/s (71% draft acceptance) but extraction failures jumped to ~70% of executed jobs (189 failed / 79 ok in 3 min), all `after 2 attempts`
+root cause: drafted n-gram tokens are not subject to the xgrammar structured-output mask the way step-by-step decoding is; accepted drafts produce schema-invalid JSON that fails the parse gate
+guard: DO NOT enable speculative decoding while output_mode=json_schema. INVARIANT: any engine flag that changes token emission must be validated on extraction FAILURE RATE, not tok/s — a faster engine that emits invalid JSON is a slower pipeline
