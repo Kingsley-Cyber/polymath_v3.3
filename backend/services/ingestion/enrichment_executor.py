@@ -208,7 +208,11 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
                 queued = await db["extraction_jobs"].count_documents(
                     {"corpus_id": cid, "status": "queued"}
                 )
-                if not queued:
+                # Refill proactively (2026-08-12): the encoder engine consumes
+                # ~53 chunks/s, so waiting for the queue to hit ZERO before
+                # planning starves the GPU between cycles. Keep the pipe full.
+                plan_threshold = int(os.environ.get("ENRICHMENT_PLAN_THRESHOLD", "5000") or 5000)
+                if queued < plan_threshold:
                     # Gap-awareness (battery forensics 2026-08-11): two-phase
                     # defers enrichment, but the single-doc/MCP ingest path
                     # never plans jobs — docs sat extraction-less until a
@@ -223,7 +227,7 @@ async def run_enrichment_executor(db: Any, ingestion_service: Any) -> None:
                         )
 
                         plan_limit = int(os.environ.get(
-                            "ENRICHMENT_PLAN_LIMIT", "2000") or 2000)
+                            "ENRICHMENT_PLAN_LIMIT", "10000") or 10000)
                         await plan_extraction_jobs(
                             db, corpus_id=cid, user_id=uid, apply=True,
                             limit=plan_limit,
