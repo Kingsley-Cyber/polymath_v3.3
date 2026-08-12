@@ -442,7 +442,13 @@ async def _run_ghost_b_backfill(
             return ExtractionBatchReport(
                 results=[], failures=[], metrics={"engine": "encoder"}
             )
-        results, metrics = await run_thin_extraction(tasks)
+        # Domain vocabularies live on the corpus (IngestionConfig.entity_schema /
+        # relation_schema); they are what the encoder is asked to find.
+        results, metrics = await run_thin_extraction(
+            tasks,
+            entity_labels=list(getattr(config, "entity_schema", None) or []) or None,
+            relation_labels=list(getattr(config, "relation_schema", None) or []) or None,
+        )
         return ExtractionBatchReport(results=results, failures=[], metrics=metrics)
     if engine != "graphify_cpu":
         raise RuntimeError(f"unsupported extraction engine: {engine}")
