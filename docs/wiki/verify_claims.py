@@ -11,8 +11,8 @@ WIKI = ROOT / "docs" / "wiki"
 
 CHECKS = [
     # (description, grep pattern, file, expected lines or None)
-    ("claim lease 7200s", r"lease_seconds[^0-9]*7200", "backend/services/ingestion/extraction_jobs.py", [1240, 1342]),
-    ("renew ~1/4 lease", r"asyncio\.sleep\(1800\)", "backend/services/ingestion/extraction_jobs.py", [1470]),
+    ("claim lease 7200s", r"lease_seconds[^0-9]*7200", "backend/services/ingestion/extraction_jobs.py", [1240, 1348]),
+    ("renew ~1/4 lease", r"asyncio\.sleep\(1800\)", "backend/services/ingestion/extraction_jobs.py", [1476]),
     ("lane adopt 420s", r"DEFAULT_LANE_ADOPT_STALE_SECONDS\s*=\s*420\.0", "backend/services/ingestion/job_leases.py", [35]),
     ("job lease 15min", r"DEFAULT_JOB_LEASE_SECONDS\s*=\s*15 \* 60", "backend/services/ingestion/job_leases.py", [23]),
     ("lane lease 30min", r"DEFAULT_LANE_LEASE_SECONDS\s*=\s*30 \* 60", "backend/services/ingestion/job_leases.py", [25]),
