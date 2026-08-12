@@ -296,7 +296,12 @@ def assemble_results(
     return results
 
 
-async def run_thin_extraction(children: Sequence[Any]) -> tuple[list[Any], dict[str, Any]]:
+async def run_thin_extraction(
+    children: Sequence[Any],
+    *,
+    entity_labels: Sequence[str] | None = None,
+    relation_labels: Sequence[str] | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
     """Window -> encoder -> offset attribution -> per-child results.
 
     Returns (results, metrics). Raises RelexSidecarError if the encoder is
@@ -308,7 +313,16 @@ async def run_thin_extraction(children: Sequence[Any]) -> tuple[list[Any], dict[
     from services.extraction import relex_sidecar_client as relex
     from services.ghost_b import EntityItem, ExtractionResult, RelationItem
 
-    entity_labels, relation_labels = schema_vocabularies()
+    # Per-corpus vocabularies when the corpus defines them, else the frozen
+    # global schema. Measured 2026-08-12: concrete domain labels do not just
+    # type better, they stop the encoder proposing junk spans entirely —
+    # "Programming Language" returns Python at 1.00 where the abstract
+    # 15-class set returned "In this chapter" as an entity.
+    default_entities, default_relations = schema_vocabularies()
+    entity_labels = [str(x) for x in (entity_labels or default_entities) if str(x).strip()]
+    relation_labels = [
+        str(x) for x in (relation_labels or default_relations) if str(x).strip()
+    ]
     entity_threshold, relation_threshold = thresholds()
     windows = build_windows(children)
     if not windows:
@@ -369,6 +383,8 @@ async def run_thin_extraction(children: Sequence[Any]) -> tuple[list[Any], dict[
     elapsed = time.perf_counter() - started
     metrics = {
         "engine": "thin_encoder",
+        "entity_labels": len(entity_labels),
+        "relation_labels": len(relation_labels),
         "windows": len(windows),
         "children": len(children),
         "replicas": len([s for s in shards if s]),

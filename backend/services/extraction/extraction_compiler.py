@@ -122,6 +122,10 @@ def _ontology_signatures() -> dict[str, set[tuple[str, str]]]:
     return out
 
 
+def _all_signature_types(sigs: dict[str, set[tuple[str, str]]]) -> set[tuple[str, str]]:
+    return {pair for legal in sigs.values() for pair in legal}
+
+
 _SIGNATURES: dict[str, set[tuple[str, str]]] | None = None
 
 
@@ -166,6 +170,14 @@ def compile_entities(
         try:
             name = canonicalize_entity_name(raw_name)
             etype = canonical_entity_type(raw_type)
+            # canonical_entity_type only knows the GLOBAL vocabulary, so a
+            # per-corpus domain label ("Film", "Narrative Device", "Shot
+            # Type") collapses to "other" and the entity gets dropped —
+            # which then strands every relation that referenced it. When the
+            # encoder returned a real label that the global normalizer does
+            # not recognise, keep the domain type instead of destroying it.
+            if etype.strip().lower() in UNTYPED_LABELS and raw_type.strip().lower() not in UNTYPED_LABELS:
+                etype = raw_type.strip().lower()
         except Exception:  # noqa: BLE001
             report.entity_drop_reasons["canonicalization_error"] += 1
             continue
@@ -254,8 +266,16 @@ def compile_relations(
         legal = sigs.get(predicate)
         subject_type = subject.entity_type.strip().lower()
         object_type = obj.entity_type.strip().lower()
+        # Corpora may carry DOMAIN vocabularies ("Programming Language",
+        # "Shot Type") that the global ontology has no signatures for. An
+        # unknown type is an ontology gap, not a violation — route to REVIEW
+        # so the quality loop can close it, rather than destroying the fact.
+        known_types = {t for pair in _all_signature_types(sigs) for t in pair}
+        domain_typed = subject_type not in known_types or object_type not in known_types
         if legal is None:
             reasons.append("predicate_has_no_ontology_signature")
+        elif domain_typed:
+            reasons.append("domain_type_outside_global_ontology")
         elif (subject_type, object_type) not in legal:
             if (object_type, subject_type) in legal:
                 # direction is invertible under the same predicate — flag for
