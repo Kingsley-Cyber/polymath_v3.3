@@ -91,7 +91,30 @@ async def _autoscale_gpu(db: Any, remaining_jobs: int) -> dict[str, Any]:
                 "$in": ["auto", "ghost_b_llm", "encoder"]
             },
         })
-        want_gpu = bool(remaining_jobs and gpu_corpora)
+        # remaining_jobs is a GLOBAL count and includes jobs on ARCHIVED
+        # corpora, which the executor never claims. Counting those keeps
+        # want_gpu true forever and the pool never idles down — measured
+        # 2026-08-12: 23 jobs on an archived qualification corpus pinned
+        # 40GB of VRAM indefinitely. Scope the decision to claimable work.
+        claimable = 0
+        try:
+            active_ids = await db["corpora"].distinct(
+                "corpus_id",
+                {
+                    "status": {"$ne": "archived"},
+                    "default_ingestion_config.extraction_engine": {
+                        "$in": ["auto", "ghost_b_llm", "encoder"]
+                    },
+                },
+            )
+            if active_ids:
+                claimable = await db["extraction_jobs"].count_documents(
+                    {"corpus_id": {"$in": active_ids},
+                     "status": {"$in": ["queued", "running"]}}
+                )
+        except Exception:  # noqa: BLE001 — fall back to the global count
+            claimable = remaining_jobs
+        want_gpu = bool(claimable and gpu_corpora)
         healthy = await asyncio.to_thread(
             _probe_health, str(gpu.get("health_url") or "")
         )
@@ -110,6 +133,7 @@ async def _autoscale_gpu(db: Any, remaining_jobs: int) -> dict[str, Any]:
         return {
             "state": "healthy" if healthy else "down",
             "want_gpu": want_gpu,
+            "claimable_jobs": claimable,
             "gpu_corpora": gpu_corpora,
             "idle_cycles": _GPU_IDLE_CYCLES,
             "action": action,
