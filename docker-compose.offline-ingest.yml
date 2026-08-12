@@ -30,13 +30,27 @@ services:
     # graphify_cpu loads local models in-process (count_lstm_v2, adapter
     # compiler); 2g OOM-killed every lane (exit 137). The ghost_b_llm path
     # only made HTTP calls, which is why 2g sufficed there.
-    mem_limit: ${ENRICH_LANE_MEM_LIMIT:-5g}
+    mem_limit: ${ENRICH_LANE_MEM_LIMIT:-6g}
     volumes:
       - "./config:/app/config:ro"
+      - "${POLYMATH_DOCKER_DATA_ROOT:-C:/PolymathRuntime}/volumes/hf-cache:/home/appuser/.cache/huggingface"
     command: ["python", "-c", "import asyncio\nfrom services.conversation import conversation_service\nfrom services.ingestion_service import ingestion_service\nfrom services.ingestion.enrichment_executor import run_enrichment_executor\nasync def main():\n    await conversation_service.connect()\n    await ingestion_service.connect(conversation_service._db)\n    await run_enrichment_executor(conversation_service._db, ingestion_service)\nasyncio.run(main())"]
     environment:
       APP_ENV: enrich-worker-2
       ENRICHMENT_EXECUTOR_ENABLED: "true"
+      # release/extraction-v1.yaml runtime env. WITHOUT these the lane falls
+      # through to GRAPHIFY_ENTITY_PROVIDER=gliner2 and loads a transformer
+      # IN-PROCESS (entity_encoder.py:370) — that, not graphify itself, is
+      # what OOM-killed every lane at 2g and 5g.
+      GRAPHIFY_ENTITY_PROVIDER: ${GRAPHIFY_ENTITY_PROVIDER:-relex}
+      GRAPHIFY_RELEX_RELATIONS: ${GRAPHIFY_RELEX_RELATIONS:-1}
+      GRAPHIFY_ADAPTER_COMPILER: ${GRAPHIFY_ADAPTER_COMPILER:-1}
+      # .env:406-409 said "halve the farms" but the value was never halved
+      GRAPHIFY_OPENIE_WORKERS: "2"
+      # fail fast instead of 900s of silence against a serial sidecar
+      RELEX_INFER_TIMEOUT_SECONDS: "180"
+      # config.py:2883 defaults to 32 concurrent WHOLE-DOCUMENT pipelines
+      EXTRACTION_REPAIR_MAX_ACTIVE_DOCS: "2"
       INGEST_RUNNERS_ENABLED: "false"
       ENRICHMENT_EXECUTOR_BATCH: ${ENRICHMENT_EXECUTOR_BATCH:-600}
       ENRICHMENT_PLAN_LIMIT: ${ENRICHMENT_PLAN_LIMIT:-2000}
