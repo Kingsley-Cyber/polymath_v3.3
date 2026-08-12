@@ -267,6 +267,7 @@ class IngestionConfig(BaseModel):
         "off",
         "graphify_cpu",
         "ghost_b_llm",
+        "encoder",
         "auto",
     ] = Field(default="graphify_cpu")
 
@@ -574,6 +575,7 @@ class ExtractionSettings(BaseModel):
         "off",
         "graphify_cpu",
         "ghost_b_llm",
+        "encoder",
         "auto",
     ] = Field(
         default="graphify_cpu",

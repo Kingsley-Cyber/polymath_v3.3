@@ -432,6 +432,18 @@ async def _run_ghost_b_backfill(
         return ExtractionBatchReport(
             results=list(report), failures=[], metrics={"engine": "ghost_b_llm"}
         )
+    if engine == "encoder":
+        # Thin encoder path: window -> GLiNER-Relex -> exact offset
+        # attribution -> per-child results. No model in this process, so
+        # lanes stay small; no LLM, so output is reproducible.
+        from services.extraction.thin_encoder_path import run_thin_extraction
+
+        if not tasks:
+            return ExtractionBatchReport(
+                results=[], failures=[], metrics={"engine": "encoder"}
+            )
+        results, metrics = await run_thin_extraction(tasks)
+        return ExtractionBatchReport(results=results, failures=[], metrics=metrics)
     if engine != "graphify_cpu":
         raise RuntimeError(f"unsupported extraction engine: {engine}")
     if not tasks:

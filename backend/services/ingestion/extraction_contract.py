@@ -11,7 +11,7 @@ from services.provider_payload import (  # noqa: F401
     ingestion_provider_payload_extras,
 )
 
-ENGINES = ("off", "graphify_cpu", "ghost_b_llm")
+ENGINES = ("off", "graphify_cpu", "ghost_b_llm", "encoder")
 
 # "auto" is a ROUTING alias, not an engine: it resolves to a concrete
 # engine before contract resolution (GPU LLM when the RTX box answers and

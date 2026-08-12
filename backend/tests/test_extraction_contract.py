@@ -22,7 +22,10 @@ def test_engine_surface_is_the_qualified_registry():
     # Owner-ordered 2026-08-10: ghost_b_llm (provider-LLM lane) joins the
     # registry; graphify_cpu remains canonical/default; retired names still
     # fail closed (covered below).
-    assert ENGINES == ("off", "graphify_cpu", "ghost_b_llm")
+    # 2026-08-12: "encoder" joins — the thin GLiNER-Relex path (window ->
+    # encoder -> exact offset attribution), measured ~97x faster than the
+    # graphify pipeline and reproducible unlike ghost_b_llm.
+    assert ENGINES == ("off", "graphify_cpu", "ghost_b_llm", "encoder")
     assert CANONICAL_ENGINE == "graphify_cpu"
 
 
@@ -94,3 +97,10 @@ def test_provider_pool_arguments_cannot_activate_an_extractor():
     assert contract.pool_source == "none"
     assert contract.pool_size == 0
     assert not contract.errors
+
+
+def test_encoder_engine_resolves_when_explicitly_selected():
+    contract = _resolve(corpus_engine="encoder")
+    assert contract.engine == "encoder"
+    assert contract.source == "corpus"
+    assert not contract.uses_graphify_cpu
