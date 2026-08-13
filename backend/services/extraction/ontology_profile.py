@@ -37,6 +37,46 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 CORE_MODULE = "core"
+
+# SYSTEM relations are DERIVED, never extracted. The relation model is not
+# asked to rediscover from prose what entity typing already established:
+# GLiNER returning type=Director implies Nolan INSTANCE_OF Director IS_A
+# Person. Keeping these out of the extraction vocabulary is what stops the
+# model competing with the ontology.
+SYSTEM_RELATIONS = frozenset(
+    {"instance_of", "is_a", "appears_in_domain", "supported_by", "subject", "object"}
+)
+
+# NEVER a canonical stored edge. An unresolved pair is provenance
+# (predicate=null, status=unresolved), not A-[:RELATED_TO]->B.
+QUARANTINE_PREDICATES = frozenset({"related_to", "associated_with", "" })
+
+# Exactly one storage orientation per relation. Extractions arriving the
+# other way round are INVERTED by the adapter, not stored as a second edge.
+CANONICAL_DIRECTION = {
+    "preceded_by": ("precedes", True),
+    "contains": ("part_of", True),
+    "created": ("created_by", True),
+    "developed": ("created_by", True),
+    "includes": ("part_of", True),
+    "used_by": ("uses", True),
+}
+
+
+def canonical_predicate_direction(predicate: str) -> tuple[str, bool]:
+    """Return (canonical_predicate, invert_subject_object).
+
+    Deterministic and total: an unmapped predicate is already canonical.
+    """
+    key = str(predicate or "").strip().lower()
+    if key in CANONICAL_DIRECTION:
+        return CANONICAL_DIRECTION[key]
+    return key, False
+
+
+def is_extractable(predicate: str) -> bool:
+    key = str(predicate or "").strip().lower()
+    return bool(key) and key not in SYSTEM_RELATIONS and key not in QUARANTINE_PREDICATES
 # A zero-shot encoder loses discrimination as the label set grows. Profiles
 # that exceed this are truncated deterministically (core first, then modules
 # in requested order) and the drop is reported rather than silent.
@@ -51,6 +91,8 @@ class OntologyProfile:
     relation_labels: tuple[str, ...]
     signatures: dict[str, frozenset[tuple[str, str]]] = field(default_factory=dict)
     dropped_labels: tuple[str, ...] = ()
+    # The lossless union. entity_labels is what the encoder actually gets.
+    resolved_labels: tuple[str, ...] = ()
 
     def as_metrics(self) -> dict[str, Any]:
         return {
@@ -59,6 +101,8 @@ class OntologyProfile:
             "entity_labels": len(self.entity_labels),
             "relation_labels": len(self.relation_labels),
             "signed_predicates": len(self.signatures),
+            "resolved_label_count": len(self.resolved_labels or self.entity_labels),
+            "active_label_count": len(self.entity_labels),
             "dropped_labels": list(self.dropped_labels),
         }
 
@@ -142,13 +186,19 @@ def resolve_profile(
     relation: list[str] = []
     signatures: dict[str, set[tuple[str, str]]] = {}
     loaded: list[str] = []
+    module_labels: dict[str, list[str]] = {}
+    core_set: list[str] = []
 
     for module in ordered:
         data = load_module(module)
         if not data:
             continue
         loaded.append(module)
-        for label in _entity_labels(data):
+        mine = _entity_labels(data)
+        module_labels[module] = mine
+        if module == CORE_MODULE:
+            core_set = list(mine)
+        for label in mine:
             if label not in entity:
                 entity.append(label)
         for label in _relation_labels(data):
@@ -157,19 +207,39 @@ def resolve_profile(
         for predicate, legal in _signatures(data).items():
             signatures.setdefault(predicate, set()).update(legal)
 
+    # Extraction vocabulary excludes system + quarantine predicates: the
+    # model is never asked to produce a relation the ontology derives, nor
+    # one that must not become an edge.
+    relation = [r for r in relation if is_extractable(r)]
+
+    # TIERED BUDGET. Master composition is lossless; the ACTIVE vocabulary is
+    # intentionally pruned. Core is mandatory and never competes for budget;
+    # the primary domain is served before secondary ones, so a cap never
+    # removes the specialisation the chunk was routed for.
     cap = max_labels or _max_labels()
-    dropped: list[str] = []
-    if len(entity) > cap:
-        dropped = entity[cap:]
-        entity = entity[:cap]
+    core_labels = [lab for lab in entity if lab in core_set]
+    tiers: list[list[str]] = []
+    for module in loaded[1:]:
+        tiers.append([lab for lab in module_labels.get(module, []) if lab not in core_labels])
+
+    active = list(core_labels[:cap])
+    remaining = max(0, cap - len(active))
+    for tier in tiers:
+        take = tier[:remaining]
+        active.extend(take)
+        remaining -= len(take)
+        if remaining <= 0:
+            break
+    dropped = [lab for lab in entity if lab not in active]
 
     return OntologyProfile(
         profile_id="+".join(loaded) or CORE_MODULE,
         modules=tuple(loaded),
-        entity_labels=tuple(entity),
+        entity_labels=tuple(active),
         relation_labels=tuple(relation),
         signatures={k: frozenset(v) for k, v in sorted(signatures.items())},
         dropped_labels=tuple(dropped),
+        resolved_labels=tuple(entity),
     )
 
 

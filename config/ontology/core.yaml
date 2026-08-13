@@ -27,18 +27,28 @@ entity_types:
   - Method
   - TimeReference
 
-# Core relations are the cross-domain bridges. Domain packs add specific
-# predicates; these stay available everywhere so traversal can cross domains.
+# EXTRACTED relations only — what the model is asked to find in prose.
+#
+# Deliberately ABSENT:
+#   related_to   never a canonical edge. An unresolved pair is provenance
+#                (predicate=null, status=unresolved), not A-[:RELATED_TO]->B,
+#                or the graph accumulates exactly the semantic garbage this
+#                pipeline exists to prevent.
+#   instance_of  DERIVED from entity typing, not rediscovered from prose.
+#                GLiNER returning type=Director already implies
+#                Nolan INSTANCE_OF Director IS_A Person.
+#
+# Direction is canonical: `precedes`, never `preceded_by`. Exactly one
+# storage orientation per relation; the adapter inverts extractions that
+# arrive the other way round.
 relation_types:
-  - instance_of
   - part_of
   - uses
   - created_by
   - located_in
   - causes
-  - preceded_by
+  - precedes
   - references
-  - related_to
 
 predicates:
   created_by:
@@ -49,12 +59,6 @@ predicates:
       - [Technology, Organization]
       - [Technology, Person]
       - [Method, Person]
-  instance_of:
-    allowed_pairs:
-      - [Concept, Concept]
-      - [Method, Method]
-      - [Product, Product]
-      - [Technology, Technology]
   located_in:
     allowed_pairs:
       - [Event, Location]
@@ -68,7 +72,7 @@ predicates:
       - [Organization, Organization]
       - [Product, Product]
       - [Technology, Technology]
-  preceded_by:
+  precedes:
     allowed_pairs:
       - [Event, Event]
       - [Method, Method]

@@ -326,3 +326,47 @@ def test_gate_is_idempotent():
         (x.subject, x.predicate, x.object) for x in second[0].relations
     ]
     assert m1["graph_written_facts"] == m2["graph_written_facts"]
+
+
+# --- quarantine, derived relations, canonical direction -------------------
+
+def test_related_to_is_quarantined_never_stored_as_an_edge():
+    r = _Result(
+        entities=[_Ent("alex", "Person"), _Ent("qdrant", "Software")],
+        relations=[_Rel("alex", "related_to", "qdrant", confidence=0.99)],
+    )
+    facts, report = comp.compile_extraction([r])
+    assert facts == [] and report.accepted == 0
+    assert report.reject_reasons["unresolved_predicate_quarantined"] == 1
+
+
+def test_system_relations_are_derived_not_extracted():
+    r = _Result(
+        entities=[_Ent("alex", "Person"), _Ent("qdrant", "Software")],
+        relations=[_Rel("alex", "instance_of", "qdrant", confidence=0.99)],
+    )
+    facts, report = comp.compile_extraction([r])
+    assert facts == []
+    assert report.reject_reasons["system_relation_is_derived_not_extracted"] == 1
+
+
+def test_inverse_predicate_is_rewritten_to_one_storage_orientation():
+    # "B contains A" must be stored as "A part_of B", not a second edge type
+    r = _Result(
+        entities=[_Ent("qdrant", "Software"), _Ent("hnsw index", "Software")],
+        relations=[_Rel("qdrant", "contains", "hnsw index", confidence=0.9)],
+    )
+    facts, report = comp.compile_extraction([r])
+    assert facts, "inverted relation must survive, rewritten"
+    fact = facts[0]
+    assert fact.predicate == "part_of"
+    assert fact.subject_name == "hnsw index" and fact.object_name == "qdrant"
+    assert "direction_normalised_to_canonical" in fact.reasons
+
+
+def test_extraction_vocabulary_excludes_system_and_quarantine_predicates():
+    from services.extraction import ontology_profile as op
+
+    p = op.resolve_profile(["film_production"])
+    for banned in ("related_to", "instance_of", "is_a", "appears_in_domain"):
+        assert banned not in p.relation_labels

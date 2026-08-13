@@ -279,9 +279,34 @@ def compile_relations(
         reasons: list[str] = []
         subj_raw = str(getattr(proposal, "subject", "") or "")
         obj_raw = str(getattr(proposal, "object", "") or "")
+        from services.extraction.ontology_profile import (
+            QUARANTINE_PREDICATES,
+            SYSTEM_RELATIONS,
+            canonical_predicate_direction,
+        )
+
         predicate = canonicalize_predicate_label(
             str(getattr(proposal, "predicate", "") or "")
         )
+        # ONE storage orientation per relation. An extraction arriving the
+        # inverse way round is rewritten, not stored as a second edge — the
+        # direction-inversion class that bit the earlier relation pipeline.
+        predicate, invert = canonical_predicate_direction(predicate)
+        if invert:
+            subj_raw, obj_raw = obj_raw, subj_raw
+            reasons.append("direction_normalised_to_canonical")
+        # related_to is NEVER a canonical edge. An unresolved pair is
+        # provenance, not A-[:RELATED_TO]->B, or the graph becomes exactly
+        # the semantic garbage collection this compiler exists to prevent.
+        if predicate in QUARANTINE_PREDICATES:
+            report.rejected += 1
+            report.reject_reasons["unresolved_predicate_quarantined"] += 1
+            continue
+        # The model must not re-propose what typing already derives.
+        if predicate in SYSTEM_RELATIONS:
+            report.rejected += 1
+            report.reject_reasons["system_relation_is_derived_not_extracted"] += 1
+            continue
         confidence = float(getattr(proposal, "confidence", 0.0) or 0.0)
         evidence = str(getattr(proposal, "evidence_phrase", "") or "").strip()
 
