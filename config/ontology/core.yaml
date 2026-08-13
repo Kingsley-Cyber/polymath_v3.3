@@ -1,0 +1,89 @@
+# CORE ontology — the universal semantic backbone.
+#
+# Owner architecture 2026-08-12 (second-brain design): a corpus is NOT an
+# ontology. One corpus may hold fifty domains, so domain packs must COMPOSE
+# with this core, never replace it.
+#
+# Measured failure this replaced: film_production REPLACED the global
+# vocabulary, so the corpus lost Location, Event and TimeReference outright
+# — zero of each across 6,000 sampled rows in a film-history library full of
+# "shot in Budapest", "premiered in 1975", "at Cannes".
+#
+# Keep this SMALL. It is present on every chunk, and a zero-shot encoder
+# discriminates concrete labels well and abstract ones badly. Everything
+# here is concrete enough to be found without context.
+schema_version: polymath.core_ontology.v1
+domain: core
+
+entity_types:
+  - Person
+  - Organization
+  - Location
+  - Product
+  - Technology
+  - Concept
+  - Event
+  - Document
+  - Method
+  - TimeReference
+
+# Core relations are the cross-domain bridges. Domain packs add specific
+# predicates; these stay available everywhere so traversal can cross domains.
+relation_types:
+  - instance_of
+  - part_of
+  - uses
+  - created_by
+  - located_in
+  - causes
+  - preceded_by
+  - references
+  - related_to
+
+predicates:
+  created_by:
+    allowed_pairs:
+      - [Document, Person]
+      - [Document, Organization]
+      - [Product, Organization]
+      - [Technology, Organization]
+      - [Technology, Person]
+      - [Method, Person]
+  instance_of:
+    allowed_pairs:
+      - [Concept, Concept]
+      - [Method, Method]
+      - [Product, Product]
+      - [Technology, Technology]
+  located_in:
+    allowed_pairs:
+      - [Event, Location]
+      - [Location, Location]
+      - [Organization, Location]
+      - [Person, Location]
+  part_of:
+    allowed_pairs:
+      - [Concept, Concept]
+      - [Location, Location]
+      - [Organization, Organization]
+      - [Product, Product]
+      - [Technology, Technology]
+  preceded_by:
+    allowed_pairs:
+      - [Event, Event]
+      - [Method, Method]
+      - [Technology, Technology]
+  references:
+    allowed_pairs:
+      - [Document, Concept]
+      - [Document, Document]
+      - [Document, Person]
+  uses:
+    allowed_pairs:
+      - [Method, Technology]
+      - [Organization, Technology]
+      - [Person, Method]
+      - [Person, Technology]
+      - [Product, Technology]
+      - [Technology, Method]
+      - [Technology, Technology]
